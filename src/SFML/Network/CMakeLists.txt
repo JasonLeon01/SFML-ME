@@ -140,8 +140,9 @@ else()
     sfml_set_stdlib(libssh2_static)
 
     # Set libssh2 to include/link to MbedTLS
+    FetchContent_GetProperties(MbedTLS SOURCE_DIR sfml_mbedtls_source_dir)
     target_compile_definitions(libssh2_static PRIVATE LIBSSH2_MBEDTLS)
-    target_include_directories(libssh2_static PRIVATE "${FETCHCONTENT_BASE_DIR}/mbedtls-src/include")
+    target_include_directories(libssh2_static PRIVATE "${sfml_mbedtls_source_dir}/include")
 
     # Disable all warnings
     target_compile_options(libssh2_static PRIVATE -w)
