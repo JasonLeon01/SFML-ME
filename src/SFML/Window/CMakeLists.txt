@@ -343,10 +343,20 @@ elseif(SFML_OS_HARMONY)
     source_group("harmony" FILES ${PLATFORM_SRC})
 endif()
 
+# Desktop GLES installations expose the client library and headers to consumers.
+set(SFML_DESKTOP_GLES OFF)
+set(WINDOW_LIBRARY_OPTIONS)
+if(SFML_BUILD_OPENGL_BACKEND AND SFML_OPENGL_ES AND
+   (SFML_OS_WINDOWS OR SFML_OS_LINUX OR SFML_OS_FREEBSD OR SFML_OS_OPENBSD OR SFML_OS_NETBSD))
+    set(SFML_DESKTOP_GLES ON)
+    set(WINDOW_LIBRARY_OPTIONS INSTALL_SHARED_DEPENDENCIES)
+endif()
+
 # define the sfml-window target
 sfml_add_library(Window
                  SOURCES ${SRC} ${PLATFORM_SRC}
-                 DEPENDENCIES "Dependencies.cmake.in")
+                 DEPENDENCIES "Dependencies.cmake.in"
+                 ${WINDOW_LIBRARY_OPTIONS})
 # DRM libraries
 if(SFML_OS_LINUX OR SFML_OS_FREEBSD OR SFML_OS_OPENBSD OR SFML_OS_NETBSD)
     if(SFML_USE_DRM)
@@ -394,10 +404,14 @@ if(SFML_BUILD_OPENGL_BACKEND)
     endif()
 
     if(SFML_OS_IOS)
-        target_link_libraries(sfml-window PRIVATE "-framework OpenGLES")
+        target_link_libraries(sfml-window PUBLIC "-framework OpenGLES")
     elseif(SFML_OS_ANDROID OR SFML_OS_HARMONY)
-        target_link_libraries(sfml-window PRIVATE EGL GLESv3)
-    elseif(SFML_OPENGL_ES OR SFML_USE_DRM)
+        target_link_libraries(sfml-window PRIVATE EGL PUBLIC GLESv3)
+    elseif(SFML_DESKTOP_GLES)
+        find_package(EGL REQUIRED)
+        find_package(GLES REQUIRED)
+        target_link_libraries(sfml-window PRIVATE EGL::EGL ${CMAKE_DL_LIBS} PUBLIC GLES::GLES)
+    elseif(SFML_USE_DRM OR SFML_OS_EMSCRIPTEN)
         if(CMAKE_DL_LIBS)
             target_link_libraries(sfml-window PRIVATE ${CMAKE_DL_LIBS})
         endif()

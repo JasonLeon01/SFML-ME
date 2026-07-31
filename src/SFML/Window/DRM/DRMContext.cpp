@@ -32,6 +32,7 @@
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Sleep.hpp>
 
+#include <algorithm>
 #include <array>
 #include <fcntl.h>
 #include <ostream>
@@ -50,7 +51,10 @@
 #define SF_GLAD_EGL_IMPLEMENTATION_INCLUDED
 #define SF_GLAD_EGL_IMPLEMENTATION
 #include <glad/egl.h>
+#undef SF_GLAD_EGL_IMPLEMENTATION
 #endif
+
+#include <SFML/Window/EglFunctionLoader.hpp>
 
 namespace
 {
@@ -527,6 +531,8 @@ DRMContext::DRMContext(DRMContext* shared)
 
     // Get the best EGL config matching the default video settings
     m_config = getBestConfig(m_display, ContextSettings{});
+    if (!m_config)
+        return;
     updateSettings();
 
     // Create EGL context
@@ -566,7 +572,7 @@ DRMContext::DRMContext(DRMContext* shared, const ContextSettings& settings, cons
 
 
 ////////////////////////////////////////////////////////////
-DRMContext::DRMContext(DRMContext* shared, const ContextSettings& settings, Vector2u /*size*/)
+DRMContext::DRMContext(DRMContext* shared, const ContextSettings& settings, Vector2u size)
 {
     contextCount++;
     if (initDrm() < 0)
@@ -586,7 +592,7 @@ DRMContext::DRMContext(DRMContext* shared, const ContextSettings& settings, Vect
 
     // Create EGL context
     createContext(shared);
-    createSurface({drmNode.mode->hdisplay, drmNode.mode->vdisplay}, false);
+    createSurface({std::max(size.x, 1u), std::max(size.y, 1u)}, false);
 }
 
 
@@ -828,7 +834,7 @@ EGLConfig DRMContext::getBestConfig(EGLDisplay display, const ContextSettings& s
     // Ask EGL for the best config matching our video settings
     eglCheck(eglChooseConfig(display, attributes.data(), configs.data(), configs.size(), &configCount));
 
-    return configs[0];
+    return configCount > 0 ? configs.front() : EGLConfig{};
 }
 
 
@@ -852,7 +858,7 @@ void DRMContext::updateSettings()
 ////////////////////////////////////////////////////////////
 GlFunctionPointer DRMContext::getFunction(const char* name)
 {
-    return reinterpret_cast<GlFunctionPointer>(eglGetProcAddress(name));
+    return getEglGlFunction(name);
 }
 
 

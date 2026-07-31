@@ -35,29 +35,7 @@
 /// This file just includes the OpenGL headers,
 /// which have actually different paths on each system
 ////////////////////////////////////////////////////////////
-#if defined(SFML_SYSTEM_WINDOWS)
-
-// The Visual C++ version of gl.h uses WINGDIAPI and APIENTRY but doesn't define them
-#ifdef _MSC_VER
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-
-#include <GL/gl.h>
-
-#elif defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_FREEBSD) || defined(SFML_SYSTEM_OPENBSD) || \
-    defined(SFML_SYSTEM_NETBSD)
-
-#if defined(SFML_OPENGL_ES)
-#include <GLES2/gl2ext.h>
-#include <GLES3/gl3.h>
-#else
-#include <GL/gl.h>
-#endif
-
-#elif defined(SFML_SYSTEM_EMSCRIPTEN)
+#if defined(SFML_SYSTEM_EMSCRIPTEN)
 
 #include <GLES3/gl3.h>
 
@@ -70,10 +48,23 @@
 #include <OpenGLES/ES3/gl.h>
 #include <OpenGLES/ES3/glext.h>
 
-#elif defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY)
+#elif defined(SFML_OPENGL_ES) || defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY)
 
-#include <GLES2/gl2ext.h>
 #include <GLES3/gl3.h>
 
+// The extension declarations use types and calling conventions from the core header.
+#include <GLES2/gl2ext.h>
+
+#else
+
+// The Visual C++ version of gl.h uses WINGDIAPI and APIENTRY but doesn't define them
+#if defined(SFML_SYSTEM_WINDOWS) && defined(_MSC_VER)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
+#include <GL/gl.h>
 
 #endif

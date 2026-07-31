@@ -301,7 +301,7 @@ else()
 
     # Now that both targets exist, add the HarfBuzz include directories to the freetype target
     # We can't use target_link_libraries here because creating a circular dependency between FreeType and HarfBuzz
-    # will make it impossible to resolve either of them with find_dependency in SFMLGraphicsDependencies.cmake
+    # will make it impossible to resolve either of them with find_dependency in the installed Graphics dependency configuration
     # because we break the link here ourselves, we will have to re-establish it in Dependencies.cmake so CMake knows
     # it has to adjust the linker command line by duplicating the libraries that have circular dependencies
     target_include_directories(freetype SYSTEM PRIVATE $<TARGET_PROPERTY:harfbuzz,INTERFACE_INCLUDE_DIRECTORIES>)
