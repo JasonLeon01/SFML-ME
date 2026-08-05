@@ -3,6 +3,10 @@
 
 #include <SFML/Window/Context.hpp>
 
+#if defined(SFML_RENDER_OPENGL)
+#include <SFML/OpenGL.hpp>
+#endif
+
 // Other 1st party headers
 #include <SFML/System/Exception.hpp>
 #include <SFML/System/FileInputStream.hpp>
@@ -337,6 +341,44 @@ TEST_CASE("[Graphics] sf::Shader", runDisplayTests())
             CHECK(shader.getNativeHandle() != 0);
         }
     }
+
+#if defined(SFML_RENDER_OPENGL)
+    SECTION("Restore a program deleted while bound")
+    {
+        sf::Context context;
+        REQUIRE(context.setActive(true));
+        REQUIRE(sf::Shader::isAvailable());
+
+        sf::Shader shader{std::string_view(vertexSource), std::string_view(fragmentSource)};
+
+#if defined(SFML_SYSTEM_WINDOWS)
+        using GlGetInteger = void(APIENTRY*)(GLenum, GLint*);
+#else
+        using GlGetInteger = void (*)(GLenum, GLint*);
+#endif
+        const auto glGetInteger = reinterpret_cast<GlGetInteger>(sf::Context::getFunction("glGetIntegerv"));
+        REQUIRE(glGetInteger);
+
+        unsigned int deletedProgram = 0;
+        {
+            const sf::Shader boundShader{std::string_view(vertexSource), std::string_view(fragmentSource)};
+            deletedProgram = boundShader.getNativeHandle();
+            sf::Shader::bind(&boundShader);
+        }
+
+        constexpr GLenum currentProgramParameter = 0x8B8D; // GL_CURRENT_PROGRAM
+        GLint            currentProgram          = 0;
+        glGetInteger(currentProgramParameter, &currentProgram);
+        REQUIRE(static_cast<unsigned int>(currentProgram) == deletedProgram);
+
+        shader.setUniform("blink_alpha", 0.5f);
+
+        glGetInteger(currentProgramParameter, &currentProgram);
+        CHECK(currentProgram == 0);
+
+        sf::Shader::bind(nullptr);
+    }
+#endif
 
     SECTION("loadFromFile()")
     {

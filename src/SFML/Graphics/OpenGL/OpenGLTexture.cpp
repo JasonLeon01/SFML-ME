@@ -164,11 +164,9 @@ bool OpenGLTexture::resize(Vector2u size, bool sRgb)
         }
     }
 
-    static const bool textureSrgb = GLEXT_texture_sRGB;
-
     m_sRgb = sRgb;
 
-    if (m_sRgb && !textureSrgb)
+    if (m_sRgb && !GLEXT_texture_sRGB)
     {
         static bool warned = false;
 

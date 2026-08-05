@@ -74,6 +74,15 @@ TEST_CASE("[Graphics] sf::RenderTexture", runDisplayTests())
         CHECK((texture.getNativeHandle() != 0) == hasOpenGLGraphicsBackend());
     }
 
+    SECTION("sRGB capability matches the target texture")
+    {
+        sf::ContextSettings settings;
+        settings.sRgbCapable = true;
+
+        const sf::RenderTexture renderTexture({64, 64}, settings);
+        CHECK(renderTexture.isSrgb() == renderTexture.getTexture().isSrgb());
+    }
+
     SECTION("resize()")
     {
         sf::RenderTexture renderTexture;

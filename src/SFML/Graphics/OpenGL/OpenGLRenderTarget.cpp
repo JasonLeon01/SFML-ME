@@ -1203,7 +1203,9 @@ std::shared_ptr<OpenGLRenderTarget> OpenGLRenderTarget::create(std::shared_ptr<O
     }
     else
         target->m_attachment = std::make_unique<RenderTextureImplDefault>();
-    if (!target->m_attachment->create(texture->m_actualSize, texture->m_texture, settings))
+    ContextSettings actual = settings;
+    actual.sRgbCapable     = settings.sRgbCapable && texture->isSrgb();
+    if (!target->m_attachment->create(texture->m_actualSize, texture->m_texture, actual))
         return {};
     target->m_size                 = texture->getSize();
     target->m_settings             = settings;

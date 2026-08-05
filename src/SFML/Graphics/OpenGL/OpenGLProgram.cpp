@@ -115,8 +115,12 @@ struct OpenGLProgram::UniformBinder
 
     ~UniformBinder()
     {
-        if (program && program != static_cast<GLuint>(savedProgram))
-            glCheck(glUseProgram(static_cast<GLuint>(savedProgram)));
+        const auto previous = static_cast<GLuint>(savedProgram);
+        if (program && program != previous)
+        {
+            // Switching programs can complete deletion of the previously bound program.
+            glCheck(glUseProgram(previous && glIsProgram(previous) ? previous : 0));
+        }
     }
 
     UniformBinder(const UniformBinder&)            = delete;

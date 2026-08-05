@@ -257,8 +257,9 @@
         glFramebufferRenderbuffer, glGenerateMipmap
 
 // Core since 3.0 - EXT_packed_depth_stencil
-#define GLEXT_packed_depth_stencil (SF_GLAD_GL_VERSION_3_0 || SF_GLAD_GL_EXT_packed_depth_stencil)
-#define GLEXT_GL_DEPTH24_STENCIL8  GL_DEPTH24_STENCIL8
+#define GLEXT_packed_depth_stencil \
+    (SF_GLAD_GL_VERSION_3_0 || SF_GLAD_GL_ARB_framebuffer_object || SF_GLAD_GL_EXT_packed_depth_stencil)
+#define GLEXT_GL_DEPTH24_STENCIL8 GL_DEPTH24_STENCIL8
 
 // Core since 3.0 - EXT_framebuffer_blit
 #define GLEXT_framebuffer_blit \

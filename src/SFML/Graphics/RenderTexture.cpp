@@ -72,10 +72,22 @@ bool RenderTexture::resize(Vector2u size, const ContextSettings& settings)
                                     {
                                         Texture texture;
                                         texture.setRepeated(m_texture.isRepeated());
-                                        if (!texture.resize(size, settings.sRgbCapable))
-                                            return false;
-                                        auto target = device.device->createRenderTarget(texture.m_resource, effective);
-                                        if (!target)
+                                        const auto createTarget = [&](bool srgb) -> std::shared_ptr<rhi::RenderTarget>
+                                        {
+                                            if (!texture.resize(size, srgb))
+                                                return {};
+                                            ContextSettings actual = effective;
+                                            actual.sRgbCapable     = texture.isSrgb();
+                                            return device.device->createRenderTarget(texture.m_resource, actual);
+                                        };
+                                        auto target = createTarget(effective.sRgbCapable);
+                                        if (texture.isSrgb() && (!target || !target->settings().sRgbCapable) &&
+                                            (device.backend == GraphicsBackend::OpenGL ||
+                                             device.backend == GraphicsBackend::OpenGLES))
+                                        {
+                                            target = createTarget(false);
+                                        }
+                                        if (!target || target->settings().sRgbCapable != texture.isSrgb())
                                             return false;
                                         m_backend = std::static_pointer_cast<priv::RenderTargetBackend>(target);
                                         m_texture = std::move(texture);
