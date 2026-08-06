@@ -547,21 +547,22 @@ void GlContext::acquireTransientContext()
 {
     auto& currentContext = GlContextImpl::CurrentContext::get();
 
-    // Fast path if we already have a context active on this thread
-    if (currentContext.id)
+#ifdef SFML_SYSTEM_HARMONY
+    if (currentContext.ptr)
+        static_cast<ContextType*>(currentContext.ptr)->refreshNativeWindow();
+#endif
+
+    if (!currentContext.id)
     {
-        ++currentContext.transientCount;
-        return;
+        // A context borrowed by an outer lock may have been deactivated or destroyed.
+        auto& fallback = TransientContext::get();
+        if (!fallback)
+            fallback.emplace();
+        else if (fallback->sharedContext)
+            fallback->sharedContext->context->setActive(true);
     }
 
-    // If we don't already have a context active on this thread the count should be 0
-    assert(!currentContext.transientCount && "Transient count cannot be non-zero");
-
-    // If currentContextId is not set, this must be the first
-    // TransientContextLock on this thread, construct the state object
-    TransientContext::get().emplace();
-
-    // Make sure a context is active at this point
+    ++currentContext.transientCount;
 }
 
 
@@ -569,20 +570,9 @@ void GlContext::acquireTransientContext()
 void GlContext::releaseTransientContext()
 {
     auto& currentContext = GlContextImpl::CurrentContext::get();
-
-    // Make sure a context was left active after acquireTransientContext() was called
-
-
-    // Fast path if we already had a context active on this thread before acquireTransientContext() was called
-    if (currentContext.transientCount)
-    {
-        --currentContext.transientCount;
-        return;
-    }
-
-    // If currentContextId is set and currentContextTransientCount is 0,
-    // this is the last TransientContextLock that is released, destroy the state object
-    TransientContext::get().reset();
+    assert(currentContext.transientCount && "Transient context release without a matching acquire");
+    if (currentContext.transientCount && --currentContext.transientCount == 0)
+        TransientContext::get().reset();
 }
 
 
