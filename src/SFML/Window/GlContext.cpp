@@ -102,6 +102,11 @@ using ContextType = sf::priv::EaglContext;
 #include <SFML/Window/EglContext.hpp>
 using ContextType = sf::priv::EglContext;
 
+#elif defined(SFML_SYSTEM_HARMONY)
+
+#include <SFML/Window/Harmony/EglContextHarmony.hpp>
+using ContextType = sf::priv::EglContextHarmony;
+
 #endif
 
 #if defined(SFML_SYSTEM_WINDOWS)
@@ -200,6 +205,11 @@ namespace
 ////////////////////////////////////////////////////////////
 ContextSettings normalizeContextSettings(ContextSettings settings)
 {
+#ifdef SFML_SYSTEM_HARMONY
+    settings.majorVersion   = 2;
+    settings.minorVersion   = 0;
+    settings.attributeFlags = ContextSettings::Default;
+#else
     if (settings.majorVersion < 2)
     {
         settings.majorVersion = 2;
@@ -216,6 +226,7 @@ ContextSettings normalizeContextSettings(ContextSettings settings)
     {
         settings.minorVersion = 2;
     }
+#endif
 #endif
 
     return settings;
@@ -593,6 +604,13 @@ void GlContext::acquireTransientContext()
 {
     auto& currentContext = GlContextImpl::CurrentContext::get();
 
+#ifdef SFML_SYSTEM_HARMONY
+    // A Harmony window surface can disappear independently from its persistent
+    // EGLContext. Reconcile that state before borrowing the cached context so a
+    // transient lock never starts out with an already unusable target.
+    (void)getActiveContext();
+#endif
+
     // Fast path if we already have a context active on this thread
     if (currentContext.id)
     {
@@ -600,15 +618,18 @@ void GlContext::acquireTransientContext()
         return;
     }
 
-    // If we don't already have a context active on this thread the count should be 0
-    assert(!currentContext.transientCount && "Transient count cannot be non-zero");
-
-    // If currentContextId is not set, this must be the first
-    // TransientContextLock on this thread, construct the state object
-    TransientContext::get().emplace();
+    // The context borrowed by an earlier lock can disappear while that lock is
+    // still alive (for example when a Harmony window loses its surface). In that
+    // case, create a fallback context and keep it until all nested locks have
+    // been released.
+    auto& transientContext = TransientContext::get();
+    if (!transientContext)
+        transientContext.emplace();
 
     // Make sure a context is active at this point
     assert(currentContext.id && "Current context ID cannot be zero");
+
+    ++currentContext.transientCount;
 }
 
 
@@ -617,19 +638,19 @@ void GlContext::releaseTransientContext()
 {
     auto& currentContext = GlContextImpl::CurrentContext::get();
 
-    // Make sure a context was left active after acquireTransientContext() was called
-    assert(currentContext.id && "Current context ID cannot be zero");
-
-    // Fast path if we already had a context active on this thread before acquireTransientContext() was called
-    if (currentContext.transientCount)
-    {
-        --currentContext.transientCount;
+    // The active context is allowed to disappear asynchronously while a lock is
+    // alive, so the context ID is not a valid acquire/release invariant. The
+    // lock count is. Keeping this assertion also makes an unmatched release a
+    // deterministic programming error instead of silently accepting it.
+    assert(currentContext.transientCount && "Transient context release without a matching acquire");
+    if (!currentContext.transientCount)
         return;
-    }
 
-    // If currentContextId is set and currentContextTransientCount is 0,
-    // this is the last TransientContextLock that is released, destroy the state object
-    TransientContext::get().reset();
+    --currentContext.transientCount;
+
+    // Destroy a fallback context only after the outermost lock is released.
+    if (!currentContext.transientCount)
+        TransientContext::get().reset();
 }
 
 
@@ -876,15 +897,39 @@ GlFunctionPointer GlContext::getFunction(const char* name)
 ////////////////////////////////////////////////////////////
 const GlContext* GlContext::getActiveContext()
 {
+#ifdef SFML_SYSTEM_HARMONY
+    auto& currentContext = GlContextImpl::CurrentContext::get();
+    if (currentContext.ptr && !currentContext.ptr->validateCurrentContext())
+    {
+        currentContext.id  = 0;
+        currentContext.ptr = nullptr;
+    }
+
+    return currentContext.ptr;
+#else
     return GlContextImpl::CurrentContext::get().ptr;
+#endif
 }
 
 
 ////////////////////////////////////////////////////////////
 std::uint64_t GlContext::getActiveContextId()
 {
+#ifdef SFML_SYSTEM_HARMONY
+    // getActiveContext() also validates asynchronous native target changes.
+    (void)getActiveContext();
+#endif
     return GlContextImpl::CurrentContext::get().id;
 }
+
+
+#ifdef SFML_SYSTEM_HARMONY
+////////////////////////////////////////////////////////////
+bool GlContext::validateCurrentContext()
+{
+    return true;
+}
+#endif
 
 
 ////////////////////////////////////////////////////////////
@@ -938,8 +983,20 @@ bool GlContext::setActive(bool active)
             return false;
         }
 
+#ifdef SFML_SYSTEM_HARMONY
+        // The native target can disappear asynchronously even though this
+        // thread-local cache still names the same context. Reconcile it before
+        // taking the fast path.
+        if (validateCurrentContext())
+            return true;
+
+        currentContext.id  = 0;
+        currentContext.ptr = nullptr;
+        return false;
+#else
         // This context is already the active one on this thread, don't do anything
         return true;
+#endif
     }
 
     if (m_impl->id == currentContext.id)
@@ -1284,7 +1341,14 @@ void GlContext::initialize(const ContextSettings& requestedSettings)
         m_settings.sRgbCapable = false;
     }
 #else
+#ifdef SFML_SYSTEM_HARMONY
+    // EGL_GL_COLORSPACE_SRGB_KHR performs the conversion for Harmony
+    // window surfaces. EglContext reports whether that request succeeded.
+    if (!requestedSettings.sRgbCapable)
+        m_settings.sRgbCapable = false;
+#else
     m_settings.sRgbCapable = false;
+#endif
 #endif
 }
 

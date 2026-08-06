@@ -3,6 +3,9 @@ set(WINDOW_SRC
     Context.test.cpp
     ContextSettings.test.cpp
     Event.test.cpp
+    HarmonyCancelableInitialization.test.cpp
+    HarmonyEventQueue.test.cpp
+    HarmonyFullscreenModeCache.test.cpp
     GlResource.test.cpp
     Joystick.test.cpp
     Mouse.test.cpp

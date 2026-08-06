@@ -44,4 +44,6 @@
 #include <SFML/Window/iOS/CursorImpl.hpp>
 #elif defined(SFML_SYSTEM_ANDROID)
 #include <SFML/Window/Android/CursorImpl.hpp>
+#elif defined(SFML_SYSTEM_HARMONY)
+#include <SFML/Window/Harmony/CursorImpl.hpp>
 #endif

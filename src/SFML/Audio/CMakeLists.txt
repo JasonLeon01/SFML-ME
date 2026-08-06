@@ -35,6 +35,18 @@ set(SRC
     ${SRCROOT}/SoundStream.cpp
     ${INCROOT}/SoundStream.hpp
 )
+
+if(SFML_OS_HARMONY)
+    list(REMOVE_ITEM SRC ${SRCROOT}/SoundRecorder.cpp)
+    list(APPEND SRC
+        ${SRCROOT}/OpenHarmonyAudio.cpp
+        ${SRCROOT}/OpenHarmonyAudio.hpp
+        ${SRCROOT}/OpenHarmonyPlaybackDevice.cpp
+        ${SRCROOT}/OpenHarmonyPlaybackDevice.hpp
+        ${SRCROOT}/SoundRecorderOpenHarmony.cpp
+    )
+endif()
+
 source_group("" FILES ${SRC})
 
 set(CODECS_SRC
@@ -199,6 +211,17 @@ target_compile_definitions(sfml-audio PRIVATE OV_EXCLUDE_STATIC_CALLBACKS FLAC__
 # disable miniaudio features we do not use
 target_compile_definitions(sfml-audio PRIVATE MA_NO_MP3 MA_NO_FLAC MA_NO_ENCODING MA_NO_RESOURCE_MANAGER MA_NO_GENERATION)
 
+if(SFML_OS_HARMONY)
+    # The OpenHarmony toolchain also defines __linux__. Keep miniaudio from
+    # probing Linux audio backends: OHAudio owns device I/O and pulls PCM from
+    # a no-device ma_engine instead.
+    target_compile_definitions(sfml-audio PRIVATE
+                               MA_NO_ALSA
+                               MA_NO_PULSEAUDIO
+                               MA_NO_JACK
+                               MA_NO_DEVICE_IO)
+endif()
+
 # use standard fixed-width integer types
 target_compile_definitions(sfml-audio PRIVATE MA_USE_STDINT)
 
@@ -221,6 +244,10 @@ target_include_directories(sfml-audio SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extl
 
 if(SFML_OS_ANDROID)
     target_link_libraries(sfml-audio PRIVATE android OpenSLES)
+endif()
+
+if(SFML_OS_HARMONY)
+    target_link_libraries(sfml-audio PRIVATE ohaudio ability_access_control)
 endif()
 
 if(SFML_OS_LINUX)

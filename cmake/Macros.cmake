@@ -146,8 +146,8 @@ macro(sfml_add_library module)
     endif()
 
     # set the version and soversion of the target (for compatible systems -- mostly Linuxes)
-    # except for Android which strips soversion suffixes
-    if(NOT SFML_OS_ANDROID)
+    # except for mobile package platforms which require unsuffixed shared objects
+    if(NOT SFML_OS_ANDROID AND NOT SFML_OS_HARMONY)
         set_target_properties(${target} PROPERTIES SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
         set_target_properties(${target} PROPERTIES VERSION ${PROJECT_VERSION})
     endif()
@@ -221,7 +221,7 @@ macro(sfml_add_library module)
 
     if(SFML_OS_ANDROID)
         # Always use position-independent code on Android, even when linking statically.
-        # This is needed because all c++ code is placed in a shared library on Android.
+        # This is needed because all C++ code is placed in a shared library on Android.
         set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
         # Google Play requires all new apps to support 16 KB page sizes.

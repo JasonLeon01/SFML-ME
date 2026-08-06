@@ -36,6 +36,9 @@
 
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Exception.hpp>
+#ifdef SFML_SYSTEM_HARMONY
+#include <SFML/System/FileInputStream.hpp>
+#endif
 #include <SFML/System/InputStream.hpp>
 #include <SFML/System/Utils.hpp>
 #include <SFML/System/Vector2.hpp>
@@ -128,8 +131,14 @@ std::size_t getMaxTextureUnits()
 }
 
 // Read the contents of a file into an array of char
+bool getStreamContents(sf::InputStream& stream, std::vector<char>& buffer);
+
 bool getFileContents(const std::filesystem::path& filename, std::vector<char>& buffer)
 {
+#ifdef SFML_SYSTEM_HARMONY
+    sf::FileInputStream stream;
+    return stream.open(filename) && getStreamContents(stream, buffer);
+#else
     if (auto file = std::ifstream(filename, std::ios_base::binary))
     {
         file.seekg(0, std::ios_base::end);
@@ -145,6 +154,7 @@ bool getFileContents(const std::filesystem::path& filename, std::vector<char>& b
     }
 
     return false;
+#endif
 }
 
 // Read the contents of a stream into an array of char

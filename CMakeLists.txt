@@ -37,6 +37,10 @@ include(cmake/Config.cmake)
 # https://cmake.org/cmake/help/latest/module/GNUInstallDirs.html
 include(GNUInstallDirs)
 
+if(SFML_OS_HARMONY)
+    include(cmake/OpenHarmony.cmake)
+endif()
+
 # add options to select which modules to build
 sfml_set_option(SFML_BUILD_WINDOW ON BOOL "ON to build SFML's Window module. This setting is ignored, if the graphics module is built.")
 sfml_set_option(SFML_BUILD_GRAPHICS ON BOOL "ON to build SFML's Graphics module.")
@@ -49,7 +53,7 @@ if(SFML_BUILD_WINDOW)
 
     # These platforms only expose OpenGL ES, so a stale or explicitly disabled
     # cache entry must not select the desktop OpenGL loader.
-    if(SFML_OS_IOS OR SFML_OS_ANDROID)
+    if(SFML_OS_IOS OR SFML_OS_ANDROID OR SFML_OS_HARMONY)
         set(SFML_OPENGL_ES ON CACHE BOOL "ON to use an OpenGL ES implementation, OFF to use a desktop OpenGL implementation" FORCE)
     endif()
 
@@ -97,6 +101,8 @@ elseif(SFML_OS_MACOS)
     set(DEFAULT_INSTALL_MISC_DIR /usr/local/share/SFML)
 elseif(SFML_OS_ANDROID)
     set(DEFAULT_INSTALL_MISC_DIR ${CMAKE_ANDROID_NDK}/sources/third_party/sfml)
+elseif(SFML_OS_HARMONY)
+    set(DEFAULT_INSTALL_MISC_DIR share/SFML)
 endif()
 
 # force building sfml-window, if sfml-graphics module is built
@@ -106,7 +112,7 @@ if(SFML_BUILD_GRAPHICS AND NOT SFML_BUILD_WINDOW)
 endif()
 
 # use bundled dependencies by default on these systems and system dependencies by default on all others (maintains old behavior)
-if(SFML_OS_WINDOWS OR SFML_OS_MACOS OR SFML_OS_IOS OR SFML_OS_ANDROID)
+if(SFML_OS_WINDOWS OR SFML_OS_MACOS OR SFML_OS_IOS OR SFML_OS_ANDROID OR SFML_OS_HARMONY)
     set(SFML_USE_SYSTEM_DEPS_DEFAULT OFF)
 else()
     set(SFML_USE_SYSTEM_DEPS_DEFAULT ON)

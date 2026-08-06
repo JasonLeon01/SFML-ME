@@ -254,6 +254,21 @@ protected:
     ////////////////////////////////////////////////////////////
     virtual bool makeCurrent(bool current) = 0;
 
+#ifdef SFML_SYSTEM_HARMONY
+    ////////////////////////////////////////////////////////////
+    /// \brief Reconcile platform state before trusting the active-context cache
+    ///
+    /// Most platforms have no asynchronous target lifetime to reconcile and
+    /// therefore use the default implementation. Harmony window contexts
+    /// override this hook because their EGLSurface can disappear independently
+    /// from the persistent EGLContext.
+    ///
+    /// \return `true` if the cached context remains usable
+    ///
+    ////////////////////////////////////////////////////////////
+    virtual bool validateCurrentContext();
+#endif
+
     ////////////////////////////////////////////////////////////
     /// \brief Notify unshared GlResources of context destruction
     ///

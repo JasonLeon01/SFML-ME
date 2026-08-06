@@ -35,6 +35,7 @@
 #include <miniaudio.h>
 
 #include <list>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -43,6 +44,10 @@
 
 namespace sf::priv
 {
+#ifdef SFML_SYSTEM_HARMONY
+class OpenHarmonyPlaybackDevice;
+#endif
+
 ////////////////////////////////////////////////////////////
 /// \brief High-level wrapper around the audio API, it manages
 ///        the creation and destruction of the audio device and
@@ -90,9 +95,11 @@ public:
 
     struct DeviceEntry
     {
-        std::string  name;
+        std::string name;
+#ifndef SFML_SYSTEM_HARMONY
         ma_device_id id{};
-        bool         isDefault{};
+#endif
+        bool isDefault{};
     };
 
     ////////////////////////////////////////////////////////////
@@ -404,6 +411,7 @@ public:
     static Vector3f getUpVector();
 
 private:
+#ifndef SFML_SYSTEM_HARMONY
     ////////////////////////////////////////////////////////////
     /// \brief Get the device ID of the currently selected device
     ///
@@ -411,6 +419,7 @@ private:
     ///
     ////////////////////////////////////////////////////////////
     [[nodiscard]] std::optional<ma_device_id> getSelectedDeviceId() const;
+#endif
 
     ////////////////////////////////////////////////////////////
     /// \brief Initialize the audio device and engine
@@ -449,13 +458,17 @@ private:
     ////////////////////////////////////////////////////////////
     // Member data
     ////////////////////////////////////////////////////////////
-    std::optional<ma_log>     m_log;              //!< The miniaudio log
-    std::optional<ma_context> m_context;          //!< The miniaudio context
-    std::optional<ma_device>  m_playbackDevice;   //!< The miniaudio playback device
-    std::optional<ma_engine>  m_engine;           //!< The miniaudio engine (used for effects and spatialization)
-    ResourceEntryList         m_resources;        //!< Registered resources
-    std::mutex                m_resourcesMutex;   //!< The mutex guarding the registered resources
-    std::mutex                m_readingDataMutex; //!< The mutex guarding data reading cycles by the audio engine
+    std::optional<ma_log> m_log; //!< The miniaudio log
+#ifdef SFML_SYSTEM_HARMONY
+    std::unique_ptr<OpenHarmonyPlaybackDevice> m_playbackDevice; //!< The OHAudio playback stream or null sink
+#else
+    std::optional<ma_context> m_context;        //!< The miniaudio context
+    std::optional<ma_device>  m_playbackDevice; //!< The miniaudio playback device
+#endif
+    std::optional<ma_engine> m_engine;           //!< The miniaudio engine (used for effects and spatialization)
+    ResourceEntryList        m_resources;        //!< Registered resources
+    std::mutex               m_resourcesMutex;   //!< The mutex guarding the registered resources
+    std::mutex               m_readingDataMutex; //!< The mutex guarding data reading cycles by the audio engine
 };
 
 } // namespace sf::priv

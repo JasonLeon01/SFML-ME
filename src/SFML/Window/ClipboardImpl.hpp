@@ -44,4 +44,6 @@
 #include <SFML/Window/iOS/ClipboardImpl.hpp>
 #elif defined(SFML_SYSTEM_ANDROID)
 #include <SFML/Window/Android/ClipboardImpl.hpp>
+#elif defined(SFML_SYSTEM_HARMONY)
+#include <SFML/Window/Harmony/ClipboardImpl.hpp>
 #endif

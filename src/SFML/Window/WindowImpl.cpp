@@ -89,6 +89,13 @@ using WindowImplType = sf::priv::WindowImplAndroid;
 
 #define SFML_VULKAN_IMPLEMENTATION_NOT_AVAILABLE
 
+#elif defined(SFML_SYSTEM_HARMONY)
+
+#include <SFML/Window/Harmony/WindowImplHarmony.hpp>
+using WindowImplType = sf::priv::WindowImplHarmony;
+
+#include <SFML/Window/VulkanImpl.hpp>
+
 #endif
 
 
@@ -129,6 +136,10 @@ std::unique_ptr<WindowImpl> WindowImpl::create(
             err() << "Creating two fullscreen windows is not allowed, switching to windowed mode" << std::endl;
             state = State::Windowed;
         }
+#if defined(SFML_SYSTEM_HARMONY)
+        // The XComponent owns the mobile surface dimensions, so the requested
+        // mode is ignored instead of being compared with a transient size.
+#else
         // Make sure that the chosen video mode is compatible
         else if (!mode.isValid())
         {
@@ -138,10 +149,11 @@ std::unique_ptr<WindowImpl> WindowImpl::create(
             err() << "  VideoMode: { size: { " << mode.size.x << ", " << mode.size.y
                   << " }, bitsPerPixel: " << mode.bitsPerPixel << " }" << std::endl;
         }
+#endif
     }
 
     // Check validity of style according to the underlying platform
-#if defined(SFML_SYSTEM_IOS) || defined(SFML_SYSTEM_ANDROID)
+#if defined(SFML_SYSTEM_IOS) || defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY)
     if (state == State::Fullscreen)
         style &= ~static_cast<std::uint32_t>(Style::Titlebar);
     else

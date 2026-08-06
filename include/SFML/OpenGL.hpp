@@ -38,6 +38,8 @@
 /// OpenGL ES platforms expose the GLES2 baseline here. Applications
 /// using ES3-only entry points must include the appropriate platform
 /// header or use their own function loader.
+/// On Harmony, raw entry points should be obtained with
+/// `sf::Context::getFunction` so they use the EGL-selected vendor dispatch.
 ////////////////////////////////////////////////////////////
 #if defined(SFML_SYSTEM_WINDOWS)
 
@@ -76,6 +78,12 @@
 #include <OpenGLES/ES2/glext.h>
 
 #elif defined(SFML_SYSTEM_ANDROID)
+
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <GLES2/gl2platform.h>
+
+#elif defined(SFML_SYSTEM_HARMONY)
 
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>

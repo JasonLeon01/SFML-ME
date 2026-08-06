@@ -93,4 +93,8 @@ struct JoystickState
 
 #include <SFML/Window/Android/JoystickImpl.hpp>
 
+#elif defined(SFML_SYSTEM_HARMONY)
+
+#include <SFML/Window/Harmony/JoystickImpl.hpp>
+
 #endif

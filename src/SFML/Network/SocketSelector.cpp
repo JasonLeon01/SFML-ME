@@ -40,7 +40,7 @@
 #include <wepoll.h>
 using epoll_t = HANDLE;
 #define EPOLL_CLOEXEC 0
-#elif defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_ANDROID)
+#elif defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY)
 #define SFML_USE_EPOLL
 #include <sys/epoll.h>
 using epoll_t = int;
@@ -81,7 +81,11 @@ struct SocketSelector::SocketSelectorImpl
 #if defined(SFML_USE_EPOLL)
     SocketSelectorImpl() : epollHandle(epoll_create1(EPOLL_CLOEXEC))
     {
+#if defined(SFML_SYSTEM_WINDOWS)
         if (!epollHandle)
+#else
+        if (epollHandle < 0)
+#endif
         {
             err() << "Failed to create epoll handle" << std::endl;
             assert(false && "Failed to create epoll handle");
@@ -90,7 +94,11 @@ struct SocketSelector::SocketSelectorImpl
 
     ~SocketSelectorImpl()
     {
+#if defined(SFML_SYSTEM_WINDOWS)
         if (epollHandle)
+#else
+        if (epollHandle >= 0)
+#endif
         {
             if (epoll_close(epollHandle) < 0)
                 err() << "Failed to close epoll handle" << std::endl;
@@ -193,7 +201,10 @@ struct SocketSelector::SocketSelectorImpl
 
     bool wait(Time timeout)
     {
-        events.resize(sockets.size());
+        // epoll requires maxevents > 0 even when no descriptors are
+        // registered. A one-element output buffer lets an empty selector
+        // honour finite timeouts and Time::Zero's infinite wait semantics.
+        events.resize(std::max<std::size_t>(sockets.size(), 1));
         const auto result = epoll_wait(epollHandle,
                                        events.data(),
                                        static_cast<int>(events.size()),

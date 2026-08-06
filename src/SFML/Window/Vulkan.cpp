@@ -46,6 +46,10 @@
 
 #endif
 
+#elif defined(SFML_SYSTEM_HARMONY)
+
+#include <SFML/Window/VulkanImpl.hpp>
+
 #else
 
 #define SFML_VULKAN_IMPLEMENTATION_NOT_AVAILABLE

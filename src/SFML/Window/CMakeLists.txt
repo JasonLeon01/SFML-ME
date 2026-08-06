@@ -266,6 +266,35 @@ elseif(SFML_OS_ANDROID)
         ${SRCROOT}/Android/SensorImpl.cpp
     )
     source_group("android" FILES ${PLATFORM_SRC})
+elseif(SFML_OS_HARMONY)
+    set(PLATFORM_SRC
+        ${SRCROOT}/EGLCheck.cpp
+        ${SRCROOT}/EGLCheck.hpp
+        ${SRCROOT}/Harmony/CancelableInitialization.hpp
+        ${SRCROOT}/Harmony/EglContextHarmony.cpp
+        ${SRCROOT}/Harmony/EglContextHarmony.hpp
+        ${SRCROOT}/Harmony/EventQueue.hpp
+        ${SRCROOT}/Harmony/FullscreenModeCache.hpp
+        ${SRCROOT}/Harmony/NativeApp.cpp
+        ${SRCROOT}/Harmony/NativeApp.hpp
+        ${SRCROOT}/Harmony/NativeAppImpl.hpp
+        ${SRCROOT}/Harmony/CursorImpl.cpp
+        ${SRCROOT}/Harmony/CursorImpl.hpp
+        ${SRCROOT}/Harmony/ClipboardImpl.cpp
+        ${SRCROOT}/Harmony/ClipboardImpl.hpp
+        ${SRCROOT}/Harmony/InputImpl.cpp
+        ${SRCROOT}/Harmony/InputMethodImpl.cpp
+        ${SRCROOT}/Harmony/InputMethodImpl.hpp
+        ${SRCROOT}/Harmony/JoystickImpl.cpp
+        ${SRCROOT}/Harmony/JoystickImpl.hpp
+        ${SRCROOT}/Harmony/SensorImpl.cpp
+        ${SRCROOT}/Harmony/SensorImpl.hpp
+        ${SRCROOT}/Harmony/VideoModeImpl.cpp
+        ${SRCROOT}/Harmony/WindowImplHarmony.cpp
+        ${SRCROOT}/Harmony/WindowImplHarmony.hpp
+        ${SRCROOT}/Harmony/VulkanImplHarmony.cpp
+    )
+    source_group("harmony" FILES ${PLATFORM_SRC})
 endif()
 
 # define the sfml-window target
@@ -352,6 +381,16 @@ elseif(SFML_OS_IOS)
     target_link_libraries(sfml-window PUBLIC "-framework Foundation" "-framework UIKit" "-framework CoreGraphics" "-framework QuartzCore" "-framework CoreMotion")
 elseif(SFML_OS_ANDROID)
     target_link_libraries(sfml-window PRIVATE android)
+elseif(SFML_OS_HARMONY)
+    target_link_libraries(sfml-window PRIVATE
+                          ace_ndk.z
+                          deviceinfo_ndk.z
+                          native_window
+                          ohgame_controller.z
+                          ohsensor
+                          ohinputmethod
+                          pasteboard
+                          udmf)
 endif()
 
 # on some platforms (e.g. Raspberry Pi 3 armhf), GCC requires linking libatomic to use <atomic> features

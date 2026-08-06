@@ -46,6 +46,13 @@ class SFML_SYSTEM_API ResourceStream;
 }
 #endif
 
+#ifdef SFML_SYSTEM_HARMONY
+namespace sf::priv
+{
+class HarmonyResourceStream;
+}
+#endif
+
 
 namespace sf
 {
@@ -107,6 +114,12 @@ public:
 
     ////////////////////////////////////////////////////////////
     /// \brief Open the stream from a file path
+    ///
+    /// On OpenHarmony/HarmonyOS, a path beginning with `rawfile:/`
+    /// explicitly addresses the HAP rawfile directory. A relative path is
+    /// first opened from the application filesystem and then, if that fails,
+    /// from rawfile. `SFML::Main` initializes the native resource manager
+    /// before application code starts.
     ///
     /// \param filename Name of the file to open
     ///
@@ -170,6 +183,10 @@ private:
     ////////////////////////////////////////////////////////////
 #ifdef SFML_SYSTEM_ANDROID
     std::unique_ptr<priv::ResourceStream> m_androidFile;
+#endif
+
+#ifdef SFML_SYSTEM_HARMONY
+    std::unique_ptr<priv::HarmonyResourceStream> m_harmonyFile;
 #endif
 
     std::unique_ptr<std::FILE, FileCloser> m_file; //!< stdio file stream

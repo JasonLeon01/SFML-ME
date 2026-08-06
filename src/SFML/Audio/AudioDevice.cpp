@@ -28,6 +28,11 @@
 #include <SFML/Audio/AudioDevice.hpp>
 #include <SFML/Audio/PlaybackDevice.hpp>
 
+#ifdef SFML_SYSTEM_HARMONY
+#include <SFML/Audio/OpenHarmonyAudio.hpp>
+#include <SFML/Audio/OpenHarmonyPlaybackDevice.hpp>
+#endif
+
 #include <SFML/System/Err.hpp>
 
 #include <algorithm>
@@ -72,6 +77,21 @@ NotificationCallback& getNotificationCallback()
     static NotificationCallback notificationCallback;
     return notificationCallback;
 }
+
+#ifdef SFML_SYSTEM_HARMONY
+void notifyPlaybackDevice(PlaybackDevice::Notification notification)
+{
+    PlaybackDevice::NotificationCallback callback;
+    {
+        auto&                 notificationCallback = getNotificationCallback();
+        const std::lock_guard lock(notificationCallback.mutex);
+        callback = notificationCallback.callback;
+    }
+
+    if (callback)
+        callback(notification);
+}
+#endif
 } // namespace
 
 
@@ -113,10 +133,16 @@ AudioDevice::AudioDevice()
 ////////////////////////////////////////////////////////////
 AudioDevice::~AudioDevice()
 {
+#ifdef SFML_SYSTEM_HARMONY
+    // Stop OHAudio callbacks before destroying the engine they pull from.
+    m_playbackDevice.reset();
+#endif
+
     // Destroy the engine
     if (m_engine)
         ma_engine_uninit(&*m_engine);
 
+#ifndef SFML_SYSTEM_HARMONY
     // Destroy the playback device
     if (m_playbackDevice)
         ma_device_uninit(&*m_playbackDevice);
@@ -124,6 +150,7 @@ AudioDevice::~AudioDevice()
     // Destroy the context
     if (m_context)
         ma_context_uninit(&*m_context);
+#endif
 
     // Destroy the log
     if (m_log)
@@ -162,10 +189,16 @@ bool AudioDevice::reinitialize()
     for (const auto& entry : instance->m_resources)
         entry.deinitializeFunc(entry.resource);
 
-    // Destroy the old engine
+        // Destroy the old engine
+#ifdef SFML_SYSTEM_HARMONY
+    // Stop the renderer/null sink before invalidating its engine callback target.
+    instance->m_playbackDevice.reset();
+#endif
+
     if (instance->m_engine)
         ma_engine_uninit(&*instance->m_engine);
 
+#ifndef SFML_SYSTEM_HARMONY
     // Destroy the old playback device
     if (instance->m_playbackDevice)
         ma_device_uninit(&*instance->m_playbackDevice);
@@ -173,6 +206,7 @@ bool AudioDevice::reinitialize()
     // Destroy the old context
     if (instance->m_context)
         ma_context_uninit(&*instance->m_context);
+#endif
 
     // Create the new objects
     const auto result = instance->initialize();
@@ -188,6 +222,13 @@ bool AudioDevice::reinitialize()
 ////////////////////////////////////////////////////////////
 std::vector<AudioDevice::DeviceEntry> AudioDevice::getAvailableDevices()
 {
+#ifdef SFML_SYSTEM_HARMONY
+    std::vector<DeviceEntry> result;
+    for (auto& device : getOpenHarmonyAudioDevices(OpenHarmonyAudioDeviceKind::Playback))
+        result.push_back({std::move(device.name), device.isDefault});
+
+    return result;
+#else
     const auto getDevices = [](auto& context)
     {
         ma_device_info* deviceInfos{};
@@ -294,16 +335,39 @@ std::vector<AudioDevice::DeviceEntry> AudioDevice::getAvailableDevices()
     }
 
     return deviceList;
+#endif
 }
 
 
 ////////////////////////////////////////////////////////////
 bool AudioDevice::setDevice(const std::string& name)
 {
-    auto& selection     = getCurrentDeviceSelection();
+    auto& selection = getCurrentDeviceSelection();
+#ifdef SFML_SYSTEM_HARMONY
+    const auto previous = selection;
+#endif
     selection.useNull   = false;
+#ifdef SFML_SYSTEM_HARMONY
+    // The only advertised OpenHarmony playback entry is the current system
+    // route. Selecting it therefore keeps following the system default rather
+    // than pinning a name that can become stale after a headset/Bluetooth
+    // reroute.
+    static_cast<void>(name);
+    selection.selection.reset();
+#else
     selection.selection = name;
-    return reinitialize();
+#endif
+
+    if (reinitialize())
+        return true;
+
+#ifdef SFML_SYSTEM_HARMONY
+    // OpenHarmony exposes the current system-selected media route. Restore the
+    // previous usable selection if reinitializing the requested route fails.
+    selection = previous;
+    static_cast<void>(reinitialize());
+#endif
+    return false;
 }
 
 
@@ -334,6 +398,9 @@ std::optional<std::string> AudioDevice::getDevice()
     if (!instance || !instance->m_playbackDevice)
         return std::nullopt;
 
+#ifdef SFML_SYSTEM_HARMONY
+    return instance->m_playbackDevice->getName();
+#else
     std::array<char, MA_MAX_DEVICE_NAME_LENGTH + 1> deviceName{};
     std::size_t                                     deviceNameLength{};
 
@@ -349,6 +416,7 @@ std::optional<std::string> AudioDevice::getDevice()
     }
 
     return std::string(deviceName.data(), deviceNameLength);
+#endif
 }
 
 
@@ -360,11 +428,15 @@ bool AudioDevice::isDefaultDevice()
     if (!instance || !instance->m_playbackDevice)
         return false;
 
+#ifdef SFML_SYSTEM_HARMONY
+    return instance->m_playbackDevice->isDefault();
+#else
     // We don't want to consider the null device as a default
     // since it is used either as a fallback when other backends
     // don't provide devices themselves or when the user
     // explicitly requests it to discard audio data
     return (instance->m_context->backend != ma_backend_null) && (instance->m_playbackDevice->playback.pID == nullptr);
+#endif
 }
 
 
@@ -382,7 +454,13 @@ std::optional<std::uint32_t> AudioDevice::getDeviceSampleRate()
 {
     auto* instance = getInstance();
     if (instance && instance->m_playbackDevice)
+    {
+#ifdef SFML_SYSTEM_HARMONY
+        return instance->m_playbackDevice->getSampleRate();
+#else
         return instance->m_playbackDevice->sampleRate;
+#endif
+    }
 
     return std::nullopt;
 }
@@ -431,9 +509,14 @@ void AudioDevice::setGlobalVolume(float volume)
     if (!instance || !instance->m_engine)
         return;
 
+#ifdef SFML_SYSTEM_HARMONY
+    if (instance->m_playbackDevice)
+        instance->m_playbackDevice->setVolume(volume * 0.01f);
+#else
     if (const auto result = ma_device_set_master_volume(ma_engine_get_device(&*instance->m_engine), volume * 0.01f);
         result != MA_SUCCESS)
         err() << "Failed to set audio device master volume: " << ma_result_description(result) << std::endl;
+#endif
 }
 
 
@@ -559,6 +642,7 @@ Vector3f AudioDevice::getUpVector()
 
 
 ////////////////////////////////////////////////////////////
+#ifndef SFML_SYSTEM_HARMONY
 std::optional<ma_device_id> AudioDevice::getSelectedDeviceId() const
 {
     const auto& selection = getCurrentDeviceSelection();
@@ -578,11 +662,73 @@ std::optional<ma_device_id> AudioDevice::getSelectedDeviceId() const
 
     return std::nullopt;
 }
+#endif
 
 
 ////////////////////////////////////////////////////////////
 bool AudioDevice::initialize()
 {
+#ifdef SFML_SYSTEM_HARMONY
+    m_playbackDevice = OpenHarmonyPlaybackDevice::create(getCurrentDeviceSelection().useNull,
+                                                         m_readingDataMutex,
+                                                         &notifyPlaybackDevice);
+    if (!m_playbackDevice)
+        return false;
+
+    auto engineConfig               = ma_engine_config_init();
+    engineConfig.pLog               = m_log ? &*m_log : nullptr;
+    engineConfig.listenerCount      = 1;
+    engineConfig.channels           = m_playbackDevice->getChannelCount();
+    engineConfig.sampleRate         = m_playbackDevice->getSampleRate();
+    engineConfig.periodSizeInFrames = 256;
+    engineConfig.noDevice           = MA_TRUE;
+
+    m_engine.emplace();
+    if (const auto result = ma_engine_init(&engineConfig, &*m_engine); result != MA_SUCCESS)
+    {
+        m_playbackDevice.reset();
+        m_engine.reset();
+        err() << "Failed to initialize the no-device audio engine: " << ma_result_description(result) << std::endl;
+        return false;
+    }
+
+    ma_engine_listener_set_position(&*m_engine,
+                                    0,
+                                    getListenerProperties().position.x,
+                                    getListenerProperties().position.y,
+                                    getListenerProperties().position.z);
+    ma_engine_listener_set_direction(&*m_engine,
+                                     0,
+                                     getListenerProperties().direction.x,
+                                     getListenerProperties().direction.y,
+                                     getListenerProperties().direction.z);
+    ma_engine_listener_set_velocity(&*m_engine,
+                                    0,
+                                    getListenerProperties().velocity.x,
+                                    getListenerProperties().velocity.y,
+                                    getListenerProperties().velocity.z);
+    ma_engine_listener_set_cone(&*m_engine,
+                                0,
+                                getListenerProperties().cone.innerAngle.asRadians(),
+                                getListenerProperties().cone.outerAngle.asRadians(),
+                                getListenerProperties().cone.outerGain);
+    ma_engine_listener_set_world_up(&*m_engine,
+                                    0,
+                                    getListenerProperties().upVector.x,
+                                    getListenerProperties().upVector.y,
+                                    getListenerProperties().upVector.z);
+
+    if (!m_playbackDevice->start(*m_engine))
+    {
+        m_playbackDevice.reset();
+        ma_engine_uninit(&*m_engine);
+        m_engine.reset();
+        return false;
+    }
+
+    setGlobalVolume(getListenerProperties().volume);
+    return true;
+#else
     // Create the context
     m_context.emplace();
 
@@ -770,6 +916,7 @@ bool AudioDevice::initialize()
                                     getListenerProperties().upVector.z);
 
     return true;
+#endif
 }
 
 

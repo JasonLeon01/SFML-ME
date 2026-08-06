@@ -29,6 +29,9 @@
 
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Exception.hpp>
+#ifdef SFML_SYSTEM_HARMONY
+#include <SFML/System/FileInputStream.hpp>
+#endif
 #include <SFML/System/InputStream.hpp>
 #include <SFML/System/Utils.hpp>
 #ifdef SFML_SYSTEM_ANDROID
@@ -228,6 +231,23 @@ void Image::resize(Vector2u size, const std::uint8_t* pixels)
 ////////////////////////////////////////////////////////////
 bool Image::loadFromFile(const std::filesystem::path& filename)
 {
+#ifdef SFML_SYSTEM_HARMONY
+
+    // FileInputStream preserves normal sandbox filesystem access while also
+    // providing the rawfile:/ prefix and relative-path packaged-resource
+    // fallback used by the other SFML resource loaders on OpenHarmony.
+    FileInputStream stream;
+    if (!stream.open(filename))
+    {
+        err() << "Failed to load image\n"
+              << formatDebugPathInfo(filename) << "\nReason: unable to open filesystem path or HAP rawfile" << std::endl;
+        return false;
+    }
+
+    return loadFromStream(stream);
+
+#endif
+
 #ifdef SFML_SYSTEM_ANDROID
 
     if (priv::getActivityStatesPtr() != nullptr)

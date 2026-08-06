@@ -52,4 +52,8 @@
 
 #include <SFML/Window/Android/SensorImpl.hpp>
 
+#elif defined(SFML_SYSTEM_HARMONY)
+
+#include <SFML/Window/Harmony/SensorImpl.hpp>
+
 #endif
