@@ -29,15 +29,9 @@
 
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Exception.hpp>
-#ifdef SFML_SYSTEM_HARMONY
 #include <SFML/System/FileInputStream.hpp>
-#endif
 #include <SFML/System/InputStream.hpp>
 #include <SFML/System/Utils.hpp>
-#ifdef SFML_SYSTEM_ANDROID
-#include <SFML/System/Android/Activity.hpp>
-#include <SFML/System/Android/ResourceStream.hpp>
-#endif
 
 #define QOI_IMPLEMENTATION
 #define qoi_decode sf_qoi_decode
@@ -250,13 +244,15 @@ bool Image::loadFromFile(const std::filesystem::path& filename)
 
 #ifdef SFML_SYSTEM_ANDROID
 
-    if (priv::getActivityStatesPtr() != nullptr)
+    FileInputStream stream;
+    if (!stream.open(filename))
     {
-        priv::ResourceStream stream;
-        if (!stream.open(filename))
-            return false;
-        return loadFromStream(stream);
+        err() << "Failed to load image\n"
+              << formatDebugPathInfo(filename) << "\nReason: unable to open filesystem path or APK asset" << std::endl;
+        return false;
     }
+
+    return loadFromStream(stream);
 
 #endif
 

@@ -120,6 +120,9 @@ public:
     /// first opened from the application filesystem and then, if that fails,
     /// from rawfile. `SFML::Main` initializes the native resource manager
     /// before application code starts.
+    /// On Android, paths are first opened from the application filesystem.
+    /// Relative paths fall back to the packaged asset directory when no
+    /// filesystem file exists.
     ///
     /// \param filename Name of the file to open
     ///
