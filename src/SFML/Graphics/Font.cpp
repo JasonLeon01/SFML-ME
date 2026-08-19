@@ -28,6 +28,7 @@
 #include <SFML/Graphics/Font.hpp>
 #include <SFML/Graphics/Image.hpp>
 #include <SFML/Graphics/Texture.hpp>
+
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Exception.hpp>
 #include <SFML/System/FileInputStream.hpp>

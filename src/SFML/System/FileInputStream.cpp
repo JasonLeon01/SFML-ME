@@ -78,10 +78,12 @@ bool FileInputStream::open(const std::filesystem::path& filename)
 #endif
 
     m_file.reset(openFile(filename, "rb"));
+#ifndef SFML_SYSTEM_ANDROID
+    return m_file != nullptr;
+#else
     if (m_file)
         return true;
 
-#ifdef SFML_SYSTEM_ANDROID
     if (filename.is_relative() && priv::getActivityStatesPtr() != nullptr)
     {
         m_androidFile = std::make_unique<priv::ResourceStream>();
@@ -90,8 +92,8 @@ bool FileInputStream::open(const std::filesystem::path& filename)
 
         m_androidFile.reset();
     }
-#endif
     return false;
+#endif
 }
 
 

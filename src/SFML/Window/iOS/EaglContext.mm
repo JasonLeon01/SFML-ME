@@ -39,9 +39,10 @@
 #include <OpenGLES/ES2/glext.h>
 #include <QuartzCore/CAEAGLLayer.h>
 #include <array>
-#include <cstring>
 #include <dlfcn.h>
 #include <ostream>
+
+#include <cstring>
 
 
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -74,8 +75,7 @@ EaglContext::EaglContext(EaglContext* shared, const ContextSettings& settings, c
 EaglContext::EaglContext(EaglContext* shared, const ContextSettings& settings, Vector2u /* size */) : m_context(nil)
 {
     EAGLRenderingAPI api = shared ? [shared->m_context API]
-                                 : (settings.majorVersion >= 3 ? kEAGLRenderingAPIOpenGLES3
-                                                               : kEAGLRenderingAPIOpenGLES2);
+                                  : (settings.majorVersion >= 3 ? kEAGLRenderingAPIOpenGLES3 : kEAGLRenderingAPIOpenGLES2);
 
     if (shared)
         m_context = [[EAGLContext alloc] initWithAPI:api sharegroup:[shared->m_context sharegroup]];
@@ -178,8 +178,8 @@ void EaglContext::recreateRenderBuffers(SFView* glView)
         const bool  isGles3    = [m_context API] == kEAGLRenderingAPIOpenGLES3;
         const char* extensions = isGles3 ? nullptr : reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
         const bool  hasDepth24 = isGles3 || (extensions && std::strstr(extensions, "GL_OES_depth24"));
-        const bool  hasPackedDepthStencil =
-            isGles3 || (extensions && std::strstr(extensions, "GL_OES_packed_depth_stencil"));
+        const bool  hasPackedDepthStencil = isGles3 ||
+                                           (extensions && std::strstr(extensions, "GL_OES_packed_depth_stencil"));
 
         if ((m_settings.stencilBits > 0) && !hasPackedDepthStencil)
             m_settings.stencilBits = 0;
@@ -269,8 +269,7 @@ void EaglContext::createContext(EaglContext*           shared,
 
     // Create the context, matching the process-wide share group API when present
     EAGLRenderingAPI api = shared ? [shared->m_context API]
-                                 : (settings.majorVersion >= 3 ? kEAGLRenderingAPIOpenGLES3
-                                                               : kEAGLRenderingAPIOpenGLES2);
+                                  : (settings.majorVersion >= 3 ? kEAGLRenderingAPIOpenGLES3 : kEAGLRenderingAPIOpenGLES2);
 
     if (shared)
     {

@@ -32,6 +32,7 @@
 #include <glad/egl.h>
 
 #include <array>
+
 #include <cstdint>
 
 #if defined(SFML_SYSTEM_WINDOWS)
@@ -49,8 +50,8 @@ inline GlFunctionPointer getEglGlFunction(const char* name)
     if (const auto address = eglGetProcAddress(name))
         return reinterpret_cast<GlFunctionPointer>(address);
 
-    // EGL does not require eglGetProcAddress to return core GL/GLES
-    // functions, so fall back to the linked client library.
+        // EGL does not require eglGetProcAddress to return core GL/GLES
+        // functions, so fall back to the linked client library.
 #if defined(SFML_SYSTEM_WINDOWS)
     static const HMODULE module = []
     {
@@ -102,4 +103,3 @@ inline GlFunctionPointer getEglGlFunction(const char* name)
 }
 
 } // namespace sf::priv
-

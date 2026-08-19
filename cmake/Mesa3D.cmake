@@ -1,8 +1,12 @@
 set(MESA3D_URL "https://github.com/pal1000/mesa-dist-win/releases/download/25.2.0/mesa3d-25.2.0-release-msvc.7z")
 set(MESA3D_SHA256 "67e76e9844206c71cf313e09409303af9c01d7561c5f57d7e152771e2408aafe")
+set(MESA3D_DEVEL_URL "https://github.com/pal1000/mesa-dist-win/releases/download/25.2.0/mesa3d-25.2.0-devel-msvc.7z")
+set(MESA3D_DEVEL_SHA256 "9ffbc4c1d8d10c00a60e2cfc878235f1f94eda87558ea1a8cf9c089d0a09da05")
 
 get_filename_component(MESA3D_ARCHIVE "${MESA3D_URL}" NAME)
 get_filename_component(MESA3D_ARCHIVE_DIRECTORY "${MESA3D_URL}" NAME_WLE)
+get_filename_component(MESA3D_DEVEL_ARCHIVE "${MESA3D_DEVEL_URL}" NAME)
+get_filename_component(MESA3D_DEVEL_ARCHIVE_DIRECTORY "${MESA3D_DEVEL_URL}" NAME_WLE)
 
 if(ARCH_X64)
     set(MESA3D_ARCH "x64")
@@ -14,6 +18,8 @@ endif()
 
 set(MESA3D_ARCHIVE_PATH "${PROJECT_BINARY_DIR}/${MESA3D_ARCHIVE_DIRECTORY}/${MESA3D_ARCHIVE}")
 set(MESA3D_ARCH_PATH "${PROJECT_BINARY_DIR}/${MESA3D_ARCHIVE_DIRECTORY}/${MESA3D_ARCH}")
+set(MESA3D_DEVEL_ARCHIVE_PATH "${PROJECT_BINARY_DIR}/${MESA3D_DEVEL_ARCHIVE_DIRECTORY}/${MESA3D_DEVEL_ARCHIVE}")
+set(MESA3D_DEVEL_PATH "${PROJECT_BINARY_DIR}/${MESA3D_DEVEL_ARCHIVE_DIRECTORY}")
 
 # we support automatically installing and uninstalling the necessary files
 
@@ -25,6 +31,54 @@ set(MESA3D_ARCH_PATH "${PROJECT_BINARY_DIR}/${MESA3D_ARCHIVE_DIRECTORY}/${MESA3D
 
 if(SFML_OS_WINDOWS AND SFML_USE_MESA3D)
     # we are installing the files
+
+    if(SFML_OPENGL_ES)
+        set(MESA3D_DEVEL_INCLUDE_PATH "${MESA3D_DEVEL_PATH}/include")
+        set(MESA3D_DEVEL_LIBRARY_PATH "${MESA3D_DEVEL_PATH}/lib/${MESA3D_ARCH}")
+
+        # OpenGL ES builds need the matching Mesa development files in addition
+        # to the runtime files copied below.
+        if(NOT EXISTS "${MESA3D_DEVEL_INCLUDE_PATH}/EGL/egl.h" OR
+           NOT EXISTS "${MESA3D_DEVEL_INCLUDE_PATH}/GLES2/gl2.h" OR
+           NOT EXISTS "${MESA3D_DEVEL_LIBRARY_PATH}/libEGL.lib" OR
+           NOT EXISTS "${MESA3D_DEVEL_LIBRARY_PATH}/libGLESv2.lib")
+            message(STATUS "Downloading ${MESA3D_DEVEL_ARCHIVE}")
+
+            file(MAKE_DIRECTORY "${MESA3D_DEVEL_PATH}")
+            file(DOWNLOAD "${MESA3D_DEVEL_URL}"
+                 "${MESA3D_DEVEL_ARCHIVE_PATH}"
+                 SHOW_PROGRESS
+                 EXPECTED_HASH SHA256=${MESA3D_DEVEL_SHA256})
+
+            if(NOT EXISTS "${MESA3D_DEVEL_ARCHIVE_PATH}")
+                message(FATAL_ERROR "Failed to download ${MESA3D_DEVEL_URL}")
+            endif()
+
+            message(STATUS "Extracting files from ${MESA3D_DEVEL_ARCHIVE}")
+
+            execute_process(COMMAND "${CMAKE_COMMAND}" -E tar x "${MESA3D_DEVEL_ARCHIVE_PATH}"
+                            WORKING_DIRECTORY "${MESA3D_DEVEL_PATH}"
+                            COMMAND_ERROR_IS_FATAL ANY)
+
+            file(REMOVE "${MESA3D_DEVEL_ARCHIVE_PATH}")
+        endif()
+
+        # Seed the existing find modules with the development package selected
+        # by SFML_USE_MESA3D. External SDK builds continue to use normal search.
+        set(EGL_INCLUDE_DIR "${MESA3D_DEVEL_INCLUDE_PATH}")
+        set(EGL_LIBRARY "${MESA3D_DEVEL_LIBRARY_PATH}/libEGL.lib")
+        set(GLES_INCLUDE_DIR "${MESA3D_DEVEL_INCLUDE_PATH}")
+        set(GLES_LIBRARY "${MESA3D_DEVEL_LIBRARY_PATH}/libGLESv2.lib")
+
+        install(DIRECTORY "${MESA3D_DEVEL_INCLUDE_PATH}/EGL"
+                          "${MESA3D_DEVEL_INCLUDE_PATH}/GLES2"
+                          "${MESA3D_DEVEL_INCLUDE_PATH}/KHR"
+                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+                COMPONENT devel)
+        install(FILES "${EGL_LIBRARY}" "${GLES_LIBRARY}"
+                DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                COMPONENT devel)
+    endif()
 
     # if the Mesa 3D directory is not yet present, download and extract the
     # files relevant for the architecture we are configured to build for
@@ -46,6 +100,10 @@ if(SFML_OS_WINDOWS AND SFML_USE_MESA3D)
 
     # add the files as file dependencies to a custom target that we can add as a dependency to executable/test targets
     file(GLOB MESA3D_FILE_LIST "${MESA3D_ARCH_PATH}/*")
+
+    install(FILES ${MESA3D_FILE_LIST}
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+            COMPONENT bin)
 
     get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 

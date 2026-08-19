@@ -136,7 +136,7 @@ void WindowImplUIKit::setPosition(Vector2i /* position */)
 Vector2u WindowImplUIKit::getSize() const
 {
     const CGRect viewBounds   = m_view.bounds;
-    const double backingScale = static_cast<double>(m_view.contentScaleFactor);
+    const auto   backingScale = static_cast<double>(m_view.contentScaleFactor);
     return {static_cast<unsigned int>(viewBounds.size.width * backingScale),
             static_cast<unsigned int>(viewBounds.size.height * backingScale)};
 }

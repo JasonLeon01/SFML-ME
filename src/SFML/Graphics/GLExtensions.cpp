@@ -85,7 +85,7 @@ namespace sf::priv
 ////////////////////////////////////////////////////////////
 void ensureExtensionsInit()
 {
-    static std::mutex mutex;
+    static std::mutex     mutex;
     const std::lock_guard lock(mutex);
 
     if (Context::getActiveContextId() == 0)

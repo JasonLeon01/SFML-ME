@@ -650,8 +650,8 @@ void GlxContext::createContext(GlxContext* shared)
             attributes.push_back(GLX_CONTEXT_MINOR_VERSION_ARB);
             attributes.push_back(static_cast<int>(m_settings.minorVersion));
 
-            const bool profileVersion =
-                (m_settings.majorVersion > 3) || ((m_settings.majorVersion == 3) && (m_settings.minorVersion >= 2));
+            const bool profileVersion = (m_settings.majorVersion > 3) ||
+                                        ((m_settings.majorVersion == 3) && (m_settings.minorVersion >= 2));
 
             // Profile masks are only valid for OpenGL 3.2 and newer
             if (profileVersion && SF_GLAD_GLX_ARB_create_context_profile)

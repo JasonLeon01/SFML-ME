@@ -7,8 +7,8 @@
 # GLES_LIBRARY
 #
 
-find_path(GLES_INCLUDE_DIR GLES2/gl2.h)
-find_library(GLES_LIBRARY NAMES GLESv2)
+find_path(GLES_INCLUDE_DIR GLES2/gl2.h PATHS ${FIND_SFML_PATHS} PATH_SUFFIXES include)
+find_library(GLES_LIBRARY NAMES GLESv2 libGLESv2 PATHS ${FIND_SFML_PATHS} PATH_SUFFIXES lib)
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(GLES DEFAULT_MSG GLES_LIBRARY GLES_INCLUDE_DIR)
