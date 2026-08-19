@@ -380,17 +380,16 @@ struct GlContext::SharedContext
             }
             else
             {
-                err() << "Warning: OpenGL ES share group is already locked to version "
-                      << context->m_settings.majorVersion << "." << context->m_settings.minorVersion
-                      << "; falling back from requested version " << requestedSettings.majorVersion << "."
-                      << requestedSettings.minorVersion << std::endl;
+                err() << "Warning: OpenGL ES share group is already locked to version " << context->m_settings.majorVersion
+                      << "." << context->m_settings.minorVersion << "; falling back from requested version "
+                      << requestedSettings.majorVersion << "." << requestedSettings.minorVersion << std::endl;
             }
         }
 
         // EAGL requires all contexts in a share group to use the same API.
         // Applying the same rule to EGL keeps resource sharing deterministic.
-        settings.majorVersion = context->m_settings.majorVersion;
-        settings.minorVersion = context->m_settings.minorVersion;
+        settings.majorVersion   = context->m_settings.majorVersion;
+        settings.minorVersion   = context->m_settings.minorVersion;
         settings.attributeFlags = ContextSettings::Default;
 #else
         (void)canRecreate;
@@ -688,8 +687,12 @@ std::unique_ptr<GlContext> GlContext::create(const ContextSettings& settings, co
 
     const std::lock_guard lock(sharedContext->mutex);
 
-    const bool      canRecreateShareGroup = sharedContext.use_count() == 2;
-    ContextSettings effectiveSettings     = sharedContext->prepareSettings(settings, canRecreateShareGroup);
+    const bool canRecreateShareGroup = sharedContext.use_count() == 2;
+#ifdef SFML_OPENGL_ES
+    ContextSettings effectiveSettings = sharedContext->prepareSettings(settings, canRecreateShareGroup);
+#else
+    const ContextSettings effectiveSettings = sharedContext->prepareSettings(settings, canRecreateShareGroup);
+#endif
 
     // If use_count is 2 (GlResource + sharedContext) we know that we are inside sf::Context or sf::Window
     // Only in this situation we allow the user to indirectly re-create the shared context as a core context
@@ -718,14 +721,12 @@ std::unique_ptr<GlContext> GlContext::create(const ContextSettings& settings, co
 
         try
         {
-            auto context =
-                std::make_unique<ContextType>(&sharedContext->context.value(), creationSettings, owner, bitsPerPixel);
+            auto context = std::make_unique<ContextType>(&sharedContext->context.value(), creationSettings, owner, bitsPerPixel);
 
             sharedContext->context->setActive(false);
             context->initialize(creationSettings);
             return context;
-        }
-        catch (...)
+        } catch (...)
         {
             static_cast<GlContext&>(sharedContext->context.value()).makeCurrent(false);
             auto& currentContext = GlContextImpl::CurrentContext::get();
@@ -741,8 +742,7 @@ std::unique_ptr<GlContext> GlContext::create(const ContextSettings& settings, co
     try
     {
         context = createContext(effectiveSettings);
-    }
-    catch (const Exception& exception)
+    } catch (const Exception& exception)
     {
         if (!canRecreateShareGroup || (effectiveSettings.majorVersion < 3))
             throw;
@@ -781,8 +781,12 @@ std::unique_ptr<GlContext> GlContext::create(const ContextSettings& settings, Ve
 
     const std::lock_guard lock(sharedContext->mutex);
 
-    const bool      canRecreateShareGroup = sharedContext.use_count() == 2;
-    ContextSettings effectiveSettings     = sharedContext->prepareSettings(settings, canRecreateShareGroup);
+    const bool canRecreateShareGroup = sharedContext.use_count() == 2;
+#ifdef SFML_OPENGL_ES
+    ContextSettings effectiveSettings = sharedContext->prepareSettings(settings, canRecreateShareGroup);
+#else
+    const ContextSettings effectiveSettings = sharedContext->prepareSettings(settings, canRecreateShareGroup);
+#endif
 
     // If use_count is 2 (GlResource + sharedContext) we know that we are inside sf::Context or sf::Window
     // Only in this situation we allow the user to indirectly re-create the shared context as a core context
@@ -816,8 +820,7 @@ std::unique_ptr<GlContext> GlContext::create(const ContextSettings& settings, Ve
             sharedContext->context->setActive(false);
             context->initialize(creationSettings);
             return context;
-        }
-        catch (...)
+        } catch (...)
         {
             static_cast<GlContext&>(sharedContext->context.value()).makeCurrent(false);
             auto& currentContext = GlContextImpl::CurrentContext::get();
@@ -833,8 +836,7 @@ std::unique_ptr<GlContext> GlContext::create(const ContextSettings& settings, Ve
     try
     {
         context = createContext(effectiveSettings);
-    }
-    catch (const Exception& exception)
+    } catch (const Exception& exception)
     {
         if (!canRecreateShareGroup || (effectiveSettings.majorVersion < 3))
             throw;
@@ -1165,8 +1167,8 @@ void GlContext::initialize(const ContextSettings& requestedSettings)
                 if (std::strncmp(versionString, prefix, prefixLength) != 0)
                     return false;
 
-                char*       end    = nullptr;
-                const auto  parsed = std::strtoul(versionString + prefixLength, &end, 10);
+                char*      end    = nullptr;
+                const auto parsed = std::strtoul(versionString + prefixLength, &end, 10);
                 if ((end == versionString + prefixLength) || (*end != '.'))
                     return false;
 
@@ -1201,43 +1203,44 @@ void GlContext::initialize(const ContextSettings& requestedSettings)
                         std::to_string(m_settings.majorVersion) + "." + std::to_string(m_settings.minorVersion));
     }
 
-    static constexpr std::array requiredEntryPoints = {"glCreateShader",
-                                                       "glShaderSource",
-                                                       "glCompileShader",
-                                                       "glGetShaderiv",
-                                                       "glGetShaderInfoLog",
-                                                       "glDeleteShader",
-                                                       "glCreateProgram",
-                                                       "glAttachShader",
-                                                       "glBindAttribLocation",
-                                                       "glLinkProgram",
-                                                       "glGetProgramiv",
-                                                       "glGetProgramInfoLog",
-                                                       "glDeleteProgram",
-                                                       "glUseProgram",
-                                                       "glGetUniformLocation",
-                                                       "glUniform1f",
-                                                       "glUniform2f",
-                                                       "glUniform3f",
-                                                       "glUniform4f",
-                                                       "glUniform1i",
-                                                       "glUniform2i",
-                                                       "glUniform3i",
-                                                       "glUniform4i",
-                                                       "glUniform1fv",
-                                                       "glUniform2fv",
-                                                       "glUniform3fv",
-                                                       "glUniform4fv",
-                                                       "glUniformMatrix3fv",
-                                                       "glUniformMatrix4fv",
-                                                       "glActiveTexture",
-                                                       "glVertexAttribPointer",
-                                                       "glEnableVertexAttribArray",
-                                                       "glDisableVertexAttribArray",
-                                                       "glGetVertexAttribfv",
-                                                       "glGetVertexAttribiv",
-                                                       "glGetVertexAttribPointerv",
-                                                       "glVertexAttrib4fv"};
+    static constexpr std::array requiredEntryPoints =
+        {"glCreateShader",
+         "glShaderSource",
+         "glCompileShader",
+         "glGetShaderiv",
+         "glGetShaderInfoLog",
+         "glDeleteShader",
+         "glCreateProgram",
+         "glAttachShader",
+         "glBindAttribLocation",
+         "glLinkProgram",
+         "glGetProgramiv",
+         "glGetProgramInfoLog",
+         "glDeleteProgram",
+         "glUseProgram",
+         "glGetUniformLocation",
+         "glUniform1f",
+         "glUniform2f",
+         "glUniform3f",
+         "glUniform4f",
+         "glUniform1i",
+         "glUniform2i",
+         "glUniform3i",
+         "glUniform4i",
+         "glUniform1fv",
+         "glUniform2fv",
+         "glUniform3fv",
+         "glUniform4fv",
+         "glUniformMatrix3fv",
+         "glUniformMatrix4fv",
+         "glActiveTexture",
+         "glVertexAttribPointer",
+         "glEnableVertexAttribArray",
+         "glDisableVertexAttribArray",
+         "glGetVertexAttribfv",
+         "glGetVertexAttribiv",
+         "glGetVertexAttribPointerv",
+         "glVertexAttrib4fv"};
 
     for (const char* entryPoint : requiredEntryPoints)
     {

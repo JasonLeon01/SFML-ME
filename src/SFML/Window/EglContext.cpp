@@ -34,10 +34,11 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <ostream>
+
+#include <cstdint>
 #ifdef SFML_SYSTEM_ANDROID
 #include <SFML/System/Android/Activity.hpp>
 #endif
@@ -126,7 +127,7 @@ void ensureInit()
                            return false;
                        }
 
-                       // Continue loading with a display
+        // Continue loading with a display
 #ifdef SFML_SYSTEM_ANDROID
                        const EGLDisplay display = getInitializedDisplay();
                        if (display == EGL_NO_DISPLAY || !gladLoaderLoadEGL(display))
@@ -204,14 +205,14 @@ EglContext::EglContext(EglContext*                        shared,
 
     // Get the best EGL config matching the requested video settings
     ContextSettings effectiveSettings = settings;
-    m_config = getBestConfig(m_display, bitsPerPixel, effectiveSettings, EGL_WINDOW_BIT);
+    m_config                          = getBestConfig(m_display, bitsPerPixel, effectiveSettings, EGL_WINDOW_BIT);
     if (!m_config && !shared && (settings.majorVersion >= 3))
     {
         err() << "Warning: No EGL configuration supports requested OpenGL ES " << settings.majorVersion << "."
               << settings.minorVersion << "; falling back to OpenGL ES 2.0" << std::endl;
         effectiveSettings.majorVersion = 2;
         effectiveSettings.minorVersion = 0;
-        m_config = getBestConfig(m_display, bitsPerPixel, effectiveSettings, EGL_WINDOW_BIT);
+        m_config                       = getBestConfig(m_display, bitsPerPixel, effectiveSettings, EGL_WINDOW_BIT);
     }
 
     if (!m_config)
@@ -240,7 +241,7 @@ EglContext::EglContext(EglContext* shared, const ContextSettings& settings, Vect
     EglContextImpl::ensureInit();
 
     m_display = EglContextImpl::getInitializedDisplay();
-    m_config = getBestConfig(m_display, VideoMode::getDesktopMode().bitsPerPixel, settings, EGL_PBUFFER_BIT);
+    m_config  = getBestConfig(m_display, VideoMode::getDesktopMode().bitsPerPixel, settings, EGL_PBUFFER_BIT);
 
     ContextSettings effectiveSettings = settings;
     if (!m_config && !shared && (settings.majorVersion >= 3))
@@ -249,8 +250,7 @@ EglContext::EglContext(EglContext* shared, const ContextSettings& settings, Vect
               << settings.minorVersion << "; falling back to OpenGL ES 2.0" << std::endl;
         effectiveSettings.majorVersion = 2;
         effectiveSettings.minorVersion = 0;
-        m_config =
-            getBestConfig(m_display, VideoMode::getDesktopMode().bitsPerPixel, effectiveSettings, EGL_PBUFFER_BIT);
+        m_config = getBestConfig(m_display, VideoMode::getDesktopMode().bitsPerPixel, effectiveSettings, EGL_PBUFFER_BIT);
     }
 
     if (!m_config)
@@ -272,7 +272,7 @@ EglContext::EglContext(EglContext* shared, const ContextSettings& settings, Vect
                                    EGL_HEIGHT,
                                    static_cast<EGLint>(std::max(size.y, 1u)),
                                    EGL_NONE};
-    m_surface = eglCheck(eglCreatePbufferSurface(m_display, m_config, attribList.data()));
+    m_surface                   = eglCheck(eglCreatePbufferSurface(m_display, m_config, attribList.data()));
 }
 
 
@@ -342,10 +342,7 @@ void EglContext::setVerticalSyncEnabled(bool enabled)
 
 
 ////////////////////////////////////////////////////////////
-void EglContext::createContext(EglContext*           shared,
-                               const ContextSettings& settings,
-                               unsigned int           bitsPerPixel,
-                               EGLint                 surfaceType)
+void EglContext::createContext(EglContext* shared, const ContextSettings& settings, unsigned int bitsPerPixel, EGLint surfaceType)
 {
     const EGLContext toShared = shared ? shared->m_context : EGL_NO_CONTEXT;
     if (toShared != EGL_NO_CONTEXT)
@@ -363,8 +360,9 @@ void EglContext::createContext(EglContext*           shared,
             return eglCreateContext(m_display, m_config, toShared, contextAttributes.data());
         }
 
-        const std::array contextAttributes = {
-            EGL_CONTEXT_CLIENT_VERSION, static_cast<EGLint>(requested.majorVersion >= 3 ? 3 : 2), EGL_NONE};
+        const std::array contextAttributes = {EGL_CONTEXT_CLIENT_VERSION,
+                                              static_cast<EGLint>(requested.majorVersion >= 3 ? 3 : 2),
+                                              EGL_NONE};
         return eglCreateContext(m_display, m_config, toShared, contextAttributes.data());
     };
 
@@ -411,10 +409,7 @@ void EglContext::destroySurface()
 
 
 ////////////////////////////////////////////////////////////
-EGLConfig EglContext::getBestConfig(EGLDisplay            display,
-                                    unsigned int          bitsPerPixel,
-                                    const ContextSettings& settings,
-                                    EGLint                requestedSurfaceType)
+EGLConfig EglContext::getBestConfig(EGLDisplay display, unsigned int bitsPerPixel, const ContextSettings& settings, EGLint requestedSurfaceType)
 {
     EglContextImpl::ensureInit();
 
@@ -439,8 +434,7 @@ EGLConfig EglContext::getBestConfig(EGLDisplay            display,
         int renderableType = 0;
         eglCheck(eglGetConfigAttrib(display, configs[i], EGL_SURFACE_TYPE, &surfaceType));
         eglCheck(eglGetConfigAttrib(display, configs[i], EGL_RENDERABLE_TYPE, &renderableType));
-        const int requiredRenderableType =
-            settings.majorVersion >= 3 ? EGL_OPENGL_ES3_BIT_KHR : EGL_OPENGL_ES2_BIT;
+        const int requiredRenderableType = settings.majorVersion >= 3 ? EGL_OPENGL_ES3_BIT_KHR : EGL_OPENGL_ES2_BIT;
         if (!(surfaceType & requestedSurfaceType) || !(renderableType & requiredRenderableType))
             continue;
 
@@ -528,7 +522,7 @@ XVisualInfo EglContext::selectBestVisual(::Display* xDisplay, unsigned int bitsP
         ContextSettings fallbackSettings = settings;
         fallbackSettings.majorVersion    = 2;
         fallbackSettings.minorVersion    = 0;
-        config = getBestConfig(display, bitsPerPixel, fallbackSettings, EGL_WINDOW_BIT);
+        config                           = getBestConfig(display, bitsPerPixel, fallbackSettings, EGL_WINDOW_BIT);
     }
 
     if (!config)

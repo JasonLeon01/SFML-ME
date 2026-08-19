@@ -126,10 +126,7 @@ public:
     /// \param settings     Creation parameters
     ///
     ////////////////////////////////////////////////////////////
-    void createContext(EglContext*           shared,
-                       const ContextSettings& settings,
-                       unsigned int           bitsPerPixel,
-                       EGLint                 surfaceType);
+    void createContext(EglContext* shared, const ContextSettings& settings, unsigned int bitsPerPixel, EGLint surfaceType);
 
     ////////////////////////////////////////////////////////////
     /// \brief Create the EGL surface
@@ -161,10 +158,10 @@ public:
     /// \return The best EGL config
     ///
     ////////////////////////////////////////////////////////////
-    static EGLConfig getBestConfig(EGLDisplay            display,
-                                   unsigned int          bitsPerPixel,
+    static EGLConfig getBestConfig(EGLDisplay             display,
+                                   unsigned int           bitsPerPixel,
                                    const ContextSettings& settings,
-                                   EGLint                surfaceType = EGL_WINDOW_BIT | EGL_PBUFFER_BIT);
+                                   EGLint                 surfaceType = EGL_WINDOW_BIT | EGL_PBUFFER_BIT);
 
 #if defined(SFML_SYSTEM_LINUX) && !defined(SFML_USE_DRM)
     ////////////////////////////////////////////////////////////

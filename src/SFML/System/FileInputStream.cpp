@@ -112,6 +112,9 @@ bool FileInputStream::open(const std::filesystem::path& filename)
 #endif
 
     m_file.reset(openFile(filename, "rb"));
+#if !defined(SFML_SYSTEM_ANDROID) && !defined(SFML_SYSTEM_HARMONY)
+    return m_file != nullptr;
+#else
     if (m_file)
         return true;
 
@@ -140,6 +143,7 @@ bool FileInputStream::open(const std::filesystem::path& filename)
 #endif
 
     return false;
+#endif
 }
 
 

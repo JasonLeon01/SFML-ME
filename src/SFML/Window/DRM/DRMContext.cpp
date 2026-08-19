@@ -50,6 +50,7 @@
 #define SF_GLAD_EGL_IMPLEMENTATION_INCLUDED
 #define SF_GLAD_EGL_IMPLEMENTATION
 #include <glad/egl.h>
+#undef SF_GLAD_EGL_IMPLEMENTATION
 #endif
 
 #include <SFML/Window/EglFunctionLoader.hpp>
@@ -534,8 +535,7 @@ DRMContext::DRMContext(DRMContext* shared)
     if (!m_config)
     {
         if (shared)
-            err() << "Failed to find an EGL configuration matching the locked OpenGL ES share-group version"
-                  << std::endl;
+            err() << "Failed to find an EGL configuration matching the locked OpenGL ES share-group version" << std::endl;
         else
             err() << "Failed to find an EGL configuration supporting OpenGL ES 2" << std::endl;
         return;
@@ -573,13 +573,12 @@ DRMContext::DRMContext(DRMContext* shared, const ContextSettings& settings, cons
               << settings.minorVersion << "; falling back to OpenGL ES 2.0" << std::endl;
         effectiveSettings.majorVersion = 2;
         effectiveSettings.minorVersion = 0;
-        m_config = getBestConfig(m_display, effectiveSettings);
+        m_config                       = getBestConfig(m_display, effectiveSettings);
     }
     if (!m_config)
     {
         if (shared)
-            err() << "Failed to find an EGL configuration matching the locked OpenGL ES share-group version"
-                  << std::endl;
+            err() << "Failed to find an EGL configuration matching the locked OpenGL ES share-group version" << std::endl;
         else
             err() << "Failed to find an EGL configuration supporting OpenGL ES 2" << std::endl;
         return;
@@ -614,7 +613,7 @@ DRMContext::DRMContext(DRMContext* shared, const ContextSettings& settings, Vect
               << settings.minorVersion << "; falling back to OpenGL ES 2.0" << std::endl;
         effectiveSettings.majorVersion = 2;
         effectiveSettings.minorVersion = 0;
-        m_config = getBestConfig(m_display, effectiveSettings);
+        m_config                       = getBestConfig(m_display, effectiveSettings);
     }
     if (!m_config)
     {
@@ -763,8 +762,9 @@ void DRMContext::createContext(DRMContext* shared, const ContextSettings& settin
             return eglCreateContext(m_display, m_config, toShared, contextAttributes.data());
         }
 
-        const std::array contextAttributes = {
-            EGL_CONTEXT_CLIENT_VERSION, static_cast<EGLint>(requested.majorVersion >= 3 ? 3 : 2), EGL_NONE};
+        const std::array contextAttributes = {EGL_CONTEXT_CLIENT_VERSION,
+                                              static_cast<EGLint>(requested.majorVersion >= 3 ? 3 : 2),
+                                              EGL_NONE};
         return eglCreateContext(m_display, m_config, toShared, contextAttributes.data());
 #else
         static constexpr std::array contextAttributes = {EGL_NONE};

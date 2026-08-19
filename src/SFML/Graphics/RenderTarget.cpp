@@ -831,7 +831,7 @@ void RenderTarget::resetGLStates()
 
         if (m_defaultShader)
         {
-            RenderStates states;
+            const RenderStates states;
             applyShader(m_defaultShader.get(), states);
         }
 
@@ -919,7 +919,7 @@ void RenderTarget::applyBlendMode(const BlendMode& mode)
         glCheck(glBlendFunc(factorToGlConstant(mode.colorSrcFactor), factorToGlConstant(mode.colorDstFactor)));
     }
 
-    if (GLEXT_blend_minmax || GLEXT_blend_subtract)
+    if (GLEXT_blend_equation)
     {
         if (GLEXT_blend_equation_separate)
         {
@@ -1095,7 +1095,7 @@ void RenderTarget::cleanupDraw(const RenderStates& states)
     // Restore SFML's default program after a custom shader draw.
     if (states.shader && states.shader->getNativeHandle())
     {
-        RenderStates defaultStates;
+        const RenderStates defaultStates;
         applyShader(m_defaultShader.get(), defaultStates);
     }
 

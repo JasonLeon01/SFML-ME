@@ -195,7 +195,7 @@ bool RenderTextureImplFBO::create(Vector2u size, unsigned int textureId, const C
         }
 #endif
 
-        if (settings.antiAliasingLevel && !(GLEXT_framebuffer_multisample && GLEXT_framebuffer_blit))
+        if (settings.antiAliasingLevel && !GLEXT_framebuffer_multisample_blit)
             return false;
 
         m_sRgb = settings.sRgbCapable && hasSrgbFramebufferSupport();

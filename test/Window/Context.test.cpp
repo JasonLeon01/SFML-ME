@@ -35,13 +35,12 @@ TEST_CASE("[Window] sf::Context", runDisplayTests())
 
     SECTION("OpenGL 2 minimum")
     {
-        const sf::Context context(
-            sf::ContextSettings{/* depthBits */ 0,
-                                /* stencilBits */ 0,
-                                /* antiAliasingLevel */ 0,
-                                /* majorVersion */ 1,
-                                /* minorVersion */ 1},
-            {1, 1});
+        const sf::Context context(sf::ContextSettings{/* depthBits */ 0,
+                                                      /* stencilBits */ 0,
+                                                      /* antiAliasingLevel */ 0,
+                                                      /* majorVersion */ 1,
+                                                      /* minorVersion */ 1},
+                                  {1, 1});
 
         const auto& settings = context.getSettings();
         CHECK(settings.majorVersion >= 2);
