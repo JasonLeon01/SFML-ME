@@ -22,8 +22,6 @@
 //
 ////////////////////////////////////////////////////////////
 
-#include <SFML/Main/MainHarmony.hpp>
-
 #include <SFML/Window/Harmony/InputMethodImpl.hpp>
 #include <SFML/Window/Harmony/NativeApp.hpp>
 #include <SFML/Window/Harmony/NativeAppImpl.hpp>
@@ -32,6 +30,7 @@
 #include <SFML/System/Harmony/ResourceManagerImpl.hpp>
 #include <SFML/System/String.hpp>
 
+#include <SFML/Main/MainHarmony.hpp>
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <array>
 #include <exception>
@@ -502,7 +501,7 @@ void runMain()
     }
 
     sf::priv::Harmony::HostCallbacks callbacks;
-    bool                       destroyed = false;
+    bool                             destroyed = false;
     {
         auto&                 host = sf::priv::Harmony::getHostState();
         const std::lock_guard lock(host.mutex);

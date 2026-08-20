@@ -346,7 +346,7 @@ bool AudioDevice::setDevice(const std::string& name)
 #ifdef SFML_SYSTEM_HARMONY
     const auto previous = selection;
 #endif
-    selection.useNull   = false;
+    selection.useNull = false;
 #ifdef SFML_SYSTEM_HARMONY
     // The only advertised OpenHarmony playback entry is the current system
     // route. Selecting it therefore keeps following the system default rather
@@ -358,16 +358,18 @@ bool AudioDevice::setDevice(const std::string& name)
     selection.selection = name;
 #endif
 
-    if (reinitialize())
-        return true;
+    const bool reinitialized = reinitialize();
 
 #ifdef SFML_SYSTEM_HARMONY
     // OpenHarmony exposes the current system-selected media route. Restore the
     // previous usable selection if reinitializing the requested route fails.
-    selection = previous;
-    static_cast<void>(reinitialize());
+    if (!reinitialized)
+    {
+        selection = previous;
+        static_cast<void>(reinitialize());
+    }
 #endif
-    return false;
+    return reinitialized;
 }
 
 

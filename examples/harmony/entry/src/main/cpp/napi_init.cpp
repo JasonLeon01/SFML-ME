@@ -5,7 +5,6 @@
 ////////////////////////////////////////////////////////////
 
 #include <SFML/Main/MainHarmony.hpp>
-
 #include <array>
 #include <napi/native_api.h>
 

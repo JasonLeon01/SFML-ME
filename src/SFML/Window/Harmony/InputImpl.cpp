@@ -407,9 +407,9 @@ void setVirtualKeyboardVisible(bool visible)
     if (Harmony::setInputMethodVisible(visible) != Harmony::InputMethodVisibilityResult::Unavailable)
         return;
 
-    auto&                      state = Harmony::getHostState();
+    auto&                            state = Harmony::getHostState();
     sf::priv::Harmony::HostCallbacks callbacks;
-    OH_NativeXComponent*       component = nullptr;
+    OH_NativeXComponent*             component = nullptr;
     {
         const std::lock_guard lock(state.mutex);
         callbacks = state.callbacks;

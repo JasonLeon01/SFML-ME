@@ -16,9 +16,9 @@
 #include <SFML/System/FileInputStream.hpp>
 #include <SFML/System/Sleep.hpp>
 
-#include <EGL/egl.h>
 #include <GLES2/gl2.h>
 
+#include <EGL/egl.h>
 #include <SFML/Main.hpp>
 #include <algorithm>
 #include <array>
@@ -984,8 +984,8 @@ bool hasCurrentWindowEglSurface(sf::Vector2u expectedSize)
     if (display == EGL_NO_DISPLAY || surface == EGL_NO_SURFACE)
         return false;
 
-    EGLint width{};
-    EGLint height{};
+    EGLint     width{};
+    EGLint     height{};
     const bool queried = eglQuerySurface(display, surface, EGL_WIDTH, &width) == EGL_TRUE &&
                          eglQuerySurface(display, surface, EGL_HEIGHT, &height) == EGL_TRUE;
     const bool noError = eglGetError() == EGL_SUCCESS;
@@ -1003,8 +1003,8 @@ bool checkSharedResourcesOnCurrentContext(const sf::Image&                  chec
         return false;
 
     constexpr sf::Vector2u samplePixel{1, 1};
-    const sf::Image        textureCopy = checkerTexture.copyToImage();
-    const bool texturePassed = textureCopy.getSize() == checkerboard.getSize() &&
+    const sf::Image        textureCopy   = checkerTexture.copyToImage();
+    const bool             texturePassed = textureCopy.getSize() == checkerboard.getSize() &&
                                checkerboard.getSize().x > samplePixel.x && checkerboard.getSize().y > samplePixel.y &&
                                textureCopy.getPixel(samplePixel) == checkerboard.getPixel(samplePixel);
 
@@ -2409,10 +2409,8 @@ int main()
                 bool passed{};
                 try
                 {
-                    passed = checkSharedResourcesOnCurrentContext(
-                        checkerboard, checkerTexture, shader, diagnostics.shader, renderTexture);
-                }
-                catch (const std::exception& exception)
+                    passed = checkSharedResourcesOnCurrentContext(checkerboard, checkerTexture, shader, diagnostics.shader, renderTexture);
+                } catch (const std::exception& exception)
                 {
                     logError(std::string("surface fallback resource check threw: ") + exception.what());
                 }
@@ -2439,10 +2437,9 @@ int main()
             bool persisted{};
             try
             {
-                persisted = window.setActive() && checkSharedResourcesOnCurrentContext(
-                                                      checkerboard, checkerTexture, shader, diagnostics.shader, renderTexture);
-            }
-            catch (const std::exception& exception)
+                persisted = window.setActive() &&
+                            checkSharedResourcesOnCurrentContext(checkerboard, checkerTexture, shader, diagnostics.shader, renderTexture);
+            } catch (const std::exception& exception)
             {
                 logError(std::string("surface restore resource check threw: ") + exception.what());
             }

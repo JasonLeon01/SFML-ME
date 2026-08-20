@@ -35,7 +35,6 @@
 #include <array>
 #include <deque>
 #include <ostream>
-#include <utility>
 
 #include <cstddef>
 
@@ -59,7 +58,7 @@ public:
 
             if (event.is<Event::MouseMoved>() && previous.is<Event::MouseMoved>())
             {
-                previous = std::move(event);
+                previous = event;
                 return;
             }
 
@@ -68,14 +67,14 @@ public:
                 if (const auto* previousMoved = previous.getIf<Event::TouchMoved>();
                     previousMoved && previousMoved->finger == moved->finger)
                 {
-                    previous = std::move(event);
+                    previous = event;
                     return;
                 }
             }
 
             if (event.is<Event::Resized>() && previous.is<Event::Resized>())
             {
-                previous = std::move(event);
+                previous = event;
                 return;
             }
         }
@@ -102,7 +101,7 @@ public:
             }
         }
 
-        m_events.emplace_back(std::move(event));
+        m_events.emplace_back(event);
     }
 
     [[nodiscard]] std::deque<Event> drain()

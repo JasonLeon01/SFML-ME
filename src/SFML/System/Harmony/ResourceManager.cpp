@@ -88,7 +88,7 @@ public:
             if (resourceManager)
             {
                 registration = nextRegistration();
-                next = std::make_shared<sf::priv::Harmony::ResourceManagerLease>(resourceManager, registration);
+                next         = std::make_shared<sf::priv::Harmony::ResourceManagerLease>(resourceManager, registration);
             }
 
             retired = std::exchange(m_current, std::move(next));

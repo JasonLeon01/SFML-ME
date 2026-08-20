@@ -8,40 +8,40 @@
 
 TEST_CASE("[Window] Harmony fullscreen mode cache")
 {
-    const auto& beforeSurface = sf::priv::Harmony::refreshFullscreenModes({sf::VideoMode({1, 1}, 32)});
-    REQUIRE(beforeSurface.size() == 1);
-    CHECK(beforeSurface.front() == sf::VideoMode({1, 1}, 32));
-    const auto* const beforeSurfaceElement  = &beforeSurface.front();
-    const auto        beforeSurfaceIterator = beforeSurface.cbegin();
+    const auto* const beforeSurface = &sf::priv::Harmony::refreshFullscreenModes({sf::VideoMode({1, 1}, 32)});
+    REQUIRE(beforeSurface->size() == 1);
+    CHECK(beforeSurface->front() == sf::VideoMode({1, 1}, 32));
+    const auto* const beforeSurfaceElement  = &beforeSurface->front();
+    const auto        beforeSurfaceIterator = beforeSurface->cbegin();
 
-    const auto& portrait = sf::priv::Harmony::refreshFullscreenModes({sf::VideoMode({1'920, 2'880}, 32)});
-    CHECK(&portrait != &beforeSurface);
-    REQUIRE(portrait.size() == 1);
-    CHECK(portrait.front() == sf::VideoMode({1'920, 2'880}, 32));
-    const auto* const portraitElement  = &portrait.front();
-    const auto        portraitIterator = portrait.cbegin();
+    const auto* const portrait = &sf::priv::Harmony::refreshFullscreenModes({sf::VideoMode({1'920, 2'880}, 32)});
+    CHECK(portrait != beforeSurface);
+    REQUIRE(portrait->size() == 1);
+    CHECK(portrait->front() == sf::VideoMode({1'920, 2'880}, 32));
+    const auto* const portraitElement  = &portrait->front();
+    const auto        portraitIterator = portrait->cbegin();
 
-    const auto& landscape = sf::priv::Harmony::refreshFullscreenModes({sf::VideoMode({2'880, 1'920}, 32)});
-    CHECK(&landscape != &beforeSurface);
-    CHECK(&landscape != &portrait);
-    REQUIRE(landscape.size() == 1);
-    CHECK(landscape.front() == sf::VideoMode({2'880, 1'920}, 32));
+    const auto* const landscape = &sf::priv::Harmony::refreshFullscreenModes({sf::VideoMode({2'880, 1'920}, 32)});
+    CHECK(landscape != beforeSurface);
+    CHECK(landscape != portrait);
+    REQUIRE(landscape->size() == 1);
+    CHECK(landscape->front() == sf::VideoMode({2'880, 1'920}, 32));
 
     // Later lifecycle snapshots must not mutate or invalidate public data
     // returned by an earlier query.
-    REQUIRE(beforeSurface.size() == 1);
-    CHECK(beforeSurface.front() == sf::VideoMode({1, 1}, 32));
-    CHECK(&beforeSurface.front() == beforeSurfaceElement);
+    REQUIRE(beforeSurface->size() == 1);
+    CHECK(beforeSurface->front() == sf::VideoMode({1, 1}, 32));
+    CHECK(&beforeSurface->front() == beforeSurfaceElement);
     CHECK(*beforeSurfaceIterator == sf::VideoMode({1, 1}, 32));
-    REQUIRE(portrait.size() == 1);
-    CHECK(portrait.front() == sf::VideoMode({1'920, 2'880}, 32));
-    CHECK(&portrait.front() == portraitElement);
+    REQUIRE(portrait->size() == 1);
+    CHECK(portrait->front() == sf::VideoMode({1'920, 2'880}, 32));
+    CHECK(&portrait->front() == portraitElement);
     CHECK(*portraitIterator == sf::VideoMode({1'920, 2'880}, 32));
 
     // Repeated queries of an existing lifecycle state reuse its immutable
     // snapshot rather than allocating another one.
-    const auto& repeatedPortrait = sf::priv::Harmony::refreshFullscreenModes({sf::VideoMode({1'920, 2'880}, 32)});
-    CHECK(&repeatedPortrait == &portrait);
+    const auto* const repeatedPortrait = &sf::priv::Harmony::refreshFullscreenModes({sf::VideoMode({1'920, 2'880}, 32)});
+    CHECK(repeatedPortrait == portrait);
 
     // Concurrent first queries for an equal new value share one process-wide
     // snapshot, which remains valid after the querying threads have exited.
@@ -51,8 +51,7 @@ TEST_CASE("[Window] Harmony fullscreen mode cache")
     for (std::size_t index = 0; index < workers.size(); ++index)
     {
         workers[index] = std::thread(
-            [&, index]
-            {
+            [&, index] {
                 concurrentSnapshots[index] = &sf::priv::Harmony::refreshFullscreenModes({sf::VideoMode({1'234, 567}, 32)});
             });
     }

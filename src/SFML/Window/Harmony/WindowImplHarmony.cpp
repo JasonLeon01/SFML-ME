@@ -42,8 +42,8 @@ WindowImplHarmony::WindowImplHarmony(VideoMode, const String&, std::uint32_t, St
 {
     initialize(nullptr);
 
-    const bool                 fullscreen = state == State::Fullscreen;
-    Harmony::HostState&        host       = Harmony::getHostState();
+    const bool                       fullscreen = state == State::Fullscreen;
+    Harmony::HostState&              host       = Harmony::getHostState();
     sf::priv::Harmony::HostCallbacks callbacks;
     {
         const std::lock_guard lock(host.mutex);
@@ -168,7 +168,7 @@ void WindowImplHarmony::setVisible(bool)
 
 void WindowImplHarmony::setMouseCursorVisible(bool visible)
 {
-    Harmony::HostState&        host = Harmony::getHostState();
+    Harmony::HostState&              host = Harmony::getHostState();
     sf::priv::Harmony::HostCallbacks callbacks;
     {
         const std::lock_guard lock(host.mutex);
@@ -187,7 +187,7 @@ void WindowImplHarmony::setMouseCursorGrabbed(bool)
 
 void WindowImplHarmony::setMouseCursor(const CursorImpl& cursor)
 {
-    Harmony::HostState&        host = Harmony::getHostState();
+    Harmony::HostState&              host = Harmony::getHostState();
     sf::priv::Harmony::HostCallbacks callbacks;
     {
         const std::lock_guard lock(host.mutex);

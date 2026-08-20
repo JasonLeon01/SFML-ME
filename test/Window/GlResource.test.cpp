@@ -23,7 +23,7 @@ struct GlResourceAccessor : sf::GlResource
 
 TEST_CASE("[Window] sf::GlResource::TransientContextLock", runDisplayTests())
 {
-    GlResourceAccessor         resource;
+    const GlResourceAccessor   resource;
     std::optional<sf::Context> context{std::in_place};
 
     {
