@@ -26,7 +26,7 @@ endif()
 # start with an empty list
 set(FIND_SFML_DEPENDENCIES_NOTFOUND)
 
-if(NOT @BUILD_SHARED_LIBS@)
+if(NOT "@BUILD_SHARED_LIBS@")
     if(FIND_SFML_USE_DRM)
         find_dependency(DRM)
         find_dependency(GBM)
