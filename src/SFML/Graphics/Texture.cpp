@@ -60,6 +60,15 @@ std::uint64_t getUniqueId() noexcept
 
     return id.fetch_add(1);
 }
+
+GLenum getUploadPixelFormat([[maybe_unused]] bool sRgb)
+{
+#if defined(SFML_OPENGL_ES)
+    return sRgb ? GLEXT_GL_SRGB_FORMAT : GL_RGBA;
+#else
+    return GL_RGBA;
+#endif
+}
 } // namespace TextureImpl
 } // namespace
 
@@ -335,7 +344,7 @@ bool Texture::resize(Vector2u size, bool sRgb)
                          static_cast<GLsizei>(m_actualSize.x),
                          static_cast<GLsizei>(m_actualSize.y),
                          0,
-                         (m_sRgb ? GLEXT_GL_SRGB_FORMAT : GL_RGBA),
+                         TextureImpl::getUploadPixelFormat(m_sRgb),
                          GL_UNSIGNED_BYTE,
                          nullptr));
     glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, textureWrapParam));
@@ -427,7 +436,7 @@ bool Texture::loadFromImage(const Image& image, bool sRgb, const IntRect& area)
                                     i,
                                     rectangle.size.x,
                                     1,
-                                    (m_sRgb ? GLEXT_GL_SRGB_FORMAT : GL_RGBA),
+                                    TextureImpl::getUploadPixelFormat(m_sRgb),
                                     GL_UNSIGNED_BYTE,
                                     pixels));
             pixels += 4 * size.x;
@@ -587,7 +596,7 @@ void Texture::update(const std::uint8_t* pixels, Vector2u size, Vector2u dest)
                             static_cast<GLint>(dest.y),
                             static_cast<GLsizei>(size.x),
                             static_cast<GLsizei>(size.y),
-                            (m_sRgb ? GLEXT_GL_SRGB_FORMAT : GL_RGBA),
+                            TextureImpl::getUploadPixelFormat(m_sRgb),
                             GL_UNSIGNED_BYTE,
                             pixels));
     glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, m_isSmooth ? GL_LINEAR : GL_NEAREST));
