@@ -252,23 +252,23 @@ private:
     return {cosine, sine, 0.f, 0.f, -sine, cosine, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f};
 }
 
-[[nodiscard]] inline Matrix frustum(float left, float right, float bottom, float top, float near, float far)
+[[nodiscard]] inline Matrix frustum(float left, float right, float bottom, float top, float nearPlane, float farPlane)
 {
-    return {2.f * near / (right - left),
+    return {2.f * nearPlane / (right - left),
             0.f,
             0.f,
             0.f,
             0.f,
-            2.f * near / (top - bottom),
+            2.f * nearPlane / (top - bottom),
             0.f,
             0.f,
             (right + left) / (right - left),
             (top + bottom) / (top - bottom),
-            -(far + near) / (far - near),
+            -(farPlane + nearPlane) / (farPlane - nearPlane),
             -1.f,
             0.f,
             0.f,
-            -(2.f * far * near) / (far - near),
+            -(2.f * farPlane * nearPlane) / (farPlane - nearPlane),
             0.f};
 }
 

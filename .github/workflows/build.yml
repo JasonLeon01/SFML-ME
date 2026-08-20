@@ -30,7 +30,7 @@ jobs:
         - { name: Windows VS2022 x86,             os: windows-2025, flags: -DSFML_USE_MESA3D=ON -GNinja }
         - { name: Windows VS2022 x64,             os: windows-2025, flags: -DSFML_USE_MESA3D=ON -GNinja }
         - { name: Windows VS2022 arm64,           os: windows-2025, flags: -DSFML_USE_MESA3D=OFF -GNinja -DSFML_BUILD_TEST_SUITE=OFF }
-        - { name: Windows VS2022 ClangCL MSBuild, os: windows-2025, flags: -DSFML_USE_MESA3D=ON -T ClangCL } # ninja doesn't support specifying the toolset, so use the ClangCL toolset to test building with MSBuild as well
+        - { name: Windows VS2026 ClangCL MSBuild, os: windows-2025-vs2026, flags: -DSFML_USE_MESA3D=ON -T ClangCL } # ninja doesn't support specifying the toolset, so use the ClangCL toolset to test building with MSBuild as well
         - { name: Windows VS2022 OpenGL ES,       os: windows-2025, flags: -DSFML_USE_MESA3D=ON -DSFML_OPENGL_ES=ON -GNinja }
         - { name: Windows VS2022 Unity,           os: windows-2025, flags: -DSFML_USE_MESA3D=ON -DCMAKE_UNITY_BUILD=ON -GNinja }
         - { name: Windows LLVM/Clang,             os: windows-2025, flags: -DSFML_USE_MESA3D=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -GNinja }
@@ -115,7 +115,7 @@ jobs:
     - name: Get CMake and Ninja
       uses: lukka/get-cmake@latest
       with:
-        cmakeVersion: 3.28
+        cmakeVersion: ${{ contains(matrix.platform.name, 'MSBuild') && '4.2' || '3.28' }} # MSBuild / VS2026 generator requires CMake 4.2 or later
         ninjaVersion: latest
 
     - name: Install Linux Dependencies and Tools

@@ -749,7 +749,7 @@ void DRMContext::createContext(DRMContext* shared, const ContextSettings& settin
     if (toShared != EGL_NO_CONTEXT)
         eglCheck(eglMakeCurrent(m_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));
 
-    const auto create = [&](const ContextSettings& requested)
+    const auto create = [&]([[maybe_unused]] const ContextSettings& requested)
     {
 #if defined(SFML_OPENGL_ES)
         if ((requested.majorVersion >= 3) && (SF_GLAD_EGL_VERSION_1_5 || SF_GLAD_EGL_KHR_create_context))
