@@ -138,7 +138,7 @@ private:
 class HarmonyErrorRedirect
 {
 public:
-    HarmonyErrorRedirect() : previous(sf::err().rdbuf(&stream))
+    HarmonyErrorRedirect() : m_previous(sf::err().rdbuf(&m_stream))
     {
     }
 
@@ -147,10 +147,10 @@ public:
         // Do not override a stream buffer subsequently selected by the user.
         // If ours is still installed, restore SFML's original buffer before
         // this object is destroyed so later static destructors remain safe.
-        if (sf::err().rdbuf() == &stream)
+        if (sf::err().rdbuf() == &m_stream)
         {
-            stream.pubsync();
-            sf::err().rdbuf(previous);
+            m_stream.pubsync();
+            sf::err().rdbuf(m_previous);
         }
     }
 
@@ -158,8 +158,8 @@ public:
     HarmonyErrorRedirect& operator=(const HarmonyErrorRedirect&) = delete;
 
 private:
-    HarmonyLogStream stream;
-    std::streambuf*  previous{};
+    mutable HarmonyLogStream m_stream;
+    std::streambuf*          m_previous{};
 };
 
 
@@ -167,7 +167,7 @@ void installHarmonyErrorStream()
 {
     // Function-local static initialization is thread-safe and redirects only
     // once, so a later XComponent registration cannot replace a user buffer.
-    static HarmonyErrorRedirect redirect;
+    static const HarmonyErrorRedirect redirect;
     (void)redirect;
 }
 
@@ -282,8 +282,8 @@ void callWindowConfiguration(napi_env env, napi_value function, void*, void* dat
         return;
 
     std::array<napi_value, 2> arguments{};
-    napi_get_boolean(env, value->fullscreen, &arguments[0]);
-    napi_get_boolean(env, value->keepScreenOn, &arguments[1]);
+    napi_get_boolean(env, value->fullscreen, arguments.data());
+    napi_get_boolean(env, value->keepScreenOn, arguments.data() + 1);
     callFunction(env, function, arguments.size(), arguments.data());
 }
 
@@ -322,7 +322,7 @@ void releaseJsHostCallbacks()
                      std::exchange(jsHost.requestExit, nullptr)};
     }
 
-    for (const auto function : functions)
+    for (auto* const function : functions)
     {
         if (function)
             napi_release_threadsafe_function(function, napi_tsfn_abort);
@@ -348,7 +348,7 @@ bool installJsHostCallbacks(napi_env env, napi_value object)
         !createThreadsafeFunction(env, object, "configureWindow", callWindowConfiguration, configureWindow) ||
         !createThreadsafeFunction(env, object, "requestExit", callVoid, requestExit))
     {
-        for (const auto function :
+        for (auto* const function :
              {pointerVisible, systemPointer, customPointer, virtualKeyboard, configureWindow, requestExit})
         {
             if (function)
@@ -397,7 +397,7 @@ bool installJsHostCallbacks(napi_env env, napi_value object)
         const std::lock_guard lock(jsHost.mutex);
         if (jsHost.customPointer &&
             napi_call_threadsafe_function(jsHost.customPointer, value.get(), napi_tsfn_nonblocking) == napi_ok)
-            value.release();
+            (void)value.release(); // NOLINT(bugprone-unused-return-value) - The queued callback owns the payload.
     };
     callbacks.setVirtualKeyboardVisible = [](bool visible, void*)
     {
@@ -416,7 +416,7 @@ bool installJsHostCallbacks(napi_env env, napi_value object)
         const std::lock_guard lock(jsHost.mutex);
         if (jsHost.configureWindow &&
             napi_call_threadsafe_function(jsHost.configureWindow, value.get(), napi_tsfn_nonblocking) == napi_ok)
-            value.release();
+            (void)value.release(); // NOLINT(bugprone-unused-return-value) - The queued callback owns the payload.
     };
     callbacks.requestExit = [](void*)
     {
@@ -433,7 +433,7 @@ void releaseHostResources()
 {
     sf::priv::Harmony::cancelHostInitialization();
 
-    sf::priv::Harmony::ResourceManagerRegistration registration;
+    sf::priv::Harmony::ResourceManagerRegistration registration{};
     {
         const std::lock_guard lock(resourceMutex);
         resourceShutdown = true;

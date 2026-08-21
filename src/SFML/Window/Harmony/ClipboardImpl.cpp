@@ -49,12 +49,12 @@ using PlainTextPtr  = std::unique_ptr<OH_UdsPlainText, decltype(&OH_UdsPlainText
 
 String ClipboardImpl::getString()
 {
-    PasteboardPtr pasteboard(OH_Pasteboard_Create(), OH_Pasteboard_Destroy);
+    const PasteboardPtr pasteboard(OH_Pasteboard_Create(), OH_Pasteboard_Destroy);
     if (!pasteboard)
         return {};
 
-    int     status = ERR_INNER_ERROR;
-    DataPtr data(OH_Pasteboard_GetData(pasteboard.get(), &status), OH_UdmfData_Destroy);
+    int           status = ERR_INNER_ERROR;
+    const DataPtr data(OH_Pasteboard_GetData(pasteboard.get(), &status), OH_UdmfData_Destroy);
     if (!data || status != ERR_OK)
     {
         if (status != ERR_PERMISSION_ERROR)
@@ -62,7 +62,7 @@ String ClipboardImpl::getString()
         return {};
     }
 
-    PlainTextPtr plainText(OH_UdsPlainText_Create(), OH_UdsPlainText_Destroy);
+    const PlainTextPtr plainText(OH_UdsPlainText_Create(), OH_UdsPlainText_Destroy);
     if (!plainText || OH_UdmfData_GetPrimaryPlainText(data.get(), plainText.get()) != UDMF_E_OK)
         return {};
 
@@ -70,17 +70,17 @@ String ClipboardImpl::getString()
     if (!content)
         return {};
 
-    const auto end = content + std::char_traits<char>::length(content);
+    const auto* const end = content + std::char_traits<char>::length(content);
     return String::fromUtf8(content, end);
 }
 
 
 void ClipboardImpl::setString(const String& text)
 {
-    PasteboardPtr pasteboard(OH_Pasteboard_Create(), OH_Pasteboard_Destroy);
-    DataPtr       data(OH_UdmfData_Create(), OH_UdmfData_Destroy);
-    RecordPtr     record(OH_UdmfRecord_Create(), OH_UdmfRecord_Destroy);
-    PlainTextPtr  plainText(OH_UdsPlainText_Create(), OH_UdsPlainText_Destroy);
+    const PasteboardPtr pasteboard(OH_Pasteboard_Create(), OH_Pasteboard_Destroy);
+    const DataPtr       data(OH_UdmfData_Create(), OH_UdmfData_Destroy);
+    const RecordPtr     record(OH_UdmfRecord_Create(), OH_UdmfRecord_Destroy);
+    const PlainTextPtr  plainText(OH_UdsPlainText_Create(), OH_UdsPlainText_Destroy);
     if (!pasteboard || !data || !record || !plainText)
     {
         err() << "Failed to allocate Harmony pasteboard data" << std::endl;

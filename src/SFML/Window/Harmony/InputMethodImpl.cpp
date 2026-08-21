@@ -630,7 +630,7 @@ void extendAction(InputMethod_TextEditorProxy* editor, InputMethod_ExtendAction 
 }
 
 
-void getText(InputMethod_TextEditorProxy* editor, std::int32_t number, char16_t text[], std::size_t* length, bool left)
+void getText(InputMethod_TextEditorProxy* editor, std::int32_t number, char16_t* text, std::size_t* length, bool left)
 {
     if (!length)
         return;
@@ -671,13 +671,13 @@ void getText(InputMethod_TextEditorProxy* editor, std::int32_t number, char16_t 
 }
 
 
-void getLeftText(InputMethod_TextEditorProxy* editor, std::int32_t number, char16_t text[], std::size_t* length)
+void getLeftText(InputMethod_TextEditorProxy* editor, std::int32_t number, char16_t* text, std::size_t* length)
 {
     getText(editor, number, text, length, true);
 }
 
 
-void getRightText(InputMethod_TextEditorProxy* editor, std::int32_t number, char16_t text[], std::size_t* length)
+void getRightText(InputMethod_TextEditorProxy* editor, std::int32_t number, char16_t* text, std::size_t* length)
 {
     getText(editor, number, text, length, false);
 }
@@ -690,14 +690,14 @@ std::int32_t getCursorIndex(InputMethod_TextEditorProxy* editor)
 }
 
 
-std::int32_t receivePrivateCommand(InputMethod_TextEditorProxy*, InputMethod_PrivateCommand*[], std::size_t)
+std::int32_t receivePrivateCommand(InputMethod_TextEditorProxy*, InputMethod_PrivateCommand**, std::size_t)
 {
     return IME_ERR_OK;
 }
 
 
 std::int32_t setPreviewText(InputMethod_TextEditorProxy* editor,
-                            const char16_t               text[],
+                            const char16_t*              text,
                             std::size_t                  length,
                             std::int32_t                 start,
                             std::int32_t                 end)

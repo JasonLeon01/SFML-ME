@@ -499,7 +499,7 @@ std::unique_ptr<OpenHarmonyPlaybackDevice> OpenHarmonyPlaybackDevice::create(boo
         // A real-time renderer callback must never wait behind a resource
         // mutation or engine teardown. A missed cycle is emitted as the
         // silence already written above.
-        std::unique_lock lock(*callbackImpl.readingMutex, std::try_to_lock);
+        const std::unique_lock lock(*callbackImpl.readingMutex, std::try_to_lock);
         if (!lock.owns_lock() || !callbackImpl.callbacksEnabled.load(std::memory_order_acquire))
             return 0;
 

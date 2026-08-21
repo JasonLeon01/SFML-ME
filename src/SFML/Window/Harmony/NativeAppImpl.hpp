@@ -55,7 +55,7 @@ using HostInitializationToken = CancelableInitialization::Token;
 struct SurfaceSnapshot
 {
     NativeWindow* window{};
-    Vector2u      size{};
+    Vector2u      size;
     std::uint64_t generation{};
 };
 
@@ -68,9 +68,9 @@ struct HostState
     OH_NativeXComponent* component{};
     OH_NativeXComponent* registeringComponent{};
     NativeWindow*        registeringWindow{};
-    Vector2u             registeringSize{};
+    Vector2u             registeringSize;
     NativeWindow*        window{};
-    Vector2u             size{};
+    Vector2u             size;
     std::uint64_t        surfaceGeneration{};
 
     // A replacement surface can be created before the destroy callback for

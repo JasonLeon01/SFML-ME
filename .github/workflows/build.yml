@@ -97,6 +97,18 @@ jobs:
             arch: arm64-v8a
             api: 33
           type: { name: Debug, flags: -DCMAKE_BUILD_TYPE=Debug -DSFML_FATAL_OPENGL_ERRORS=ON }
+        - platform: { name: OpenHarmony, os: ubuntu-24.04, flags: -GNinja -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake }
+          config:
+            name: arm64-v8a
+            flags: -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_BUILD_TEST_SUITE=OFF -DSFML_BUILD_DOC=OFF -DSFML_HARMONY_DEVICE_FORM=MOBILE -DSFML_USE_SYSTEM_DEPS=OFF
+            arch: arm64-v8a
+          type: { name: Release, flags: -DCMAKE_BUILD_TYPE=Release }
+        - platform: { name: OpenHarmony, os: ubuntu-24.04, flags: -GNinja -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake }
+          config:
+            name: arm64-v8a
+            flags: -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_BUILD_TEST_SUITE=OFF -DSFML_BUILD_DOC=OFF -DSFML_HARMONY_DEVICE_FORM=MOBILE -DSFML_USE_SYSTEM_DEPS=OFF
+            arch: arm64-v8a
+          type: { name: Debug, flags: -DCMAKE_BUILD_TYPE=Debug -DSFML_FATAL_OPENGL_ERRORS=ON }
         exclude: # Shared libraries are not supported on iOS
         - platform: { name: iOS Xcode }
           config: { name: Shared }
@@ -118,8 +130,24 @@ jobs:
         cmakeVersion: ${{ contains(matrix.platform.name, 'MSBuild') && '4.2' || '3.28' }} # MSBuild / VS2026 generator requires CMake 4.2 or later
         ninjaVersion: latest
 
+    - name: Setup OpenHarmony SDK
+      if: matrix.platform.name == 'OpenHarmony'
+      id: ohos-sdk
+      uses: openharmony-rs/setup-ohos-sdk@eb82b94ef522b07269679195c2512f22e922ef3b # v1.0.0
+      with:
+        version: '6.1'
+        components: native
+        cache: true
+
+    - name: Validate OpenHarmony SDK
+      if: matrix.platform.name == 'OpenHarmony'
+      run: |
+        test "${{ steps.ohos-sdk.outputs.api-version }}" -ge 21
+        test -f "$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake"
+        echo "OpenHarmony SDK ${{ steps.ohos-sdk.outputs.sdk-version }} (API ${{ steps.ohos-sdk.outputs.api-version }})"
+
     - name: Install Linux Dependencies and Tools
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && matrix.platform.name != 'OpenHarmony'
       run: |
         CLANG_VERSION=$(clang++ --version | sed -n 's/.*version \([0-9]\+\)\..*/\1/p')
         echo "CLANG_VERSION=$CLANG_VERSION" >> $GITHUB_ENV
@@ -209,6 +237,7 @@ jobs:
       run: examples/android/gradlew ${{ matrix.type.name == 'Debug' && 'assembleDebug' || 'assembleRelease' }} -p examples/android -P ARCH_ABI=${{matrix.config.arch}} -P MIN_SDK=${{matrix.config.api}}
 
     - name: Prepare Test
+      if: matrix.platform.name != 'OpenHarmony'
       run: |
         set -e
         # Start up Xvfb and fluxbox to host display tests
@@ -229,7 +258,7 @@ jobs:
         cmake --build build --target runtests --config ${{ matrix.type.name == 'Debug' && 'Debug' || 'Release' }}
 
     - name: Test (Linux/macOS/MinGW)
-      if: (runner.os != 'Windows' || contains(matrix.platform.name, 'MinGW')) && !contains(matrix.platform.name, 'iOS') && !contains(matrix.platform.name, 'Android')
+      if: (runner.os != 'Windows' || contains(matrix.platform.name, 'MinGW')) && !contains(matrix.platform.name, 'iOS') && !contains(matrix.platform.name, 'Android') && matrix.platform.name != 'OpenHarmony'
       run: |
         ctest --test-dir build --output-on-failure -C ${{ matrix.type.name == 'Debug' && 'Debug' || 'Release' }} --repeat until-pass:3
         # Run gcovr to extract coverage information from the test run
@@ -239,7 +268,7 @@ jobs:
         ls build/
 
     - name: Upload Coverage Report to Coveralls
-      if: matrix.type.name == 'Debug' && github.repository == 'SFML/SFML' && !contains(matrix.platform.name, 'iOS') && !contains(matrix.platform.name, 'Android')  && !contains(matrix.platform.name, 'arm64') # Disable upload in forks
+      if: matrix.type.name == 'Debug' && github.repository == 'SFML/SFML' && !contains(matrix.platform.name, 'iOS') && !contains(matrix.platform.name, 'Android') && matrix.platform.name != 'OpenHarmony' && !contains(matrix.platform.name, 'arm64') # Disable upload in forks
       uses: coverallsapp/github-action@v2
       with:
         file: ./build/coverage.out
@@ -249,16 +278,38 @@ jobs:
         base-path: ${{ github.workspace }}
 
     - name: Test Install Interface (Package path)
-      if: matrix.platform.name != 'Android'
+      if: matrix.platform.name != 'Android' && matrix.platform.name != 'OpenHarmony'
       run: |
         cmake -S test/install -B test/install/build -DCMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/build/install -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_BUILD_TYPE=${{ matrix.type.name == 'Debug' && 'Debug' || 'Release' }} ${{matrix.platform.flags}} ${{matrix.config.flags}} ${{matrix.type.flags}} -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH
         cmake --build test/install/build --config ${{ matrix.type.name == 'Debug' && 'Debug' || 'Release' }}
 
     - name: Test Install Interface (Config path)
-      if: matrix.platform.name != 'Android' && !contains(matrix.config.name, 'Frameworks')
+      if: matrix.platform.name != 'Android' && matrix.platform.name != 'OpenHarmony' && !contains(matrix.config.name, 'Frameworks')
       run: |
         cmake -S test/install -B test/install/build -DSFML_DIR=$GITHUB_WORKSPACE/build/install/lib/cmake/SFML -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_BUILD_TYPE=${{ matrix.type.name == 'Debug' && 'Debug' || 'Release' }} ${{matrix.platform.flags}} ${{matrix.config.flags}} ${{matrix.type.flags}} --fresh
         cmake --build test/install/build --config ${{ matrix.type.name == 'Debug' && 'Debug' || 'Release' }}
+
+    - name: Test OpenHarmony Install Interface
+      if: matrix.platform.name == 'OpenHarmony'
+      run: |
+        cmake -S test/install -B test/install/build -DSFML_DIR=$GITHUB_WORKSPACE/build/install/lib/${{ matrix.config.arch }}/cmake/SFML -DSFML_STATIC_LIBRARIES=ON -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_BUILD_TYPE=${{ matrix.type.name }} ${{matrix.platform.flags}} ${{matrix.config.flags}} ${{matrix.type.flags}} -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH
+        cmake --build test/install/build --config ${{ matrix.type.name }}
+
+    - name: Build OpenHarmony Native Example
+      if: matrix.platform.name == 'OpenHarmony'
+      run: |
+        cmake -S examples/harmony/entry/src/main/cpp -B build/ohos-example -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_BUILD_TYPE=${{ matrix.type.name }} ${{matrix.platform.flags}} ${{matrix.config.flags}} ${{matrix.type.flags}}
+        cmake --build build/ohos-example --target entry --config ${{ matrix.type.name }}
+
+    - name: Verify OpenHarmony ABI
+      if: matrix.platform.name == 'OpenHarmony'
+      run: |
+        ENTRY_LIBRARY="$GITHUB_WORKSPACE/build/ohos-example/libentry.so"
+        test -f "$ENTRY_LIBRARY"
+        file "$ENTRY_LIBRARY"
+        file "$ENTRY_LIBRARY" | grep -Eq 'ELF 64-bit.*ARM aarch64'
+        readelf -h "$ENTRY_LIBRARY"
+        readelf -h "$ENTRY_LIBRARY" | grep -Eq 'Machine:[[:space:]]+AArch64'
 
   coverage:
     name: Finalize Coverage Upload

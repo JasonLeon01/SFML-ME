@@ -251,8 +251,8 @@ EglContextHarmony::EglContextHarmony(EglContextHarmony* shared, const ContextSet
     if (!EglContextHarmonyImpl::ensureInit())
         return;
 
-    ContextSettings effectiveSettings = EglContextHarmonyImpl::normalizeSettings(settings);
-    m_display                         = EglContextHarmonyImpl::getInitializedDisplay();
+    const ContextSettings effectiveSettings = EglContextHarmonyImpl::normalizeSettings(settings);
+    m_display                               = EglContextHarmonyImpl::getInitializedDisplay();
     m_config = getBestConfig(m_display, VideoMode::getDesktopMode().bitsPerPixel, effectiveSettings, EGL_PBUFFER_BIT);
 
     if (!m_config)

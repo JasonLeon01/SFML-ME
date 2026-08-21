@@ -68,7 +68,7 @@ bool isSupportedDevice()
 
 void queueEvent(sf::priv::Harmony::HostState& state, sf::Event event)
 {
-    state.events.push(std::move(event));
+    state.events.push(event);
 }
 
 
@@ -179,8 +179,8 @@ void applySurface(sf::priv::Harmony::HostState& state,
 
 void updateSurface(OH_NativeXComponent* component, void* window, SurfaceAction action)
 {
-    auto&            state = sf::priv::Harmony::getHostState();
-    std::unique_lock lock(state.mutex);
+    auto&                  state = sf::priv::Harmony::getHostState();
+    const std::unique_lock lock(state.mutex);
 
     if (state.destroyed || (state.component != component && state.registeringComponent != component) || !window)
         return;
@@ -507,7 +507,7 @@ void processKey(OH_NativeXComponent* component, OH_NativeXComponent_KeyCode code
     else if (!pressed)
         queueEvent(state, sf::Event::KeyReleased{key, scancode, alt, control, shift, system});
 
-    if (emitPressed && unicode && unicode <= 0x10FFFF && !(unicode >= 0xD800 && unicode <= 0xDFFF))
+    if (emitPressed && unicode && unicode <= 0x10FFFF && (unicode < 0xD800 || unicode > 0xDFFF))
         queueEvent(state, sf::Event::TextEntered{unicode});
 }
 
@@ -589,7 +589,7 @@ void enqueueEvent(Event event)
     auto&                 state = getHostState();
     const std::lock_guard lock(state.mutex);
     if (!state.destroyed)
-        queueEvent(state, std::move(event));
+        queueEvent(state, event);
 }
 
 
@@ -616,7 +616,7 @@ void submitTextEdit(std::size_t backwardDeletions, std::size_t forwardDeletions,
 
     for (const char32_t unicode : insertedText)
     {
-        if (unicode && unicode <= 0x10FFFF && !(unicode >= 0xD800 && unicode <= 0xDFFF))
+        if (unicode && unicode <= 0x10FFFF && (unicode < 0xD800 || unicode > 0xDFFF))
             queueEvent(state, Event::TextEntered{unicode});
     }
 }
@@ -643,8 +643,8 @@ void releaseWindow()
 
 void setMainEntry(void (*entry)())
 {
-    auto&            state = getHostState();
-    std::unique_lock lock(state.mutex);
+    auto&                  state = getHostState();
+    const std::unique_lock lock(state.mutex);
     state.mainEntry = entry;
     maybeStartMain(state);
 }
@@ -678,8 +678,8 @@ bool authorizeInputMethodAttach(HostInitializationToken token)
 
 bool commitHostInitialization(HostInitializationToken token)
 {
-    auto&            state = getHostState();
-    std::unique_lock lock(state.mutex);
+    auto&                  state = getHostState();
+    const std::unique_lock lock(state.mutex);
     if (state.destroyed || !state.hostInitialization.commit(token))
         return false;
 
@@ -1066,7 +1066,7 @@ bool registerNativeXComponent(void* componentPointer)
         return false;
     }
 
-    std::unique_lock lock(state.mutex);
+    const std::unique_lock lock(state.mutex);
     if (state.registeringComponent != component)
         return false;
 

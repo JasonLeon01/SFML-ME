@@ -208,15 +208,15 @@ String getDescription(Keyboard::Scancode code)
     if (code >= Keyboard::Scan::A && code <= Keyboard::Scan::Z)
     {
         const char character = static_cast<char>('A' + static_cast<int>(code) - static_cast<int>(Keyboard::Scan::A));
-        return String(character);
+        return {character};
     }
     if (code >= Keyboard::Scan::Num1 && code <= Keyboard::Scan::Num9)
     {
         const char character = static_cast<char>('1' + static_cast<int>(code) - static_cast<int>(Keyboard::Scan::Num1));
-        return String(character);
+        return {character};
     }
     if (code >= Keyboard::Scan::F1 && code <= Keyboard::Scan::F24)
-        return String("F" + std::to_string(static_cast<int>(code) - static_cast<int>(Keyboard::Scan::F1) + 1));
+        return {"F" + std::to_string(static_cast<int>(code) - static_cast<int>(Keyboard::Scan::F1) + 1)};
     switch (code)
     {
         case Keyboard::Scan::Num0:

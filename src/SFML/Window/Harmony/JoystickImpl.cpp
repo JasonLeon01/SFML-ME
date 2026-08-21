@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <arkui/native_key_event.h>
 #include <array>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <ostream>
@@ -188,9 +189,8 @@ unsigned int                              availableButtonCount{};
 
 std::string takeString(char* value)
 {
-    std::string result = value ? value : "";
-    std::free(value);
-    return result;
+    const std::unique_ptr<char, decltype(&std::free)> owned(value, &std::free);
+    return owned ? owned.get() : "";
 }
 
 
