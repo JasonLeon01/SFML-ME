@@ -34,6 +34,7 @@
 #include <SFML/Graphics/VertexBuffer.hpp>
 
 #include <SFML/Window/Context.hpp>
+#include <SFML/Window/GlResource.hpp>
 
 #include <SFML/System/EnumArray.hpp>
 #include <SFML/System/Err.hpp>
@@ -94,6 +95,202 @@ bool isActive(std::uint64_t id)
     const auto it = getContextRenderTargetMap().find(sf::Context::getActiveContextId());
     return (it != getContextRenderTargetMap().end()) && (it->second == id);
 }
+
+#ifdef SFML_SYSTEM_HARMONY
+class HarmonyVertexArrayRegistry : private sf::GlResource
+{
+public:
+    struct SavedBinding
+    {
+        GLuint object{};
+        void (*bindVertexArray)(GLuint){};
+    };
+
+    static bool bind(std::uint64_t renderTargetId, const std::shared_ptr<void>& renderTargetLifetime)
+    {
+        const std::uint64_t contextId = sf::Context::getActiveContextId();
+        if (!contextId || !renderTargetId || !renderTargetLifetime)
+            return false;
+
+#ifdef SFML_OPENGL_ES
+        // ES 2 permits client vertex arrays unless OES_vertex_array_object is
+        // advertised. ES 3 and the OES extension both require us to bind a
+        // real VAO before setting attribute pointers.
+        if (!SF_GLAD_GL_ES_VERSION_2_0)
+            return false;
+        if (!SF_GLAD_GL_ES_VERSION_3_0 && !SF_GLAD_GL_OES_vertex_array_object)
+            return true;
+#endif
+
+        std::shared_ptr<VertexArrayObject> vertexArray;
+        bool                               created{};
+        {
+            const std::lock_guard lock(getMutex());
+            auto&                 entries = getContextEntries();
+            auto&                 targets = entries[contextId];
+
+            // The usual path needs only a lookup. Cleanup is performed on a
+            // miss so repeated draws do not grow with historical target count.
+            if (const auto targetIt = targets.find(renderTargetId); targetIt != targets.end())
+            {
+                vertexArray = targetIt->second.lock();
+                if (vertexArray && vertexArray->renderTargetLifetime.expired())
+                    vertexArray.reset();
+            }
+
+            if (!vertexArray)
+            {
+                // A context owns the strong references needed for safe GL
+                // destruction. Retire records whose moved/destroyed target
+                // lifetime has ended while that same context is current.
+                for (auto targetIt = targets.begin(); targetIt != targets.end();)
+                {
+                    const auto staleVertexArray = targetIt->second.lock();
+                    if (!staleVertexArray || staleVertexArray->renderTargetLifetime.expired())
+                    {
+                        if (staleVertexArray)
+                            unregisterUnsharedGlObject(staleVertexArray);
+                        targetIt = targets.erase(targetIt);
+                    }
+                    else
+                        ++targetIt;
+                }
+
+                const FunctionTable functions = loadFunctions();
+                if (!functions)
+                    return false;
+
+                vertexArray = std::make_shared<VertexArrayObject>(functions, renderTargetLifetime);
+                vertexArray->functions.genVertexArrays(1, &vertexArray->object);
+                if (!vertexArray->object)
+                    return false;
+
+                targets[renderTargetId] = vertexArray;
+                registerUnsharedGlObject(vertexArray);
+                created = true;
+            }
+        }
+
+        vertexArray->functions.bindVertexArray(vertexArray->object);
+        if (created)
+        {
+            glCheck(glEnableVertexAttribArray(positionAttributeIndex));
+            glCheck(glEnableVertexAttribArray(colorAttributeIndex));
+            glCheck(glEnableVertexAttribArray(texCoordAttributeIndex));
+        }
+        return true;
+    }
+
+    static bool saveBinding(SavedBinding& savedBinding)
+    {
+        savedBinding = {};
+        if (!sf::Context::getActiveContextId())
+            return false;
+
+#ifdef SFML_OPENGL_ES
+        if (!SF_GLAD_GL_ES_VERSION_2_0)
+            return false;
+        if (!SF_GLAD_GL_ES_VERSION_3_0 && !SF_GLAD_GL_OES_vertex_array_object)
+            return true;
+#endif
+
+        const FunctionTable functions = loadFunctions();
+        if (!functions)
+            return false;
+
+        GLint object{};
+#if defined(SFML_OPENGL_ES)
+        glCheck(glGetIntegerv(SF_GLAD_GL_ES_VERSION_3_0 ? GL_VERTEX_ARRAY_BINDING : GL_VERTEX_ARRAY_BINDING_OES, &object));
+#else
+        glCheck(glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &object));
+#endif
+        savedBinding.object          = static_cast<GLuint>(object);
+        savedBinding.bindVertexArray = functions.bindVertexArray;
+        return true;
+    }
+
+    static void restoreBinding(const SavedBinding& savedBinding)
+    {
+        if (savedBinding.bindVertexArray)
+            savedBinding.bindVertexArray(savedBinding.object);
+    }
+
+private:
+    using GenVertexArrays    = void (*)(GLsizei, GLuint*);
+    using BindVertexArray    = void (*)(GLuint);
+    using DeleteVertexArrays = void (*)(GLsizei, const GLuint*);
+
+    struct FunctionTable
+    {
+        explicit operator bool() const
+        {
+            return genVertexArrays && bindVertexArray && deleteVertexArrays;
+        }
+
+        GenVertexArrays    genVertexArrays{};
+        BindVertexArray    bindVertexArray{};
+        DeleteVertexArrays deleteVertexArrays{};
+    };
+
+    struct VertexArrayObject
+    {
+        VertexArrayObject(FunctionTable functionTable, const std::shared_ptr<void>& targetLifetime) :
+            functions(functionTable),
+            renderTargetLifetime(targetLifetime)
+        {
+        }
+
+        ~VertexArrayObject()
+        {
+            if (object)
+                functions.deleteVertexArrays(1, &object);
+        }
+
+        FunctionTable       functions;
+        std::weak_ptr<void> renderTargetLifetime;
+        GLuint              object{};
+    };
+
+    static FunctionTable loadFunctions()
+    {
+        FunctionTable functions;
+
+#ifdef SFML_OPENGL_ES
+        if (SF_GLAD_GL_ES_VERSION_3_0)
+#endif
+        {
+            functions = {reinterpret_cast<GenVertexArrays>(sf::Context::getFunction("glGenVertexArrays")),
+                         reinterpret_cast<BindVertexArray>(sf::Context::getFunction("glBindVertexArray")),
+                         reinterpret_cast<DeleteVertexArrays>(sf::Context::getFunction("glDeleteVertexArrays"))};
+        }
+
+#ifdef SFML_OPENGL_ES
+        if (!functions && SF_GLAD_GL_OES_vertex_array_object)
+        {
+            functions = {reinterpret_cast<GenVertexArrays>(sf::Context::getFunction("glGenVertexArraysOES")),
+                         reinterpret_cast<BindVertexArray>(sf::Context::getFunction("glBindVertexArrayOES")),
+                         reinterpret_cast<DeleteVertexArrays>(sf::Context::getFunction("glDeleteVertexArraysOES"))};
+        }
+#endif
+
+        return functions;
+    }
+
+    using TargetEntries = std::unordered_map<std::uint64_t, std::weak_ptr<VertexArrayObject>>;
+
+    static std::unordered_map<std::uint64_t, TargetEntries>& getContextEntries()
+    {
+        static std::unordered_map<std::uint64_t, TargetEntries> contextEntries;
+        return contextEntries;
+    }
+
+    static std::mutex& getMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
+};
+#endif
 
 // Convert an sf::BlendMode::Factor constant to the corresponding OpenGL constant.
 std::uint32_t factorToGlConstant(sf::BlendMode::Factor blendFactor)
@@ -223,6 +420,9 @@ struct RenderTarget::GLStatesStack
 
     struct State
     {
+#ifdef SFML_SYSTEM_HARMONY
+        RenderTargetImpl::HarmonyVertexArrayRegistry::SavedBinding vertexArray;
+#endif
         GLint                          program{};
         GLint                          activeTexture{};
         std::vector<GLint>             textureBindings;
@@ -439,9 +639,27 @@ void RenderTarget::draw(const Vertex* vertices, std::size_t vertexCount, Primiti
     if (!vertices || (vertexCount == 0))
         return;
 
+#ifdef SFML_SYSTEM_HARMONY
+    // Harmony desktop contexts and the ES 3 emulator do not guarantee client
+    // vertex arrays. Stream transient SFML geometry through a real VBO so the
+    // same programmable path works for both graphics API selections.
+    if (!m_streamingVertexBuffer)
+        m_streamingVertexBuffer = std::make_unique<VertexBuffer>(type, VertexBuffer::Usage::Stream);
+
+    m_streamingVertexBuffer->setPrimitiveType(type);
+    if ((!m_streamingVertexBuffer->getNativeHandle() && !m_streamingVertexBuffer->create(vertexCount)) ||
+        !m_streamingVertexBuffer->update(vertices, vertexCount, 0))
+    {
+        err() << "Failed to stream Harmony render target vertices" << std::endl;
+        return;
+    }
+
+    draw(*m_streamingVertexBuffer, 0, vertexCount, states);
+#else
     if (RenderTargetImpl::isActive(m_id) || setActive(true))
     {
-        setupDraw(states);
+        if (!setupDraw(states))
+            return;
 
         glCheck(glBindBuffer(GL_ARRAY_BUFFER, 0));
 
@@ -468,6 +686,7 @@ void RenderTarget::draw(const Vertex* vertices, std::size_t vertexCount, Primiti
         drawPrimitives(type, 0, vertexCount);
         cleanupDraw(states);
     }
+#endif
 }
 
 
@@ -501,7 +720,8 @@ void RenderTarget::draw(const VertexBuffer& vertexBuffer, std::size_t firstVerte
 
     if (RenderTargetImpl::isActive(m_id) || setActive(true))
     {
-        setupDraw(states);
+        if (!setupDraw(states))
+            return;
 
         // Bind vertex buffer
         VertexBuffer::bind(&vertexBuffer);
@@ -603,6 +823,15 @@ void RenderTarget::pushGLStates()
 
         GLStatesStack::State state;
 
+#ifdef SFML_SYSTEM_HARMONY
+        priv::ensureExtensionsInit();
+        if (!RenderTargetImpl::HarmonyVertexArrayRegistry::saveBinding(state.vertexArray))
+        {
+            err() << "Failed to save the current Harmony vertex array binding" << std::endl;
+            return;
+        }
+#endif
+
         glCheck(glGetIntegerv(GL_CURRENT_PROGRAM, &state.program));
         glCheck(glGetIntegerv(GL_ACTIVE_TEXTURE, &state.activeTexture));
 
@@ -700,6 +929,10 @@ void RenderTarget::popGLStates()
         }
         glCheck(glActiveTexture(static_cast<GLenum>(state.activeTexture)));
 
+#ifdef SFML_SYSTEM_HARMONY
+        RenderTargetImpl::HarmonyVertexArrayRegistry::restoreBinding(state.vertexArray);
+#endif
+
         for (GLuint i = 0; i < state.attributes.size(); ++i)
         {
             const auto& attribute = state.attributes[i];
@@ -795,6 +1028,14 @@ void RenderTarget::resetGLStates()
         // Make sure that extensions are initialized
         priv::ensureExtensionsInit();
 
+#ifdef SFML_SYSTEM_HARMONY
+        if (!RenderTargetImpl::HarmonyVertexArrayRegistry::bind(m_id, m_harmonyVertexArrayLifetime))
+        {
+            err() << "Failed to bind the Harmony render target vertex array" << std::endl;
+            return;
+        }
+#endif
+
         // Make sure that the texture unit which is active is the number 0
         glCheck(glActiveTexture(GL_TEXTURE0));
 
@@ -846,6 +1087,9 @@ void RenderTarget::initialize()
     // Generate a unique ID for this RenderTarget to track
     // whether it is active within a specific context.
     m_id = RenderTargetImpl::getUniqueId();
+#ifdef SFML_SYSTEM_HARMONY
+    m_harmonyVertexArrayLifetime = std::make_shared<int>();
+#endif
 
     if (!setActive(true))
         throw Exception("Failed to activate render target while creating its default shader");
@@ -1016,7 +1260,7 @@ void RenderTarget::applyShader(const Shader* shader, const RenderStates& states)
 
 
 ////////////////////////////////////////////////////////////
-void RenderTarget::setupDraw(const RenderStates& states)
+bool RenderTarget::setupDraw(const RenderStates& states)
 {
     // GL_FRAMEBUFFER_SRGB is not available on OpenGL ES
     // If a framebuffer supports sRGB, it will always be enabled on OpenGL ES
@@ -1034,7 +1278,20 @@ void RenderTarget::setupDraw(const RenderStates& states)
 
     // First set the persistent OpenGL states if it's the very first call
     if (!m_cache.glStatesSet)
+    {
         resetGLStates();
+
+        if (!m_cache.glStatesSet)
+            return false;
+    }
+
+#ifdef SFML_SYSTEM_HARMONY
+    if (!RenderTargetImpl::HarmonyVertexArrayRegistry::bind(m_id, m_harmonyVertexArrayLifetime))
+    {
+        err() << "Failed to bind the Harmony render target vertex array" << std::endl;
+        return false;
+    }
+#endif
 
     // Apply the view
     if (!m_cache.enable || m_cache.viewChanged)
@@ -1073,6 +1330,7 @@ void RenderTarget::setupDraw(const RenderStates& states)
     // Bind a valid custom shader, or the target's own default shader.
     const bool customShader = states.shader && states.shader->getNativeHandle();
     applyShader(customShader ? states.shader : m_defaultShader.get(), states);
+    return true;
 }
 
 

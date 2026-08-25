@@ -185,6 +185,8 @@ void MiniaudioUtils::SoundBase::initialize(ma_sound_end_proc endCallback)
         return;
     }
 
+    ma_node_set_state(&effectNode, ma_node_state_stopped);
+
     effectNode.impl         = this;
     effectNode.channelCount = nodeChannelCount;
 
@@ -192,6 +194,9 @@ void MiniaudioUtils::SoundBase::initialize(ma_sound_end_proc endCallback)
     connectEffect(bool{effectProcessor});
 
     applySettings(sound, savedSettings);
+
+    if (savedSettings.playing)
+        ma_node_set_state(&effectNode, ma_node_state_started);
 }
 
 

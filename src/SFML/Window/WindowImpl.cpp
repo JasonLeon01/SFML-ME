@@ -136,7 +136,7 @@ std::unique_ptr<WindowImpl> WindowImpl::create(
             err() << "Creating two fullscreen windows is not allowed, switching to windowed mode" << std::endl;
             state = State::Windowed;
         }
-#if defined(SFML_SYSTEM_HARMONY)
+#if defined(SFML_HARMONY_MOBILE)
         // The XComponent owns the mobile surface dimensions, so the requested
         // mode is ignored instead of being compared with a transient size.
 #else
@@ -153,7 +153,7 @@ std::unique_ptr<WindowImpl> WindowImpl::create(
     }
 
     // Check validity of style according to the underlying platform
-#if defined(SFML_SYSTEM_IOS) || defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY)
+#if defined(SFML_SYSTEM_IOS) || defined(SFML_SYSTEM_ANDROID) || defined(SFML_HARMONY_MOBILE)
     if (state == State::Fullscreen)
         style &= ~static_cast<std::uint32_t>(Style::Titlebar);
     else

@@ -70,14 +70,12 @@
 
 #elif defined(__OHOS__)
 
-// OpenHarmony/HarmonyOS. The mobile profile is the only profile
-// implemented by this branch; 2-in-1 support is reserved for later.
+// OpenHarmony/HarmonyOS. CMake propagates the selected device form through
+// SFML's public targets; standalone header users retain the mobile default.
 #define SFML_SYSTEM_HARMONY
 
 #if defined(SFML_HARMONY_MOBILE) && defined(SFML_HARMONY_2IN1)
 #error SFML_HARMONY_MOBILE and SFML_HARMONY_2IN1 cannot be enabled together
-#elif defined(SFML_HARMONY_2IN1)
-#error SFML_HARMONY_2IN1 is reserved for a future backend and is not implemented
 #elif !defined(SFML_HARMONY_MOBILE) && !defined(SFML_HARMONY_2IN1)
 #define SFML_HARMONY_MOBILE
 #endif

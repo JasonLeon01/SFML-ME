@@ -500,7 +500,8 @@ function(sfml_export_targets)
     foreach(module ${SFML_ADD_LIBRARY_MODULES})
         install(EXPORT SFML${module}${config_name}Targets
                 FILE SFML${module}${config_name}Targets.cmake
-                DESTINATION ${config_package_location})
+                DESTINATION ${config_package_location}
+                COMPONENT devel)
     endforeach()
 
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/SFMLConfig.cmake"

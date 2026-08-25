@@ -83,6 +83,13 @@ sfml_add_library(System
                  SOURCES ${SRC} ${PLATFORM_SRC}
                  DEPENDENCIES "Dependencies.cmake.in")
 
+# Config.hpp uses these mutually exclusive macros to expose the selected
+# Harmony device form. PUBLIC keeps installed targets and their consumers on
+# the same ABI/backend contract as the SFML libraries they link against.
+if(SFML_OS_HARMONY)
+    target_compile_definitions(sfml-system PUBLIC "SFML_HARMONY_${SFML_HARMONY_DEVICE_FORM}")
+endif()
+
 # cpp-unicodelib sources
 target_include_directories(sfml-system SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/cpp-unicodelib")
 

@@ -192,6 +192,7 @@ private:
     EGLConfig     m_config{};                        //!< The internal EGL config
     EGLSurface    m_fallbackSurface{EGL_NO_SURFACE}; //!< Persistent 1x1 pbuffer used while XComponent has no surface
     std::uint64_t m_surfaceGeneration{};             //!< Last XComponent surface generation
+    bool          m_surfacelessContext{};            //!< Whether EGL_KHR_surfaceless_context is the fallback target
     bool          m_harmonyWindowContext{};          //!< Whether this context targets the XComponent
     bool          m_requestSrgb{};                   //!< Whether the EGL surface should use the sRGB colorspace
     bool          m_verticalSyncEnabled{};           //!< Last requested swap interval for replacement surfaces

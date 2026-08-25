@@ -11249,6 +11249,8 @@ struct ma_sound
     float* pProcessingCache;            /* Will be null if pDataSource is null. */
     ma_uint32 processingCacheFramesRemaining;
     ma_uint32 processingCacheCap;
+    ma_uint32 resamplerDrainFramesRemaining;
+    ma_bool8 isDataSourceAtEndPending;
     ma_bool8 ownsDataSource;    
 
     /*
@@ -11463,6 +11465,7 @@ MA_API void ma_sound_set_looping(ma_sound* pSound, ma_bool32 isLooping);
 MA_API ma_bool32 ma_sound_is_looping(const ma_sound* pSound);
 MA_API ma_bool32 ma_sound_at_end(const ma_sound* pSound);
 MA_API ma_result ma_sound_seek_to_pcm_frame(ma_sound* pSound, ma_uint64 frameIndex); /* Just a wrapper around ma_data_source_seek_to_pcm_frame(). */
+MA_API ma_result ma_sound_seek_to_pcm_frame_if_no_pending_seek(ma_sound* pSound, ma_uint64 frameIndex);
 MA_API ma_result ma_sound_seek_to_second(ma_sound* pSound, float seekPointInSeconds); /* Abstraction to ma_sound_seek_to_pcm_frame() */
 MA_API ma_result ma_sound_get_data_format(const ma_sound* pSound, ma_format* pFormat, ma_uint32* pChannels, ma_uint32* pSampleRate, ma_channel* pChannelMap, size_t channelMapCap);
 MA_API ma_result ma_sound_get_cursor_in_pcm_frames(const ma_sound* pSound, ma_uint64* pCursor);
@@ -74194,6 +74197,7 @@ static ma_result ma_node_input_bus_read_pcm_frames(ma_node* pInputNode, ma_node_
     ma_node_output_bus* pFirst;
     ma_uint32 inputChannels;
     ma_bool32 doesOutputBufferHaveContent = MA_FALSE;
+    ma_uint32 maximumFramesProcessed = 0;
 
     /*
     This will be called from the audio thread which means we can't be doing any locking. Basically,
@@ -74305,6 +74309,7 @@ static ma_result ma_node_input_bus_read_pcm_frames(ma_node* pInputNode, ma_node_
 
             if (isSilentOutput == MA_FALSE) {
                 doesOutputBufferHaveContent = MA_TRUE;
+                maximumFramesProcessed = ma_max(maximumFramesProcessed, framesProcessed);
             }
         } else {
             /* Seek. */
@@ -74317,8 +74322,22 @@ static ma_result ma_node_input_bus_read_pcm_frames(ma_node* pInputNode, ma_node_
         ma_silence_pcm_frames(pFramesOut, frameCount, ma_format_f32, inputChannels);
     }
 
-    /* In this path we always "process" the entire amount. */
-    *pFramesRead = frameCount;
+    /*
+    Nodes that explicitly accept NULL input need to distinguish an attached source that produced
+    no frames from a source that produced a silent frame. Other nodes retain the full frame count
+    so graph timing and endpoint mixing continue to advance through silence.
+    */
+    if ((((ma_node_base*)pInputNode)->vtable->flags &
+         (MA_NODE_FLAG_CONTINUOUS_PROCESSING | MA_NODE_FLAG_ALLOW_NULL_INPUT)) ==
+        (MA_NODE_FLAG_CONTINUOUS_PROCESSING | MA_NODE_FLAG_ALLOW_NULL_INPUT)) {
+        *pFramesRead = maximumFramesProcessed;
+    } else {
+        *pFramesRead = frameCount;
+    }
+
+    if (result == MA_AT_END && maximumFramesProcessed > 0) {
+        result = MA_SUCCESS;
+    }
 
     return result;
 }
@@ -75319,35 +75338,25 @@ static ma_result ma_node_read_pcm_frames(ma_node* pNode, ma_uint32 outputBusInde
                     frameCountOut = (framesToProcessOut - pNodeBase->cachedFrameCountOut);
 
                     /*
-                    We need to treat nodes with continuous processing a little differently. For these ones,
-                    we always want to fire the callback with the requested number of frames, regardless of
-                    pNodeBase->cachedFrameCountIn, which could be 0. Also, we want to check if we can pass
-                    in NULL for the input buffer to the callback.
+                    We need to treat nodes with continuous processing a little differently. They always
+                    fire the callback, including when no input is available. Nodes that accept NULL input
+                    receive the exact number of source frames for a partial final block.
                     */
                     if ((pNodeBase->vtable->flags & MA_NODE_FLAG_CONTINUOUS_PROCESSING) != 0) {
-                        /* We're using continuous processing. Make sure we specify the whole frame count at all times. */
-                        frameCountIn = framesToProcessIn;    /* Give the processing function as much input data as we've got in the buffer, including any silenced padding from short reads. */
+                        frameCountIn = framesToProcessIn;
 
-                        if ((pNodeBase->vtable->flags & MA_NODE_FLAG_ALLOW_NULL_INPUT) != 0 && pNodeBase->consumedFrameCountIn == 0 && pNodeBase->cachedFrameCountIn == 0) {
-                            consumeNullInput = MA_TRUE;
+                        if ((pNodeBase->vtable->flags & MA_NODE_FLAG_ALLOW_NULL_INPUT) != 0) {
+                            if (pNodeBase->consumedFrameCountIn == 0 && pNodeBase->cachedFrameCountIn == 0) {
+                                consumeNullInput = MA_TRUE;
+                            } else {
+                                consumeNullInput = MA_FALSE;
+                                frameCountIn = pNodeBase->cachedFrameCountIn;
+                            }
                         } else {
                             consumeNullInput = MA_FALSE;
-                        }
-
-                        /*
-                        Since we're using continuous processing we're always passing in a full frame count
-                        regardless of how much input data was read. If this is greater than what we read as
-                        input, we'll end up with an underflow. We instead need to make sure our cached frame
-                        count is set to the number of frames we'll be passing to the data callback. Not
-                        doing this will result in an underflow when we "consume" the cached data later on.
-
-                        Note that this check needs to be done after the "consumeNullInput" check above because
-                        we use the property of cachedFrameCountIn being 0 to determine whether or not we
-                        should be passing in a null pointer to the processing callback for when the node is
-                        configured with MA_NODE_FLAG_ALLOW_NULL_INPUT.
-                        */
-                        if (pNodeBase->cachedFrameCountIn < (ma_uint16)frameCountIn) {
-                            pNodeBase->cachedFrameCountIn = (ma_uint16)frameCountIn;
+                            if (pNodeBase->cachedFrameCountIn < (ma_uint16)frameCountIn) {
+                                pNodeBase->cachedFrameCountIn = (ma_uint16)frameCountIn;
+                            }
                         }
                     } else {
                         frameCountIn = pNodeBase->cachedFrameCountIn;  /* Give the processing function as much valid input data as we've got. */
@@ -76752,7 +76761,9 @@ static void ma_engine_node_process_pcm_frames__general(ma_engine_node* pEngineNo
         framesAvailableIn  = frameCountIn  - totalFramesProcessedIn;
         framesAvailableOut = frameCountOut - totalFramesProcessedOut;
 
-        pRunningFramesIn  = ma_offset_pcm_frames_const_ptr_f32(ppFramesIn[0], totalFramesProcessedIn, channelsIn);
+        pRunningFramesIn = (ppFramesIn[0] != NULL)
+                               ? ma_offset_pcm_frames_const_ptr_f32(ppFramesIn[0], totalFramesProcessedIn, channelsIn)
+                               : NULL;
         pRunningFramesOut = ma_offset_pcm_frames_ptr_f32(ppFramesOut[0], totalFramesProcessedOut, channelsOut);
 
         if (channelsIn == channelsOut) {
@@ -76892,6 +76903,20 @@ static void ma_engine_node_process_pcm_frames__sound(ma_node* pNode, const float
     (void)ppFramesIn;
     (void)pFrameCountIn;
 
+    /* If we're seeking, do so now before reading. */
+    seekTarget = ma_atomic_exchange_64(&pSound->seekTarget, MA_SEEK_TARGET_NONE);
+    if (seekTarget != MA_SEEK_TARGET_NONE) {
+        ma_data_source_seek_to_pcm_frame(pSound->pDataSource, seekTarget);
+        pSound->processingCacheFramesRemaining = 0;
+        pSound->resamplerDrainFramesRemaining = 0;
+        pSound->isDataSourceAtEndPending = MA_FALSE;
+        ma_resampler_reset(&pSound->engineNode.resampler);
+        ma_sound_set_at_end(pSound, MA_FALSE);
+
+        /* Any time-dependant effects need to have their times updated. */
+        ma_node_set_time(pSound, seekTarget);
+    }
+
     /* If we're marked at the end we need to stop the sound and do nothing. */
     if (ma_sound_at_end(pSound)) {
         ma_sound_stop(pSound);
@@ -76902,17 +76927,6 @@ static void ma_engine_node_process_pcm_frames__sound(ma_node* pNode, const float
 
         *pFrameCountOut = 0;
         return;
-    }
-
-    /* If we're seeking, do so now before reading. */
-    seekTarget = ma_atomic_load_64(&pSound->seekTarget);
-    if (seekTarget != MA_SEEK_TARGET_NONE) {
-        ma_data_source_seek_to_pcm_frame(pSound->pDataSource, seekTarget);
-
-        /* Any time-dependant effects need to have their times updated. */
-        ma_node_set_time(pSound, seekTarget);
-
-        ma_atomic_exchange_64(&pSound->seekTarget, MA_SEEK_TARGET_NONE);
     }
 
     /*
@@ -76966,6 +76980,33 @@ static void ma_engine_node_process_pcm_frames__sound(ma_node* pNode, const float
                 if (result != MA_SUCCESS || ma_sound_at_end(pSound)) {
                     break;  /* Might have reached the end. */
                 }
+            } else if (pSound->resamplerDrainFramesRemaining > 0) {
+                ma_uint64 requiredInputFrameCount = 0;
+                frameCountOut = ma_min(pSound->resamplerDrainFramesRemaining, framesRemaining);
+                const float* pDrainFramesIn = NULL;
+                pRunningFramesOut = ma_offset_pcm_frames_ptr_f32(ppFramesOut[0], totalFramesRead, ma_node_get_output_channels(pNode, 0));
+                ma_resampler_get_required_input_frame_count(&pSound->engineNode.resampler, frameCountOut, &requiredInputFrameCount);
+                frameCountIn = (requiredInputFrameCount <= 0xFFFFFFFF) ? (ma_uint32)requiredInputFrameCount : 0xFFFFFFFF;
+
+                ma_engine_node_process_pcm_frames__general(&pSound->engineNode, &pDrainFramesIn, &frameCountIn, &pRunningFramesOut, &frameCountOut);
+
+                MA_ASSERT(frameCountOut <= pSound->resamplerDrainFramesRemaining);
+                pSound->resamplerDrainFramesRemaining -= frameCountOut;
+                totalFramesRead += frameCountOut;
+
+                if (pSound->resamplerDrainFramesRemaining == 0) {
+                    pSound->isDataSourceAtEndPending = MA_FALSE;
+                    ma_sound_set_at_end(pSound, MA_TRUE);
+                    break;
+                }
+
+                if (frameCountIn == 0 && frameCountOut == 0) {
+                    break;
+                }
+            } else if (pSound->isDataSourceAtEndPending) {
+                pSound->isDataSourceAtEndPending = MA_FALSE;
+                ma_sound_set_at_end(pSound, MA_TRUE);
+                break;
             } else {
                 /* Getting here means there's nothing in the cache. Read more data from the data source. */
                 if (dataSourceFormat == ma_format_f32) {
@@ -76983,12 +77024,14 @@ static void ma_engine_node_process_pcm_frames__sound(ma_node* pNode, const float
                         }
 
                         result = ma_data_source_read_pcm_frames(pSound->pDataSource, temp, framesToConvertThisIteration, &framesConverted);
+                        if (framesConverted > 0) {
+                            ma_convert_pcm_frames_format(ma_offset_pcm_frames_ptr_f32(pSound->pProcessingCache, totalFramesConverted, dataSourceChannels), ma_format_f32, temp, dataSourceFormat, framesConverted, dataSourceChannels, ma_dither_mode_none);
+                            totalFramesConverted += framesConverted;
+                        }
+
                         if (result != MA_SUCCESS) {
                             break;
                         }
-
-                        ma_convert_pcm_frames_format(ma_offset_pcm_frames_ptr_f32(pSound->pProcessingCache, totalFramesConverted, dataSourceChannels), ma_format_f32, temp, dataSourceFormat, framesConverted, dataSourceChannels, ma_dither_mode_none);
-                        totalFramesConverted += framesConverted;
                     }
 
                     framesJustRead = totalFramesConverted;
@@ -76997,9 +77040,14 @@ static void ma_engine_node_process_pcm_frames__sound(ma_node* pNode, const float
                 MA_ASSERT(framesJustRead <= pSound->processingCacheCap);
                 pSound->processingCacheFramesRemaining = (ma_uint32)framesJustRead;
 
-                /* If we reached the end of the sound we'll want to mark it as at the end and stop it. This should never be returned for looping sounds. */
+                /* Drain the resampler before marking a non-looping sound as ended. */
                 if (result == MA_AT_END) {
-                    ma_sound_set_at_end(pSound, MA_TRUE);   /* This will be set to false in ma_sound_start(). */
+                    pSound->isDataSourceAtEndPending = MA_TRUE;
+                    if (ma_sound_is_looping(pSound) == MA_FALSE && ma_engine_node_is_pitching_enabled(&pSound->engineNode)) {
+                        const ma_uint64 outputLatency = ma_resampler_get_output_latency(&pSound->engineNode.resampler);
+                        pSound->resamplerDrainFramesRemaining = (outputLatency <= 0xFFFFFFFF) ? (ma_uint32)outputLatency : 0xFFFFFFFF;
+                    }
+                    result = MA_SUCCESS;
                 }
 
                 if (result != MA_SUCCESS || ma_sound_at_end(pSound)) {
@@ -78458,6 +78506,8 @@ static ma_result ma_sound_init_from_data_source_internal(ma_engine* pEngine, con
     */
     if (pSound->pDataSource != NULL) {
         pSound->processingCacheFramesRemaining = 0;
+        pSound->resamplerDrainFramesRemaining = 0;
+        pSound->isDataSourceAtEndPending = MA_FALSE;
         pSound->processingCacheCap = ma_node_graph_get_processing_size_in_frames(&pEngine->nodeGraph);
         if (pSound->processingCacheCap == 0) {
             pSound->processingCacheCap = 512;
@@ -78756,13 +78806,10 @@ MA_API ma_result ma_sound_start(ma_sound* pSound)
 
     /* If the sound is at the end it means we want to start from the start again. */
     if (ma_sound_at_end(pSound)) {
-        ma_result result = ma_data_source_seek_to_pcm_frame(pSound->pDataSource, 0);
-        if (result != MA_SUCCESS && result != MA_NOT_IMPLEMENTED) {
-            return result;  /* Failed to seek back to the start. */
+        ma_result result = ma_sound_seek_to_pcm_frame_if_no_pending_seek(pSound, 0);
+        if (result != MA_SUCCESS) {
+            return result;
         }
-
-        /* Make sure we clear the end indicator. */
-        ma_atomic_exchange_32(&pSound->atEnd, MA_FALSE);
     }
 
     /* Make sure the sound is started. If there's a start delay, the sound won't actually start until the start time is reached. */
@@ -79435,6 +79482,24 @@ MA_API ma_result ma_sound_seek_to_pcm_frame(ma_sound* pSound, ma_uint64 frameInd
 
     /* We can't be seeking while reading at the same time. We just set the seek target and get the mixing thread to do the actual seek. */
     ma_atomic_exchange_64(&pSound->seekTarget, frameIndex);
+
+    return MA_SUCCESS;
+}
+
+MA_API ma_result ma_sound_seek_to_pcm_frame_if_no_pending_seek(ma_sound* pSound, ma_uint64 frameIndex)
+{
+    ma_uint64 expectedSeekTarget = MA_SEEK_TARGET_NONE;
+
+    if (pSound == NULL) {
+        return MA_INVALID_ARGS;
+    }
+
+    /* Seeking is only valid for sounds that are backed by a data source. */
+    if (pSound->pDataSource == NULL) {
+        return MA_INVALID_OPERATION;
+    }
+
+    ma_atomic_compare_exchange_strong_64(&pSound->seekTarget, &expectedSeekTarget, frameIndex);
 
     return MA_SUCCESS;
 }

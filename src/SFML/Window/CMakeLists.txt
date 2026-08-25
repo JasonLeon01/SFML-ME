@@ -299,7 +299,7 @@ endif()
 
 # define the sfml-window target
 set(WINDOW_LIBRARY_OPTIONS)
-if(SFML_OPENGL_ES AND NOT SFML_OS_IOS)
+if((SFML_OPENGL_ES AND NOT SFML_OS_IOS) OR SFML_OS_HARMONY)
     list(APPEND WINDOW_LIBRARY_OPTIONS INSTALL_SHARED_DEPENDENCIES)
 endif()
 
@@ -351,6 +351,18 @@ endif()
 
 if(SFML_OS_IOS)
     target_link_libraries(sfml-window PRIVATE "-framework OpenGLES")
+elseif(SFML_OS_HARMONY)
+    # Harmony always creates its rendering surface through EGL. MOBILE is
+    # forced to GLES; 2IN1 defaults to the platform's desktop GL dispatch but
+    # can opt into the same GLES path at configure time.
+    find_package(EGL REQUIRED)
+    if(SFML_OPENGL_ES)
+        find_package(GLES REQUIRED)
+        target_link_libraries(sfml-window PRIVATE EGL::EGL ${CMAKE_DL_LIBS} PUBLIC GLES::GLES)
+    else()
+        find_package(GLv4 REQUIRED)
+        target_link_libraries(sfml-window PRIVATE EGL::EGL ${CMAKE_DL_LIBS} PUBLIC GLv4::GLv4)
+    endif()
 elseif(SFML_OPENGL_ES)
     find_package(EGL REQUIRED)
     find_package(GLES REQUIRED)
@@ -391,6 +403,12 @@ elseif(SFML_OS_HARMONY)
                           ohinputmethod
                           pasteboard
                           udmf)
+    if(SFML_HARMONY_DEVICE_FORM STREQUAL "2IN1")
+        target_link_libraries(sfml-window PRIVATE
+                              native_window_manager
+                              native_display_manager
+                              ohinput)
+    endif()
 endif()
 
 # on some platforms (e.g. Raspberry Pi 3 armhf), GCC requires linking libatomic to use <atomic> features

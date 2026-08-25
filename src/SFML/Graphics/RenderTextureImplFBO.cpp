@@ -186,7 +186,7 @@ bool RenderTextureImplFBO::create(Vector2u size, unsigned int textureId, const C
         // Make sure that extensions are initialized
         ensureExtensionsInit();
 
-#ifdef SFML_SYSTEM_HARMONY
+#if defined(SFML_SYSTEM_HARMONY) && defined(SFML_OPENGL_ES)
         if (settings.antiAliasingLevel)
         {
             err() << "Impossible to create render texture (anti-aliasing is unavailable in the OpenGL ES 2 backend)"

@@ -206,9 +206,26 @@ namespace
 ContextSettings normalizeContextSettings(ContextSettings settings)
 {
 #ifdef SFML_SYSTEM_HARMONY
+#ifdef SFML_OPENGL_ES
     settings.majorVersion   = 2;
     settings.minorVersion   = 0;
     settings.attributeFlags = ContextSettings::Default;
+#else
+    if (settings.majorVersion < 3)
+    {
+        settings.majorVersion = 3;
+        settings.minorVersion = 0;
+    }
+    else if (settings.majorVersion > 4 || (settings.majorVersion == 4 && settings.minorVersion > 2))
+    {
+        err() << "Warning: Harmony desktop OpenGL supports at most version 4.2; clamping requested version "
+              << settings.majorVersion << "." << settings.minorVersion << " to 4.2" << std::endl;
+        settings.majorVersion = 4;
+        settings.minorVersion = 2;
+    }
+
+    settings.attributeFlags &= ContextSettings::Core | ContextSettings::Debug;
+#endif
 #else
     if (settings.majorVersion < 2)
     {

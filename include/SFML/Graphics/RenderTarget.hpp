@@ -513,7 +513,7 @@ private:
     /// \param states Render states to use for drawing
     ///
     ////////////////////////////////////////////////////////////
-    void setupDraw(const RenderStates& states);
+    [[nodiscard]] bool setupDraw(const RenderStates& states);
 
     ////////////////////////////////////////////////////////////
     /// \brief Draw the primitives
@@ -559,11 +559,15 @@ private:
     ////////////////////////////////////////////////////////////
     // Member data
     ////////////////////////////////////////////////////////////
-    View                           m_defaultView;   //!< Default view
-    View                           m_view;          //!< Current view
-    StatesCache                    m_cache{};       //!< Render states cache
-    std::uint64_t                  m_id{};          //!< Unique number that identifies the RenderTarget
-    std::unique_ptr<Shader>        m_defaultShader; //!< Per-target default programmable pipeline
+    View                          m_defaultView;           //!< Default view
+    View                          m_view;                  //!< Current view
+    StatesCache                   m_cache{};               //!< Render states cache
+    std::uint64_t                 m_id{};                  //!< Unique number that identifies the RenderTarget
+    std::unique_ptr<Shader>       m_defaultShader;         //!< Per-target default programmable pipeline
+    std::unique_ptr<VertexBuffer> m_streamingVertexBuffer; //!< Modern path for transient CPU vertex data
+#ifdef SFML_SYSTEM_HARMONY
+    std::shared_ptr<void> m_harmonyVertexArrayLifetime; //!< Lifetime token for per-target Harmony VAOs
+#endif
     std::unique_ptr<GLStatesStack> m_glStatesStack; //!< Nested interoperability state snapshots
 };
 

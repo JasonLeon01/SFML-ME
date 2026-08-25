@@ -47,13 +47,15 @@ sfml_set_option(SFML_BUILD_GRAPHICS ON BOOL "ON to build SFML's Graphics module.
 sfml_set_option(SFML_BUILD_AUDIO ON BOOL "ON to build SFML's Audio module.")
 sfml_set_option(SFML_BUILD_NETWORK ON BOOL "ON to build SFML's Network module.")
 
-if(SFML_BUILD_WINDOW)
+if(SFML_BUILD_WINDOW OR SFML_BUILD_GRAPHICS)
     # add an option for choosing the OpenGL implementation
     sfml_set_option(SFML_OPENGL_ES ${OPENGL_ES} BOOL "ON to use an OpenGL ES implementation, OFF to use a desktop OpenGL implementation")
 
-    # These platforms only expose OpenGL ES, so a stale or explicitly disabled
-    # cache entry must not select the desktop OpenGL loader.
-    if(SFML_OS_IOS OR SFML_OS_ANDROID OR SFML_OS_HARMONY)
+    # These platforms/device forms only expose OpenGL ES, so a stale or
+    # explicitly disabled cache entry must not select desktop OpenGL. Harmony
+    # 2IN1 defaults to desktop OpenGL but may explicitly opt into OpenGL ES.
+    if(SFML_OS_IOS OR SFML_OS_ANDROID OR
+       (SFML_OS_HARMONY AND SFML_HARMONY_DEVICE_FORM STREQUAL "MOBILE"))
         set(SFML_OPENGL_ES ON CACHE BOOL "ON to use an OpenGL ES implementation, OFF to use a desktop OpenGL implementation" FORCE)
     endif()
 

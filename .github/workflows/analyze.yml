@@ -29,7 +29,9 @@ jobs:
         - { name: macOS,           os: macos-14 }
         - { name: iOS,             os: macos-14,     flags: -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 }
         - { name: Android,         os: ubuntu-24.04, flags: -DCMAKE_ANDROID_ARCH_ABI=x86_64 -DCMAKE_SYSTEM_NAME=Android -DCMAKE_SYSTEM_VERSION=22 -DCMAKE_ANDROID_NDK=$ANDROID_NDK -DCMAKE_ANDROID_STL_TYPE=c++_shared }
-        - { name: OpenHarmony arm64-v8a, os: ubuntu-24.04, flags: -GNinja -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake -DCMAKE_CXX_FLAGS=-isystem$OHOS_SDK_NATIVE/llvm/include/libcxx-ohos/include/c++/v1 -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_HARMONY_DEVICE_FORM=MOBILE -DSFML_USE_SYSTEM_DEPS=OFF }
+        - { name: OpenHarmony MOBILE arm64-v8a, os: ubuntu-24.04, form: MOBILE, opengl_es: 'ON', flags: -GNinja -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake -DCMAKE_CXX_FLAGS=-isystem$OHOS_SDK_NATIVE/llvm/include/libcxx-ohos/include/c++/v1 -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DOHOS_COMPATIBLE_SDK_VERSION=22 -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_HARMONY_DEVICE_FORM=MOBILE -DSFML_OPENGL_ES=ON -DSFML_USE_SYSTEM_DEPS=OFF }
+        - { name: OpenHarmony 2IN1 desktop GL arm64-v8a, os: ubuntu-24.04, form: 2IN1, opengl_es: 'OFF', flags: -GNinja -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake -DCMAKE_CXX_FLAGS=-isystem$OHOS_SDK_NATIVE/llvm/include/libcxx-ohos/include/c++/v1 -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DOHOS_COMPATIBLE_SDK_VERSION=22 -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_HARMONY_DEVICE_FORM=2IN1 -DSFML_OPENGL_ES=OFF -DSFML_USE_SYSTEM_DEPS=OFF }
+        - { name: OpenHarmony 2IN1 OpenGL ES arm64-v8a, os: ubuntu-24.04, form: 2IN1, opengl_es: 'ON', flags: -GNinja -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake -DCMAKE_CXX_FLAGS=-isystem$OHOS_SDK_NATIVE/llvm/include/libcxx-ohos/include/c++/v1 -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DOHOS_COMPATIBLE_SDK_VERSION=22 -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_HARMONY_DEVICE_FORM=2IN1 -DSFML_OPENGL_ES=ON -DSFML_USE_SYSTEM_DEPS=OFF }
 
     steps:
     - name: Checkout Code
@@ -53,7 +55,7 @@ jobs:
     - name: Validate OpenHarmony SDK
       if: contains(matrix.platform.name, 'OpenHarmony')
       run: |
-        test "${{ steps.ohos-sdk.outputs.api-version }}" -ge 21
+        test "${{ steps.ohos-sdk.outputs.api-version }}" -ge 22
         test -f "$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake"
         test -x "$OHOS_SDK_NATIVE/llvm/bin/clang++"
         test -f "$OHOS_SDK_NATIVE/llvm/include/libcxx-ohos/include/c++/v1/optional"
@@ -82,7 +84,14 @@ jobs:
 
     - name: Validate OpenHarmony Compilation Database
       if: contains(matrix.platform.name, 'OpenHarmony')
-      run: grep -F -- "$OHOS_SDK_NATIVE/llvm/include/libcxx-ohos/include/c++/v1" build/compile_commands.json
+      run: |
+        grep -Fq -- "$OHOS_SDK_NATIVE/llvm/include/libcxx-ohos/include/c++/v1" build/compile_commands.json
+        grep -Fq -- '-DSFML_HARMONY_${{ matrix.platform.form }}' build/compile_commands.json
+        if [ "${{ matrix.platform.opengl_es }}" = "ON" ]; then
+          grep -Fq -- '-DSFML_OPENGL_ES' build/compile_commands.json
+        else
+          ! grep -Fq -- '-DSFML_OPENGL_ES' build/compile_commands.json
+        fi
 
     - name: Analyze Code
       run: cmake --build build --target tidy

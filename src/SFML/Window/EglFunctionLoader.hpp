@@ -82,6 +82,8 @@ inline GlFunctionPointer getEglGlFunction(const char* name)
     {
 #ifdef SFML_OPENGL_ES
         static constexpr std::array libraries = {"libGLESv2.so.2", "libGLESv2.so"};
+#elif defined(SFML_SYSTEM_HARMONY)
+        static constexpr std::array libraries = {"libGLv4.so"};
 #else
         static constexpr std::array libraries = {"libOpenGL.so.0", "libGL.so.1", "libGL.so"};
 #endif

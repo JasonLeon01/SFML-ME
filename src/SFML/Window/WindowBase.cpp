@@ -214,7 +214,17 @@ void WindowBase::setSize(Vector2u size)
         m_impl->setSize(clampedSize);
 
         // Cache the new size
+#if defined(SFML_HARMONY_2IN1)
+        // Harmony window commands are acknowledged with the actual client
+        // size after platform constraints have been applied. Never overwrite
+        // that confirmed value with the original request.
+        const Vector2u actualSize = m_impl->getSize();
+        if (actualSize == m_size)
+            return;
+        m_size = actualSize;
+#else
         m_size = clampedSize;
+#endif
 
         // Notify the derived class
         onResize();

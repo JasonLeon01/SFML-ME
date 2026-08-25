@@ -1,14 +1,16 @@
 # SFML OpenHarmony mobile diagnostics
 
-This is a DevEco Studio Stage-model application for the SFML OpenHarmony/HarmonyOS mobile backend. It targets API 21 and packages `arm64-v8a` for current consumer devices. The declared device forms are phone and tablet; 2in1/PC is intentionally excluded. `x86_64` remains an optional cross-build for emulator/toolchain checks. DevEco 6.0.1's HarmonyOS Stage packager rejects `armeabi-v7a`, so that ABI can only be validated separately with the OpenHarmony NDK rather than included in this HAP.
+This is a DevEco Studio Stage-model application for the SFML OpenHarmony/HarmonyOS mobile backend. It targets and declares compatibility with API 22 and packages `arm64-v8a` for current consumer devices. The declared device forms are phone and tablet; 2in1/PC is intentionally excluded. `x86_64` remains an optional cross-build for emulator/toolchain checks. The HarmonyOS Stage packager rejects `armeabi-v7a`, so that ABI can only be validated separately with the OpenHarmony NDK rather than included in this HAP.
 
 ## Requirements
 
-- DevEco Studio 6.0.1 with the OpenHarmony API 21 native SDK.
+- DevEco Studio with an OpenHarmony API 22 or newer native SDK.
 - The SDK CMake toolchain, Clang 15, Ninja, and the shared C++ runtime installed by DevEco Studio.
 - A signing configuration supplied by DevEco Studio when installing on a physical device.
 
 Open this `examples/harmony` directory as the DevEco project. The native module builds SFML and its bundled dependencies as position-independent static libraries, then links them into the single NAPI module `libentry.so`. The HAP ABIs are selected in `entry/build-profile.json5`.
+
+The native build passes `OHOS_COMPATIBLE_SDK_VERSION=22` explicitly. Keep this argument when integrating the MOBILE package so the compiler target remains versioned for API 22 availability checks.
 
 The command-line equivalent, after DevEco has initialized the project, is:
 
@@ -164,4 +166,4 @@ The HAP declares `INTERNET`, `MICROPHONE`, `READ_PASTEBOARD`, `ACCELEROMETER`, a
 
 ## Scope
 
-This example and backend cover phone and tablet only. 2in1/PC, desktop OpenGL, multiple native windows, GLES1 fixed-function emulation, raw GLES3 contexts, and multisampled RenderTexture are deferred. See [`doc/harmony.md`](../../doc/harmony.md) for the platform contract.
+This example covers the phone/tablet form only. Use the sibling [`examples/harmony-2in1`](../harmony-2in1/README.md) project for 2in1/PC builds with desktop OpenGL or GLES. Multiple owning native windows, exclusive display-mode switching, GLES1 fixed-function emulation, raw GLES3 contexts, and GLES RenderTexture multisampling remain unsupported. See [`doc/harmony.md`](../../doc/harmony.md) for the complete platform contract.

@@ -38,6 +38,8 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
@@ -60,10 +62,19 @@ struct SurfaceSnapshot
 };
 
 
+struct PendingWindowCommand
+{
+    WindowCommand command;
+    bool          completed{};
+    bool          success{};
+};
+
+
 struct HostState
 {
     std::mutex              mutex;
     std::condition_variable surfaceCondition;
+    std::condition_variable windowCommandCondition;
 
     OH_NativeXComponent* component{};
     OH_NativeXComponent* registeringComponent{};
@@ -90,6 +101,15 @@ struct HostState
 
     HostCallbacks callbacks;
 
+    std::int32_t                                            windowId{};
+    WindowState                                             windowState;
+    std::uint32_t                                           nextWindowRequestId{1};
+    std::unordered_map<std::uint32_t, PendingWindowCommand> pendingWindowCommands;
+    std::optional<Vector2u>                                 minimumSize;
+    std::optional<Vector2u>                                 maximumSize;
+    std::string                                             title;
+    std::uint32_t                                           style{};
+
     void (*mainEntry)(){};
     void (*shutdownCallback)(){};
     std::thread              mainThread;
@@ -100,6 +120,7 @@ struct HostState
     CancelableInitialization hostInitialization;
     bool                     foreground{true};
     bool                     focused{};
+    std::optional<bool>      pointerLocationAvailable;
     bool                     destroyed{};
     bool                     windowClaimed{};
     bool                     keyRepeatEnabled{true};
@@ -119,6 +140,10 @@ void submitTextEdit(std::size_t backwardDeletions, std::size_t forwardDeletions,
 
 bool claimWindow();
 void releaseWindow();
+
+[[nodiscard]] bool        requestWindowCommand(WindowCommand command);
+[[nodiscard]] bool        isWindowCommandPending(std::uint32_t requestId);
+[[nodiscard]] WindowState getWindowState();
 
 void                                  setMainEntry(void (*entry)());
 void                                  setShutdownCallback(void (*callback)());

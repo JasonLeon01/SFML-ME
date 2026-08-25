@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <arkui/native_key_event.h>
 #include <arkui/ui_input_event.h>
+#include <chrono>
 #include <deviceinfo.h>
 #include <native_window/external_window.h>
 #include <optional>
@@ -43,6 +44,11 @@
 
 #include <cmath>
 #include <cstring>
+
+#ifdef SFML_HARMONY_2IN1
+#include <window_manager/oh_display_manager.h>
+#include <window_manager/oh_window.h>
+#endif
 
 
 namespace
@@ -60,9 +66,13 @@ bool isSupportedDevice()
         return false;
 
     const std::string_view type(deviceType);
+#ifdef SFML_HARMONY_2IN1
+    return type == "2in1";
+#else
     // API 21 deviceinfo documents "default" as the phone value used by some
     // products, in addition to the explicit "phone" spelling.
     return type == "default" || type == "phone" || type == "tablet";
+#endif
 }
 
 
@@ -91,6 +101,78 @@ void clearInputState(sf::priv::Harmony::HostState& state, bool emitTouchEnd)
     state.keys.clear();
     state.scancodes.clear();
     state.keyCodes.clear();
+}
+
+
+void applyWindowState(sf::priv::Harmony::HostState& state, const sf::priv::Harmony::WindowState& next)
+{
+    const bool wasFocused = state.focused;
+
+    state.windowState         = next;
+    state.windowState.focused = next.focused && next.visible && state.foreground && !state.destroyed;
+    state.focused             = state.windowState.focused;
+    state.fullscreen          = next.fullscreen;
+
+    if (wasFocused == state.focused)
+        return;
+
+    if (state.focused)
+    {
+        queueEvent(state, sf::Event::FocusGained{});
+    }
+    else
+    {
+        clearInputState(state, true);
+        queueEvent(state, sf::Event::FocusLost{});
+    }
+}
+
+
+void applySuccessfulWindowCommand(sf::priv::Harmony::HostState& state, const sf::priv::Harmony::WindowCommand& command)
+{
+    using sf::priv::Harmony::WindowCommandType;
+
+    switch (command.type)
+    {
+        case WindowCommandType::Configure:
+            state.title                  = command.title;
+            state.style                  = command.style;
+            state.fullscreen             = command.fullscreen;
+            state.keepScreenOn           = command.keepScreenOn;
+            state.windowConfigurationSet = true;
+            break;
+        case WindowCommandType::Restore:
+            state.fullscreen             = false;
+            state.keepScreenOn           = false;
+            state.windowConfigurationSet = false;
+            break;
+        case WindowCommandType::SetMinimumSize:
+            state.minimumSize = command.sizeLimit;
+            break;
+        case WindowCommandType::SetMaximumSize:
+            state.maximumSize = command.sizeLimit;
+            break;
+        case WindowCommandType::SetTitle:
+            state.title = command.title;
+            break;
+        case WindowCommandType::SetIcon:
+            break;
+        case WindowCommandType::SetPosition:
+        case WindowCommandType::SetSize:
+        case WindowCommandType::SetVisible:
+        case WindowCommandType::RequestFocus:
+            break;
+    }
+}
+
+
+void cancelWindowCommands(sf::priv::Harmony::HostState& state)
+{
+    if (state.pendingWindowCommands.empty())
+        return;
+
+    state.pendingWindowCommands.clear();
+    state.windowCommandCondition.notify_all();
 }
 
 
@@ -131,23 +213,30 @@ void applySurface(sf::priv::Harmony::HostState& state,
     const bool surfaceChanged = state.window != nativeWindow || (forceSurfaceChange && (state.window || nativeWindow));
     const bool wasRenderable  = state.window && state.size.x && state.size.y;
     const bool isRenderable   = nativeWindow && size.x && size.y;
-    const bool renderabilityChanged = wasRenderable != isRenderable;
-    const bool wasFocused           = state.focused;
+    const bool renderabilityChanged        = wasRenderable != isRenderable;
+    [[maybe_unused]] const bool wasFocused = state.focused;
 
     if (!surfaceChanged && !sizeChanged)
         return;
 
     state.window = nativeWindow;
     state.size   = size;
+    if (nativeWindow && size.x && size.y)
+        state.windowState.clientSize = size;
     if (surfaceChanged || renderabilityChanged)
         ++state.surfaceGeneration;
 
     if (!nativeWindow && hadSurface)
     {
-        state.focused = false;
+#ifdef SFML_HARMONY_MOBILE
+        state.focused             = false;
+        state.windowState.focused = false;
+#endif
         clearInputState(state, true);
+#ifdef SFML_HARMONY_MOBILE
         if (wasFocused)
             queueEvent(state, sf::Event::FocusLost{});
+#endif
     }
     else if (nativeWindow)
     {
@@ -155,18 +244,26 @@ void applySurface(sf::priv::Harmony::HostState& state,
         // restore even when the old destroy callback is delayed.
         if (surfaceChanged && hadSurface)
         {
-            state.focused = false;
+#ifdef SFML_HARMONY_MOBILE
+            state.focused             = false;
+            state.windowState.focused = false;
+#endif
             clearInputState(state, true);
+#ifdef SFML_HARMONY_MOBILE
             if (wasFocused)
                 queueEvent(state, sf::Event::FocusLost{});
+#endif
         }
 
+#ifdef SFML_HARMONY_MOBILE
         if (!hadSurface || surfaceChanged)
         {
-            state.focused = state.foreground;
+            state.focused             = state.foreground;
+            state.windowState.focused = state.focused;
             if (state.focused)
                 queueEvent(state, sf::Event::FocusGained{});
         }
+#endif
 
         if (!hadSurface || surfaceChanged || sizeChanged)
             queueEvent(state, sf::Event::Resized{size});
@@ -372,8 +469,9 @@ void onMouse(OH_NativeXComponent* component, void* window)
     if (state.component != component)
         return;
 
-    const auto position = toPosition(input.x, input.y);
-    state.mousePosition = position;
+    const auto position            = toPosition(input.x, input.y);
+    state.mousePosition            = position;
+    state.pointerLocationAvailable = true;
 
     const auto button = toMouseButton(input.button);
     switch (input.action)
@@ -413,7 +511,10 @@ void onHover(OH_NativeXComponent* component, bool hover)
     auto&                 state = sf::priv::Harmony::getHostState();
     const std::lock_guard lock(state.mutex);
     if (state.component == component)
+    {
+        state.pointerLocationAvailable = true;
         queueEvent(state, hover ? sf::Event(sf::Event::MouseEntered{}) : sf::Event(sf::Event::MouseLeft{}));
+    }
 }
 
 
@@ -431,7 +532,8 @@ void onAxis(OH_NativeXComponent* component, ArkUI_UIInputEvent* input, ArkUI_UII
     if (state.component != component)
         return;
 
-    state.mousePosition = position;
+    state.mousePosition            = position;
+    state.pointerLocationAvailable = true;
     if (vertical != 0.f)
         queueEvent(state, sf::Event::MouseWheelScrolled{sf::Mouse::Wheel::Vertical, -vertical, position});
     if (horizontal != 0.f)
@@ -445,7 +547,9 @@ void onFocus(OH_NativeXComponent* component, void*)
     const std::lock_guard lock(state.mutex);
     if (state.component == component && state.foreground && !state.destroyed && !state.focused)
     {
-        state.focused = true;
+        state.pointerLocationAvailable.reset();
+        state.focused             = true;
+        state.windowState.focused = true;
         queueEvent(state, sf::Event::FocusGained{});
     }
 }
@@ -460,7 +564,8 @@ void onBlur(OH_NativeXComponent* component, void*)
         clearInputState(state, true);
         if (state.focused)
         {
-            state.focused = false;
+            state.focused             = false;
+            state.windowState.focused = false;
             queueEvent(state, sf::Event::FocusLost{});
         }
     }
@@ -638,6 +743,95 @@ void releaseWindow()
     auto&                 state = getHostState();
     const std::lock_guard lock(state.mutex);
     state.windowClaimed = false;
+    cancelWindowCommands(state);
+}
+
+
+bool requestWindowCommand(WindowCommand command)
+{
+    constexpr auto commandTimeout = std::chrono::seconds(3);
+    auto&          state          = getHostState();
+    HostCallbacks  callbacks;
+    std::uint32_t  requestId{};
+    {
+        const std::lock_guard lock(state.mutex);
+        if (state.destroyed || !state.windowClaimed || !state.callbacks.executeWindowCommand)
+            return false;
+
+        // Zero is reserved for host notifications that do not acknowledge a
+        // native request. Skip live identifiers if the counter wrapped.
+        do
+        {
+            requestId = state.nextWindowRequestId++;
+            if (state.nextWindowRequestId == 0)
+                state.nextWindowRequestId = 1;
+        } while (requestId == 0 || state.pendingWindowCommands.count(requestId));
+
+        command.requestId = requestId;
+        command.deadline  = std::chrono::steady_clock::now() + commandTimeout;
+        state.pendingWindowCommands.emplace(requestId, PendingWindowCommand{command});
+        callbacks = state.callbacks;
+    }
+
+    // Queue ArkTS work without holding HostState. The application thread then
+    // sleeps with the mutex released, allowing the NAPI acknowledgement and
+    // lifecycle cancellation paths to make progress.
+    if (!callbacks.executeWindowCommand(command, callbacks.userData))
+    {
+        const std::lock_guard lock(state.mutex);
+        state.pendingWindowCommands.erase(requestId);
+        state.windowCommandCondition.notify_all();
+        err() << "Failed to queue Harmony window command " << static_cast<std::uint32_t>(command.type) << " (request "
+              << requestId << ')' << std::endl;
+        return false;
+    }
+
+    std::unique_lock lock(state.mutex);
+    const bool       acknowledged = state.windowCommandCondition
+                                  .wait_until(lock,
+                                              command.deadline,
+                                              [&]
+                                              {
+                                                  const auto found = state.pendingWindowCommands.find(requestId);
+                                                  return state.destroyed || found == state.pendingWindowCommands.end() ||
+                                                         found->second.completed;
+                                              });
+    const auto found = state.pendingWindowCommands.find(requestId);
+    if (!acknowledged || found == state.pendingWindowCommands.end())
+    {
+        state.pendingWindowCommands.erase(requestId);
+        if (!state.destroyed && acknowledged)
+            err() << "Harmony window command " << requestId << " was canceled" << std::endl;
+        else if (!state.destroyed)
+            err() << "Timed out waiting 3 seconds for Harmony window command " << requestId << std::endl;
+        return false;
+    }
+
+    const bool success = found->second.success;
+    state.pendingWindowCommands.erase(found);
+    if (!success)
+        err() << "Harmony host rejected window command " << requestId << std::endl;
+    return success;
+}
+
+
+bool isWindowCommandPending(std::uint32_t requestId)
+{
+    auto&                 state = getHostState();
+    const std::lock_guard lock(state.mutex);
+    const auto            found = state.pendingWindowCommands.find(requestId);
+    return !state.destroyed && found != state.pendingWindowCommands.end() && !found->second.completed;
+}
+
+
+WindowState getWindowState()
+{
+    auto&                 state = getHostState();
+    const std::lock_guard lock(state.mutex);
+    WindowState           result = state.windowState;
+    if ((!result.clientSize.x || !result.clientSize.y) && state.size.x && state.size.y)
+        result.clientSize = state.size;
+    return result;
 }
 
 
@@ -1017,7 +1211,11 @@ bool registerNativeXComponent(void* componentPointer)
     }
     if (!isSupportedDevice())
     {
+#ifdef SFML_HARMONY_2IN1
+        err() << "SFML Harmony 2-in-1 requires device type 2in1 (device type: "
+#else
         err() << "SFML Harmony mobile supports phone and tablet devices only (device type: "
+#endif
               << (OH_GetDeviceType() ? OH_GetDeviceType() : "unknown") << ')' << std::endl;
         return false;
     }
@@ -1079,6 +1277,7 @@ bool registerNativeXComponent(void* componentPointer)
     state.registeringSize      = {};
     state.component            = component;
     state.legacyKeyCallback    = legacyKeyCallback;
+    state.pointerLocationAvailable.reset();
     state.retiredWindows.clear();
     state.destroyedWindows.clear();
     applySurface(state, replacementWindow, replacementSize, replacingComponent);
@@ -1100,6 +1299,7 @@ void unregisterNativeXComponent(void* componentPointer)
     {
         state.component         = nullptr;
         state.legacyKeyCallback = false;
+        state.pointerLocationAvailable.reset();
         state.retiredWindows.clear();
         state.destroyedWindows.clear();
         applySurface(state, nullptr, {});
@@ -1109,33 +1309,42 @@ void unregisterNativeXComponent(void* componentPointer)
 
 void notifyForeground()
 {
-    auto&         state = getHostState();
+    auto& state = getHostState();
+#ifdef SFML_HARMONY_MOBILE
     HostCallbacks callbacks;
     bool          replayWindowConfiguration = false;
     bool          fullscreen{};
     bool          keepScreenOn{};
+#endif
     {
         const std::lock_guard lock(state.mutex);
         if (state.destroyed)
             return;
         state.foreground = true;
+#ifdef SFML_HARMONY_MOBILE
         if (state.window && !state.focused)
         {
-            state.focused = true;
+            state.focused             = true;
+            state.windowState.focused = true;
             queueEvent(state, Event::FocusGained{});
         }
+#endif
 
+#ifdef SFML_HARMONY_MOBILE
         callbacks                 = state.callbacks;
         replayWindowConfiguration = state.windowConfigurationSet;
         fullscreen                = state.fullscreen;
         keepScreenOn              = state.keepScreenOn;
+#endif
     }
 
+#ifdef SFML_HARMONY_MOBILE
     // The system may restore its bars and screen-on policy while another
     // ability owns the foreground. Replay the mobile window policy whenever
     // this Stage returns, without invoking ArkUI while holding HostState.
     if (replayWindowConfiguration && callbacks.configureWindow)
         callbacks.configureWindow(fullscreen, keepScreenOn, callbacks.userData);
+#endif
 }
 
 
@@ -1149,7 +1358,8 @@ void notifyBackground()
     clearInputState(state, true);
     if (state.focused)
     {
-        state.focused = false;
+        state.focused             = false;
+        state.windowState.focused = false;
         queueEvent(state, Event::FocusLost{});
     }
 }
@@ -1167,19 +1377,27 @@ void notifyDestroy()
         state.destroyed       = true;
         state.hostInitialized = false;
         state.hostInitialization.shutdown();
-        state.foreground = false;
-        state.focused    = false;
+        state.foreground          = false;
+        state.focused             = false;
+        state.windowState.focused = false;
         clearInputState(state, true);
         state.component              = nullptr;
         state.registeringComponent   = nullptr;
         state.registeringWindow      = nullptr;
         state.registeringSize        = {};
         state.window                 = nullptr;
+        state.windowId               = 0;
         state.legacyKeyCallback      = false;
         state.windowConfigurationSet = false;
         state.fullscreen             = false;
         state.keepScreenOn           = false;
         state.size                   = {};
+        state.windowState            = {};
+        state.minimumSize.reset();
+        state.maximumSize.reset();
+        state.title.clear();
+        state.style = 0;
+        cancelWindowCommands(state);
         state.retiredWindows.clear();
         state.destroyedWindows.clear();
         if (hadSurface)
@@ -1230,7 +1448,44 @@ void setHostCallbacks(const HostCallbacks& callbacks)
 {
     auto&                 state = getHostState();
     const std::lock_guard lock(state.mutex);
+    if (state.callbacks.executeWindowCommand && (state.callbacks.executeWindowCommand != callbacks.executeWindowCommand ||
+                                                 state.callbacks.userData != callbacks.userData))
+    {
+        cancelWindowCommands(state);
+    }
     state.callbacks = callbacks;
+}
+
+
+bool completeWindowCommand(std::uint32_t requestId, bool success, const WindowState& nextState)
+{
+    auto&                 state = getHostState();
+    const std::lock_guard lock(state.mutex);
+    if (state.destroyed)
+        return false;
+
+    const auto found = state.pendingWindowCommands.find(requestId);
+    if (found == state.pendingWindowCommands.end() || found->second.completed)
+        return false;
+
+    found->second.success   = success;
+    found->second.completed = true;
+    if (success)
+    {
+        applyWindowState(state, nextState);
+        applySuccessfulWindowCommand(state, found->second.command);
+    }
+    state.windowCommandCondition.notify_all();
+    return true;
+}
+
+
+void updateWindowState(const WindowState& nextState)
+{
+    auto&                 state = getHostState();
+    const std::lock_guard lock(state.mutex);
+    if (!state.destroyed)
+        applyWindowState(state, nextState);
 }
 
 } // namespace sf::priv::Harmony

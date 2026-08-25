@@ -85,8 +85,12 @@
 
 #elif defined(SFML_SYSTEM_HARMONY)
 
+#if defined(SFML_OPENGL_ES) || defined(SFML_HARMONY_MOBILE)
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <GLES2/gl2platform.h>
+#else
+#include <GL/gl.h>
+#endif
 
 #endif

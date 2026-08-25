@@ -99,16 +99,54 @@ jobs:
           type: { name: Debug, flags: -DCMAKE_BUILD_TYPE=Debug -DSFML_FATAL_OPENGL_ERRORS=ON }
         - platform: { name: OpenHarmony, os: ubuntu-24.04, flags: -GNinja -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake }
           config:
-            name: arm64-v8a
-            flags: -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_BUILD_TEST_SUITE=OFF -DSFML_BUILD_DOC=OFF -DSFML_HARMONY_DEVICE_FORM=MOBILE -DSFML_USE_SYSTEM_DEPS=OFF
+            name: MOBILE arm64-v8a
+            flags: -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DOHOS_COMPATIBLE_SDK_VERSION=22 -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_BUILD_TEST_SUITE=OFF -DSFML_BUILD_DOC=OFF -DSFML_HARMONY_DEVICE_FORM=MOBILE -DSFML_OPENGL_ES=ON -DSFML_USE_SYSTEM_DEPS=OFF
             arch: arm64-v8a
+            form: MOBILE
+            opengl_es: 'ON'
+            example: examples/harmony/entry/src/main/cpp
+            gl_library: libGLESv2.so
           type: { name: Release, flags: -DCMAKE_BUILD_TYPE=Release }
         - platform: { name: OpenHarmony, os: ubuntu-24.04, flags: -GNinja -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake }
           config:
-            name: arm64-v8a
-            flags: -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_BUILD_TEST_SUITE=OFF -DSFML_BUILD_DOC=OFF -DSFML_HARMONY_DEVICE_FORM=MOBILE -DSFML_USE_SYSTEM_DEPS=OFF
+            name: MOBILE arm64-v8a
+            flags: -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DOHOS_COMPATIBLE_SDK_VERSION=22 -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_BUILD_TEST_SUITE=OFF -DSFML_BUILD_DOC=OFF -DSFML_HARMONY_DEVICE_FORM=MOBILE -DSFML_OPENGL_ES=ON -DSFML_USE_SYSTEM_DEPS=OFF
             arch: arm64-v8a
+            form: MOBILE
+            opengl_es: 'ON'
+            example: examples/harmony/entry/src/main/cpp
+            gl_library: libGLESv2.so
           type: { name: Debug, flags: -DCMAKE_BUILD_TYPE=Debug -DSFML_FATAL_OPENGL_ERRORS=ON }
+        - platform: { name: OpenHarmony, os: ubuntu-24.04, flags: -GNinja -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake }
+          config:
+            name: 2IN1 desktop GL arm64-v8a
+            flags: -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DOHOS_COMPATIBLE_SDK_VERSION=22 -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_BUILD_TEST_SUITE=OFF -DSFML_BUILD_DOC=OFF -DSFML_HARMONY_DEVICE_FORM=2IN1 -DSFML_OPENGL_ES=OFF -DSFML_USE_SYSTEM_DEPS=OFF
+            arch: arm64-v8a
+            form: 2IN1
+            opengl_es: 'OFF'
+            example: examples/harmony-2in1/entry/src/main/cpp
+            gl_library: libGLv4.so
+          type: { name: Release, flags: -DCMAKE_BUILD_TYPE=Release }
+        - platform: { name: OpenHarmony, os: ubuntu-24.04, flags: -GNinja -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake }
+          config:
+            name: 2IN1 desktop GL arm64-v8a
+            flags: -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DOHOS_COMPATIBLE_SDK_VERSION=22 -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_BUILD_TEST_SUITE=OFF -DSFML_BUILD_DOC=OFF -DSFML_HARMONY_DEVICE_FORM=2IN1 -DSFML_OPENGL_ES=OFF -DSFML_USE_SYSTEM_DEPS=OFF
+            arch: arm64-v8a
+            form: 2IN1
+            opengl_es: 'OFF'
+            example: examples/harmony-2in1/entry/src/main/cpp
+            gl_library: libGLv4.so
+          type: { name: Debug, flags: -DCMAKE_BUILD_TYPE=Debug -DSFML_FATAL_OPENGL_ERRORS=ON }
+        - platform: { name: OpenHarmony, os: ubuntu-24.04, flags: -GNinja -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake }
+          config:
+            name: 2IN1 OpenGL ES arm64-v8a
+            flags: -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_shared -DOHOS_COMPATIBLE_SDK_VERSION=22 -DBUILD_SHARED_LIBS=OFF -DSFML_BUILD_EXAMPLES=OFF -DSFML_BUILD_TEST_SUITE=OFF -DSFML_BUILD_DOC=OFF -DSFML_HARMONY_DEVICE_FORM=2IN1 -DSFML_OPENGL_ES=ON -DSFML_USE_SYSTEM_DEPS=OFF
+            arch: arm64-v8a
+            form: 2IN1
+            opengl_es: 'ON'
+            example: examples/harmony-2in1/entry/src/main/cpp
+            gl_library: libGLESv2.so
+          type: { name: Release, flags: -DCMAKE_BUILD_TYPE=Release }
         exclude: # Shared libraries are not supported on iOS
         - platform: { name: iOS Xcode }
           config: { name: Shared }
@@ -142,7 +180,7 @@ jobs:
     - name: Validate OpenHarmony SDK
       if: matrix.platform.name == 'OpenHarmony'
       run: |
-        test "${{ steps.ohos-sdk.outputs.api-version }}" -ge 21
+        test "${{ steps.ohos-sdk.outputs.api-version }}" -ge 22
         test -f "$OHOS_SDK_NATIVE/build/cmake/ohos.toolchain.cmake"
         echo "OpenHarmony SDK ${{ steps.ohos-sdk.outputs.sdk-version }} (API ${{ steps.ohos-sdk.outputs.api-version }})"
 
@@ -229,6 +267,19 @@ jobs:
     - name: Configure CMake
       run: cmake --preset dev -DCMAKE_VERBOSE_MAKEFILE=ON -DSFML_RUN_IPV4_LINK_TESTS=ON -DSFML_RUN_IPV4_INTERNET_TESTS=ON -DSFML_RUN_IPV6_LINK_TESTS=ON -DSFML_NETWORK_TESTS_MAX_FDS=1028 ${{matrix.platform.flags}} ${{matrix.config.flags}} ${{matrix.type.flags}}
 
+    - name: Validate OpenHarmony Configuration
+      if: matrix.platform.name == 'OpenHarmony'
+      run: |
+        grep -Eq '^OHOS_COMPATIBLE_SDK_VERSION(:[^=]+)?=22$' build/CMakeCache.txt
+        grep -Eq '^SFML_HARMONY_DEVICE_FORM(:[^=]+)?=${{ matrix.config.form }}$' build/CMakeCache.txt
+        grep -Eq '^SFML_OPENGL_ES(:[^=]+)?=${{ matrix.config.opengl_es }}$' build/CMakeCache.txt
+        grep -Fq -- '-DSFML_HARMONY_${{ matrix.config.form }}' build/compile_commands.json
+        if [ "${{ matrix.config.opengl_es }}" = "ON" ]; then
+          grep -Fq -- '-DSFML_OPENGL_ES' build/compile_commands.json
+        else
+          ! grep -Fq -- '-DSFML_OPENGL_ES' build/compile_commands.json
+        fi
+
     - name: Build
       run: cmake --build build --config ${{ matrix.type.name == 'Debug' && 'Debug' || 'Release' }} --target install
 
@@ -298,7 +349,7 @@ jobs:
     - name: Build OpenHarmony Native Example
       if: matrix.platform.name == 'OpenHarmony'
       run: |
-        cmake -S examples/harmony/entry/src/main/cpp -B build/ohos-example -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_BUILD_TYPE=${{ matrix.type.name }} ${{matrix.platform.flags}} ${{matrix.config.flags}} ${{matrix.type.flags}}
+        cmake -S ${{ matrix.config.example }} -B build/ohos-example -DCMAKE_VERBOSE_MAKEFILE=ON -DCMAKE_BUILD_TYPE=${{ matrix.type.name }} ${{matrix.platform.flags}} ${{matrix.config.flags}} ${{matrix.type.flags}}
         cmake --build build/ohos-example --target entry --config ${{ matrix.type.name }}
 
     - name: Verify OpenHarmony ABI
@@ -310,6 +361,8 @@ jobs:
         file "$ENTRY_LIBRARY" | grep -Eq 'ELF 64-bit.*ARM aarch64'
         readelf -h "$ENTRY_LIBRARY"
         readelf -h "$ENTRY_LIBRARY" | grep -Eq 'Machine:[[:space:]]+AArch64'
+        readelf -d "$ENTRY_LIBRARY" | grep -F 'Shared library: [libEGL.so]'
+        readelf -d "$ENTRY_LIBRARY" | grep -F 'Shared library: [${{ matrix.config.gl_library }}]'
 
   coverage:
     name: Finalize Coverage Upload

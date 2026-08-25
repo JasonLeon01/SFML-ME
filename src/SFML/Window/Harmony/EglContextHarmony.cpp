@@ -59,6 +59,7 @@ namespace EglContextHarmonyImpl
 {
 sf::ContextSettings normalizeSettings(sf::ContextSettings settings)
 {
+#ifdef SFML_OPENGL_ES
     // The first Harmony backend intentionally exposes one share group made of
     // OpenGL ES 2.0 contexts.  Do this again at the EGL boundary so callers
     // cannot accidentally select an ES3 config even if they bypass the
@@ -66,6 +67,23 @@ sf::ContextSettings normalizeSettings(sf::ContextSettings settings)
     settings.majorVersion   = 2;
     settings.minorVersion   = 0;
     settings.attributeFlags = sf::ContextSettings::Default;
+#else
+    // Harmony desktop OpenGL starts at 3.0 and currently exposes at most 4.2.
+    // Keep this guard at the EGL boundary as well as in GlContext so internal
+    // callers cannot accidentally request an unsupported client version.
+    if (settings.majorVersion < 3)
+    {
+        settings.majorVersion = 3;
+        settings.minorVersion = 0;
+    }
+    else if (settings.majorVersion > 4 || (settings.majorVersion == 4 && settings.minorVersion > 2))
+    {
+        settings.majorVersion = 4;
+        settings.minorVersion = 2;
+    }
+
+    settings.attributeFlags &= sf::ContextSettings::Core | sf::ContextSettings::Debug;
+#endif
     return settings;
 }
 
@@ -105,6 +123,44 @@ EGLDisplay getInitializedDisplay()
     return display;
 }
 
+#ifdef SFML_OPENGL_ES
+constexpr EGLenum     harmonyClientApi     = EGL_OPENGL_ES_API;
+constexpr const char* harmonyClientApiName = "OpenGL ES";
+#else
+constexpr EGLenum     harmonyClientApi     = EGL_OPENGL_API;
+constexpr const char* harmonyClientApiName = "desktop OpenGL";
+
+bool queryDesktopGlSupport()
+{
+    if (!eglGetProcAddress)
+    {
+        sf::err() << "Cannot resolve OH_Graphics_QueryGL because eglGetProcAddress is unavailable; "
+                     "rebuild SFML with SFML_OPENGL_ES enabled for this device"
+                  << std::endl;
+        return false;
+    }
+
+    using QueryGlFunction = EGLBoolean (*)();
+    const auto address    = eglGetProcAddress("OH_Graphics_QueryGL");
+    const auto queryGl    = reinterpret_cast<QueryGlFunction>(address);
+    if (!queryGl)
+    {
+        sf::err() << "OH_Graphics_QueryGL is unavailable in this Harmony API 22+ desktop OpenGL build; "
+                     "rebuild SFML with SFML_OPENGL_ES enabled for this device"
+                  << std::endl;
+        return false;
+    }
+
+    if (queryGl() != EGL_FALSE)
+        return true;
+
+    sf::err() << "OH_Graphics_QueryGL reports that desktop OpenGL is unavailable (verify NEED_OPENGL=1); "
+                 "rebuild SFML with SFML_OPENGL_ES enabled for this device"
+              << std::endl;
+    return false;
+}
+#endif
+
 
 ////////////////////////////////////////////////////////////
 bool ensureInit()
@@ -136,11 +192,20 @@ bool ensureInit()
                            return;
                        }
 
+#ifndef SFML_OPENGL_ES
+                       // The 2-in-1 desktop backend requires API 22. Treat both
+                       // a missing capability query and a negative result as
+                       // authoritative; this binary must never fall back to GLES.
+                       if (!queryDesktopGlSupport())
+                           return;
+#endif
+
                        // HarmonyOS only reports EGL 1.0 before a display is
                        // initialized, so bind after reloading against it.
-                       if (!eglBindAPI || eglCheck(eglBindAPI(EGL_OPENGL_ES_API)) == EGL_FALSE)
+                       if (!eglBindAPI || eglCheck(eglBindAPI(harmonyClientApi)) == EGL_FALSE)
                        {
-                           sf::err() << "Failed to bind the EGL client API" << std::endl;
+                           sf::err() << "Failed to bind the Harmony EGL " << harmonyClientApiName << " client API"
+                                     << std::endl;
                            return;
                        }
 
@@ -166,24 +231,55 @@ EglContextHarmony::EglContextHarmony(EglContextHarmony* shared)
     const ContextSettings settings = EglContextHarmonyImpl::normalizeSettings(
         shared ? shared->m_settings : ContextSettings{});
 
-    // Get the best EGL config matching the default video settings
+    // Prefer a real pbuffer. Desktop OpenGL can use a window-capable config
+    // without a surface only when EGL_KHR_surfaceless_context is advertised.
     m_config = getBestConfig(m_display, VideoMode::getDesktopMode().bitsPerPixel, settings, EGL_PBUFFER_BIT);
+#ifndef SFML_OPENGL_ES
+    if (!m_config && SF_GLAD_EGL_KHR_surfaceless_context)
+    {
+        m_config = getBestConfig(m_display, VideoMode::getDesktopMode().bitsPerPixel, settings, EGL_WINDOW_BIT);
+        m_surfacelessContext = m_config != nullptr;
+    }
+#endif
     if (!m_config)
     {
+#ifdef SFML_OPENGL_ES
         err() << "Failed to find an EGL pbuffer configuration supporting OpenGL ES " << settings.majorVersion << "."
               << settings.minorVersion << std::endl;
+#else
+        err() << "Failed to find a desktop OpenGL EGL pbuffer configuration"
+              << (SF_GLAD_EGL_KHR_surfaceless_context ? " or a window configuration for surfaceless use"
+                                                      : "; EGL_KHR_surfaceless_context is unavailable")
+              << std::endl;
+#endif
         return;
     }
     updateSettings();
 
     // Create EGL context
     createContext(shared, settings, VideoMode::getDesktopMode().bitsPerPixel, EGL_PBUFFER_BIT);
+    if (m_context == EGL_NO_CONTEXT)
+        return;
 
-    // Note: The EGL specs say that attribList can be a null pointer when passed to eglCreatePbufferSurface,
-    // but this is resulting in a segfault. Bug in Android?
-    static constexpr std::array attribList = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
+    if (!m_surfacelessContext)
+    {
+        static constexpr std::array attribList = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
+        m_surface = eglCheck(eglCreatePbufferSurface(m_display, m_config, attribList.data()));
 
-    m_surface = eglCheck(eglCreatePbufferSurface(m_display, m_config, attribList.data()));
+        if (m_surface == EGL_NO_SURFACE)
+        {
+#ifndef SFML_OPENGL_ES
+            if (SF_GLAD_EGL_KHR_surfaceless_context)
+                m_surfacelessContext = true;
+            else
+#endif
+            {
+                err() << "Failed to create the Harmony shared EGL pbuffer" << std::endl;
+                eglCheck(eglDestroyContext(m_display, m_context));
+                m_context = EGL_NO_CONTEXT;
+            }
+        }
+    }
 }
 
 
@@ -203,18 +299,37 @@ EglContextHarmony::EglContextHarmony(EglContextHarmony*                 shared,
     m_display = EglContextHarmonyImpl::getInitializedDisplay();
 
     // Get the best EGL config matching the requested video settings
-    ContextSettings effectiveSettings     = settings;
-    effectiveSettings                     = EglContextHarmonyImpl::normalizeSettings(effectiveSettings);
-    constexpr EGLint requestedSurfaceType = EGL_WINDOW_BIT | EGL_PBUFFER_BIT;
+    ContextSettings effectiveSettings = settings;
+    effectiveSettings                 = EglContextHarmonyImpl::normalizeSettings(effectiveSettings);
+#ifdef SFML_OPENGL_ES
+    const EGLint requestedSurfaceType = EGL_WINDOW_BIT | EGL_PBUFFER_BIT;
+#else
+    EGLint requestedSurfaceType = EGL_WINDOW_BIT | EGL_PBUFFER_BIT;
+#endif
     m_config = getBestConfig(m_display, bitsPerPixel, effectiveSettings, requestedSurfaceType);
+#ifndef SFML_OPENGL_ES
+    if (!m_config && SF_GLAD_EGL_KHR_surfaceless_context)
+    {
+        requestedSurfaceType = EGL_WINDOW_BIT;
+        m_config             = getBestConfig(m_display, bitsPerPixel, effectiveSettings, requestedSurfaceType);
+        m_surfacelessContext = m_config != nullptr;
+    }
+#endif
 
     if (!m_config)
     {
+#ifdef SFML_OPENGL_ES
         if (shared)
             err() << "Failed to find an EGL window configuration matching the locked OpenGL ES share-group version"
                   << std::endl;
         else
             err() << "Failed to find an EGL configuration supporting OpenGL ES 2" << std::endl;
+#else
+        err() << "Failed to find a desktop OpenGL EGL window configuration with pbuffer support"
+              << (SF_GLAD_EGL_KHR_surfaceless_context ? " or a window configuration for surfaceless fallback"
+                                                      : "; EGL_KHR_surfaceless_context is unavailable")
+              << std::endl;
+#endif
         return;
     }
 
@@ -222,16 +337,34 @@ EglContextHarmony::EglContextHarmony(EglContextHarmony*                 shared,
 
     // Create EGL context
     createContext(shared, effectiveSettings, bitsPerPixel, requestedSurfaceType);
-
-    // XComponent surfaces are asynchronous. Keep the window context current on
-    // a persistent pbuffer while the native surface is absent so its identity,
-    // share group and thread-local SFML bookkeeping all remain stable.
-    static constexpr std::array fallbackAttributes = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
-    m_fallbackSurface = eglCheck(eglCreatePbufferSurface(m_display, m_config, fallbackAttributes.data()));
-    if (m_fallbackSurface == EGL_NO_SURFACE)
-    {
-        err() << "Failed to create the Harmony fallback EGL pbuffer" << std::endl;
+    if (m_context == EGL_NO_CONTEXT)
         return;
+
+    if (!m_surfacelessContext)
+    {
+        // XComponent surfaces are asynchronous. Keep the window context current
+        // on a persistent pbuffer while the native surface is absent.
+        static constexpr std::array fallbackAttributes = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
+        m_fallbackSurface = eglCheck(eglCreatePbufferSurface(m_display, m_config, fallbackAttributes.data()));
+        if (m_fallbackSurface == EGL_NO_SURFACE)
+        {
+#ifndef SFML_OPENGL_ES
+            if (SF_GLAD_EGL_KHR_surfaceless_context)
+                m_surfacelessContext = true;
+            else
+#endif
+            {
+#ifdef SFML_OPENGL_ES
+                err() << "Failed to create the Harmony fallback EGL pbuffer" << std::endl;
+#else
+                err() << "Failed to create the Harmony fallback EGL pbuffer and surfaceless contexts are unavailable"
+                      << std::endl;
+#endif
+                eglCheck(eglDestroyContext(m_display, m_context));
+                m_context = EGL_NO_CONTEXT;
+                return;
+            }
+        }
     }
 
     // Keep the native window and generation from the same lifecycle state.
@@ -254,27 +387,60 @@ EglContextHarmony::EglContextHarmony(EglContextHarmony* shared, const ContextSet
     const ContextSettings effectiveSettings = EglContextHarmonyImpl::normalizeSettings(settings);
     m_display                               = EglContextHarmonyImpl::getInitializedDisplay();
     m_config = getBestConfig(m_display, VideoMode::getDesktopMode().bitsPerPixel, effectiveSettings, EGL_PBUFFER_BIT);
+#ifndef SFML_OPENGL_ES
+    if (!m_config && SF_GLAD_EGL_KHR_surfaceless_context)
+    {
+        m_config = getBestConfig(m_display, VideoMode::getDesktopMode().bitsPerPixel, effectiveSettings, EGL_WINDOW_BIT);
+        m_surfacelessContext = m_config != nullptr;
+    }
+#endif
 
     if (!m_config)
     {
+#ifdef SFML_OPENGL_ES
         if (shared)
             err() << "Failed to find an EGL pbuffer configuration matching the locked OpenGL ES share-group version"
                   << std::endl;
         else
             err() << "Failed to find an EGL configuration supporting OpenGL ES 2" << std::endl;
+#else
+        err() << "Failed to find a desktop OpenGL EGL pbuffer configuration"
+              << (SF_GLAD_EGL_KHR_surfaceless_context ? " or a window configuration for surfaceless use"
+                                                      : "; EGL_KHR_surfaceless_context is unavailable")
+              << std::endl;
+#endif
         return;
     }
 
     updateSettings();
 
     createContext(shared, effectiveSettings, VideoMode::getDesktopMode().bitsPerPixel, EGL_PBUFFER_BIT);
+    if (m_context == EGL_NO_CONTEXT)
+        return;
 
-    const std::array attribList = {EGL_WIDTH,
-                                   static_cast<EGLint>(std::max(size.x, 1u)),
-                                   EGL_HEIGHT,
-                                   static_cast<EGLint>(std::max(size.y, 1u)),
-                                   EGL_NONE};
-    m_surface                   = eglCheck(eglCreatePbufferSurface(m_display, m_config, attribList.data()));
+    if (!m_surfacelessContext)
+    {
+        const std::array attribList = {EGL_WIDTH,
+                                       static_cast<EGLint>(std::max(size.x, 1u)),
+                                       EGL_HEIGHT,
+                                       static_cast<EGLint>(std::max(size.y, 1u)),
+                                       EGL_NONE};
+        m_surface                   = eglCheck(eglCreatePbufferSurface(m_display, m_config, attribList.data()));
+
+        if (m_surface == EGL_NO_SURFACE)
+        {
+#ifndef SFML_OPENGL_ES
+            if (SF_GLAD_EGL_KHR_surfaceless_context)
+                m_surfacelessContext = true;
+            else
+#endif
+            {
+                err() << "Failed to create the Harmony offscreen EGL pbuffer" << std::endl;
+                eglCheck(eglDestroyContext(m_display, m_context));
+                m_context = EGL_NO_CONTEXT;
+            }
+        }
+    }
 }
 
 
@@ -322,6 +488,9 @@ GlFunctionPointer EglContextHarmony::getFunction(const char* name)
 ////////////////////////////////////////////////////////////
 bool EglContextHarmony::makeCurrent(bool current)
 {
+    if (m_display == EGL_NO_DISPLAY || m_context == EGL_NO_CONTEXT || !eglMakeCurrent)
+        return false;
+
     if (m_harmonyWindowContext)
     {
         if (!current)
@@ -343,7 +512,7 @@ bool EglContextHarmony::makeCurrent(bool current)
 
         return makeHarmonyCurrent(m_surface != EGL_NO_SURFACE ? m_surface : m_fallbackSurface);
     }
-    if (m_surface == EGL_NO_SURFACE)
+    if (m_surface == EGL_NO_SURFACE && !m_surfacelessContext)
         return false;
 
     if (current)
@@ -365,7 +534,10 @@ void EglContextHarmony::display()
             return;
     }
     if (m_surface != EGL_NO_SURFACE)
-        eglCheck(eglSwapBuffers(m_display, m_surface));
+    {
+        if (eglCheck(eglSwapBuffers(m_display, m_surface)) == EGL_FALSE)
+            err() << "Failed to present the Harmony EGL window surface" << std::endl;
+    }
 }
 
 
@@ -399,14 +571,65 @@ void EglContextHarmony::createContext(EglContextHarmony*     shared,
     if (toShared != EGL_NO_CONTEXT)
         eglCheck(eglMakeCurrent(m_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));
 
-    (void)settings;
     (void)bitsPerPixel;
     (void)surfaceType;
+
+    if (shared && toShared == EGL_NO_CONTEXT)
+    {
+        err() << "Cannot create a Harmony EGL context from an invalid shared context" << std::endl;
+        return;
+    }
+
+#ifdef SFML_OPENGL_ES
+    (void)settings;
     static constexpr std::array contextAttributes{EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
     m_context = eglCheck(eglCreateContext(m_display, m_config, toShared, contextAttributes.data()));
 
     if (m_context == EGL_NO_CONTEXT)
         err() << "Failed to create an OpenGL ES context" << std::endl;
+#else
+    if (!SF_GLAD_EGL_VERSION_1_5 && !SF_GLAD_EGL_KHR_create_context)
+    {
+        err() << "Harmony desktop OpenGL requires EGL 1.5 or EGL_KHR_create_context" << std::endl;
+        return;
+    }
+
+    std::array<EGLint, 9> contextAttributes{};
+    std::size_t           attributeCount  = 0;
+    const auto            appendAttribute = [&](EGLint attribute, EGLint value)
+    {
+        contextAttributes[attributeCount++] = attribute;
+        contextAttributes[attributeCount++] = value;
+    };
+
+    appendAttribute(EGL_CONTEXT_MAJOR_VERSION, static_cast<EGLint>(settings.majorVersion));
+    appendAttribute(EGL_CONTEXT_MINOR_VERSION, static_cast<EGLint>(settings.minorVersion));
+
+    if (settings.majorVersion > 3 || (settings.majorVersion == 3 && settings.minorVersion >= 2))
+    {
+        appendAttribute(EGL_CONTEXT_OPENGL_PROFILE_MASK,
+                        (settings.attributeFlags & ContextSettings::Core) ? EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT
+                                                                          : EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT);
+    }
+
+    if (settings.attributeFlags & ContextSettings::Debug)
+    {
+        if (SF_GLAD_EGL_VERSION_1_5)
+            appendAttribute(EGL_CONTEXT_OPENGL_DEBUG, EGL_TRUE);
+        else
+            appendAttribute(EGL_CONTEXT_FLAGS_KHR, EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR);
+    }
+
+    contextAttributes[attributeCount] = EGL_NONE;
+    m_context = eglCheck(eglCreateContext(m_display, m_config, toShared, contextAttributes.data()));
+
+    if (m_context == EGL_NO_CONTEXT)
+    {
+        err() << "Failed to create a Harmony desktop OpenGL " << settings.majorVersion << "." << settings.minorVersion
+              << ((settings.attributeFlags & ContextSettings::Core) ? " core" : " compatibility")
+              << ((settings.attributeFlags & ContextSettings::Debug) ? " debug" : "") << " context" << std::endl;
+    }
+#endif
 }
 
 
@@ -442,12 +665,12 @@ void EglContextHarmony::destroySurface()
 
     if (m_harmonyWindowContext && eglGetCurrentContext && eglCheck(eglGetCurrentContext()) == m_context)
     {
-        // Never leave the persistent EGLContext surfaceless: move it to the
-        // pbuffer before destroying the XComponent surface. This deliberately
+        // Move the persistent context to its pbuffer or its explicitly supported
+        // surfaceless target before destroying the XComponent surface. This
         // bypasses GlContext::setActive() so its context ID remains unchanged.
         if (!makeHarmonyCurrent(m_fallbackSurface))
         {
-            err() << "Failed to move the Harmony EGL context to its fallback pbuffer" << std::endl;
+            err() << "Failed to move the Harmony EGL context to its fallback target" << std::endl;
             // Keep the SFML cache intact until synchronization either restores
             // the context or reports failure to GlContext::setActive().
             if (eglMakeCurrent)
@@ -497,7 +720,7 @@ bool EglContextHarmony::synchronizeHarmonySurface()
         const bool surfaceAvailable = snapshot.window && snapshot.size.x && snapshot.size.y;
         const bool surfaceCreated   = m_surface != EGL_NO_SURFACE;
         if (snapshot.generation == m_surfaceGeneration && surfaceAvailable == surfaceCreated)
-            return m_surface != EGL_NO_SURFACE || m_fallbackSurface != EGL_NO_SURFACE;
+            return m_surface != EGL_NO_SURFACE || m_fallbackSurface != EGL_NO_SURFACE || m_surfacelessContext;
 
         // Publish first so a failed fallback transition that has to deactivate
         // the context cannot recursively process the same generation.
@@ -518,13 +741,13 @@ bool EglContextHarmony::synchronizeHarmonySurface()
     if (restoreCurrent && !makeHarmonyCurrent(target))
         return false;
 
-    return target != EGL_NO_SURFACE;
+    return target != EGL_NO_SURFACE || m_surfacelessContext;
 }
 
 
 bool EglContextHarmony::makeHarmonyCurrent(EGLSurface surface)
 {
-    if (surface == EGL_NO_SURFACE || !eglMakeCurrent)
+    if ((surface == EGL_NO_SURFACE && !m_surfacelessContext) || m_context == EGL_NO_CONTEXT || !eglMakeCurrent)
         return false;
 
     if (eglCheck(eglMakeCurrent(m_display, surface, surface, m_context)) == EGL_FALSE)
@@ -568,7 +791,11 @@ EGLConfig EglContextHarmony::getBestConfig(EGLDisplay             display,
         int renderableType = 0;
         eglCheck(eglGetConfigAttrib(display, configs[i], EGL_SURFACE_TYPE, &surfaceType));
         eglCheck(eglGetConfigAttrib(display, configs[i], EGL_RENDERABLE_TYPE, &renderableType));
+#ifdef SFML_OPENGL_ES
         constexpr int requiredRenderableType = EGL_OPENGL_ES2_BIT;
+#else
+        constexpr int requiredRenderableType = EGL_OPENGL_BIT;
+#endif
         if ((surfaceType & requestedSurfaceType) != requestedSurfaceType || !(renderableType & requiredRenderableType))
             continue;
 
@@ -618,8 +845,13 @@ EGLConfig EglContextHarmony::getBestConfig(EGLDisplay             display,
 ////////////////////////////////////////////////////////////
 void EglContextHarmony::updateSettings()
 {
-    m_settings.majorVersion      = 2;
-    m_settings.minorVersion      = 0;
+#ifdef SFML_OPENGL_ES
+    m_settings.majorVersion = 2;
+    m_settings.minorVersion = 0;
+#else
+    m_settings.majorVersion = 3;
+    m_settings.minorVersion = 0;
+#endif
     m_settings.attributeFlags    = ContextSettings::Default;
     m_settings.depthBits         = 0;
     m_settings.stencilBits       = 0;

@@ -37,6 +37,7 @@
 #include <cstdint>
 
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 struct ma_engine;
 
 

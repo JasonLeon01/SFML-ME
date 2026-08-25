@@ -62,6 +62,8 @@ private:
     Vector2u m_size;
     bool     m_claimed{};
     bool     m_hasFocus{};
+    bool     m_cursorGrabDesired{};
+    bool     m_cursorGrabActual{};
 };
 
 } // namespace sf::priv

@@ -33,6 +33,7 @@
 #include <SFML/Main/MainHarmony.hpp>
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <array>
+#include <chrono>
 #include <exception>
 #include <hilog/log.h>
 #include <memory>
@@ -201,6 +202,7 @@ struct JsHostState
     napi_threadsafe_function customPointer{};
     napi_threadsafe_function virtualKeyboard{};
     napi_threadsafe_function configureWindow{};
+    napi_threadsafe_function executeWindowCommand{};
     napi_threadsafe_function requestExit{};
 };
 
@@ -288,6 +290,98 @@ void callWindowConfiguration(napi_env env, napi_value function, void*, void* dat
 }
 
 
+bool setNamedUint32(napi_env env, napi_value object, const char* name, std::uint32_t value)
+{
+    napi_value property{};
+    return napi_create_uint32(env, value, &property) == napi_ok &&
+           napi_set_named_property(env, object, name, property) == napi_ok;
+}
+
+
+bool setNamedInt32(napi_env env, napi_value object, const char* name, std::int32_t value)
+{
+    napi_value property{};
+    return napi_create_int32(env, value, &property) == napi_ok &&
+           napi_set_named_property(env, object, name, property) == napi_ok;
+}
+
+
+bool setNamedBoolean(napi_env env, napi_value object, const char* name, bool value)
+{
+    napi_value property{};
+    return napi_get_boolean(env, value, &property) == napi_ok &&
+           napi_set_named_property(env, object, name, property) == napi_ok;
+}
+
+
+bool setNamedBytes(napi_env env, napi_value object, const char* name, const std::vector<std::uint8_t>& bytes)
+{
+    void*      destination{};
+    napi_value buffer{};
+    napi_value array{};
+    if (napi_create_arraybuffer(env, bytes.size(), &destination, &buffer) != napi_ok || (!bytes.empty() && !destination))
+        return false;
+    if (!bytes.empty())
+        std::memcpy(destination, bytes.data(), bytes.size());
+    return napi_create_typedarray(env, napi_uint8_array, bytes.size(), buffer, 0, &array) == napi_ok &&
+           napi_set_named_property(env, object, name, array) == napi_ok;
+}
+
+
+void callWindowCommand(napi_env env, napi_value function, void*, void* data)
+{
+    const std::unique_ptr<sf::priv::Harmony::WindowCommand> command(static_cast<sf::priv::Harmony::WindowCommand*>(data));
+    if (!command)
+        return;
+
+    const auto reject = [&]
+    { (void)sf::priv::Harmony::completeWindowCommand(command->requestId, false, sf::priv::Harmony::getWindowState()); };
+    if (!env || !function)
+    {
+        reject();
+        return;
+    }
+
+    napi_value object{};
+    napi_value title{};
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               command->deadline - std::chrono::steady_clock::now())
+                               .count();
+    if (remaining <= 0)
+    {
+        reject();
+        return;
+    }
+    if (napi_create_object(env, &object) != napi_ok || !setNamedUint32(env, object, "requestId", command->requestId) ||
+        !setNamedUint32(env, object, "timeoutMs", static_cast<std::uint32_t>(remaining)) ||
+        !setNamedUint32(env, object, "type", static_cast<std::uint32_t>(command->type)) ||
+        !setNamedInt32(env, object, "x", command->position.x) || !setNamedInt32(env, object, "y", command->position.y) ||
+        !setNamedUint32(env, object, "width", command->size.x) || !setNamedUint32(env, object, "height", command->size.y) ||
+        !setNamedBoolean(env, object, "hasSizeLimit", command->sizeLimit.has_value()) ||
+        !setNamedUint32(env, object, "limitWidth", command->sizeLimit ? command->sizeLimit->x : 0) ||
+        !setNamedUint32(env, object, "limitHeight", command->sizeLimit ? command->sizeLimit->y : 0) ||
+        napi_create_string_utf8(env, command->title.data(), command->title.size(), &title) != napi_ok ||
+        napi_set_named_property(env, object, "title", title) != napi_ok ||
+        !setNamedUint32(env, object, "iconWidth", command->iconSize.x) ||
+        !setNamedUint32(env, object, "iconHeight", command->iconSize.y) ||
+        !setNamedBytes(env, object, "iconPixels", command->iconPixels) ||
+        !setNamedUint32(env, object, "style", command->style) ||
+        !setNamedBoolean(env, object, "fullscreen", command->fullscreen) ||
+        !setNamedBoolean(env, object, "visible", command->visible) ||
+        !setNamedBoolean(env, object, "keepScreenOn", command->keepScreenOn))
+    {
+        reject();
+        return;
+    }
+
+    napi_value receiver{};
+    napi_value ignored{};
+    if (napi_get_global(env, &receiver) != napi_ok ||
+        napi_call_function(env, receiver, function, 1, &object, &ignored) != napi_ok)
+        reject();
+}
+
+
 bool createThreadsafeFunction(napi_env                         env,
                               napi_value                       object,
                               const char*                      property,
@@ -307,11 +401,26 @@ bool createThreadsafeFunction(napi_env                         env,
 }
 
 
+bool createOptionalThreadsafeFunction(napi_env                         env,
+                                      napi_value                       object,
+                                      const char*                      property,
+                                      napi_threadsafe_function_call_js callback,
+                                      napi_threadsafe_function&        result)
+{
+    bool exists{};
+    if (napi_has_named_property(env, object, property, &exists) != napi_ok)
+        return false;
+    if (!exists)
+        return true;
+    return createThreadsafeFunction(env, object, property, callback, result);
+}
+
+
 void releaseJsHostCallbacks()
 {
     sf::priv::Harmony::setHostCallbacks({});
 
-    std::array<napi_threadsafe_function, 6> functions{};
+    std::array<napi_threadsafe_function, 7> functions{};
     {
         const std::lock_guard lock(jsHost.mutex);
         functions = {std::exchange(jsHost.pointerVisible, nullptr),
@@ -319,6 +428,7 @@ void releaseJsHostCallbacks()
                      std::exchange(jsHost.customPointer, nullptr),
                      std::exchange(jsHost.virtualKeyboard, nullptr),
                      std::exchange(jsHost.configureWindow, nullptr),
+                     std::exchange(jsHost.executeWindowCommand, nullptr),
                      std::exchange(jsHost.requestExit, nullptr)};
     }
 
@@ -339,6 +449,7 @@ bool installJsHostCallbacks(napi_env env, napi_value object)
     napi_threadsafe_function customPointer{};
     napi_threadsafe_function virtualKeyboard{};
     napi_threadsafe_function configureWindow{};
+    napi_threadsafe_function executeWindowCommand{};
     napi_threadsafe_function requestExit{};
 
     if (!createThreadsafeFunction(env, object, "setPointerVisible", callBoolean, pointerVisible) ||
@@ -346,10 +457,11 @@ bool installJsHostCallbacks(napi_env env, napi_value object)
         !createThreadsafeFunction(env, object, "setCustomPointer", callCustomPointer, customPointer) ||
         !createThreadsafeFunction(env, object, "setVirtualKeyboardVisible", callBoolean, virtualKeyboard) ||
         !createThreadsafeFunction(env, object, "configureWindow", callWindowConfiguration, configureWindow) ||
+        !createOptionalThreadsafeFunction(env, object, "executeWindowCommand", callWindowCommand, executeWindowCommand) ||
         !createThreadsafeFunction(env, object, "requestExit", callVoid, requestExit))
     {
         for (auto* const function :
-             {pointerVisible, systemPointer, customPointer, virtualKeyboard, configureWindow, requestExit})
+             {pointerVisible, systemPointer, customPointer, virtualKeyboard, configureWindow, executeWindowCommand, requestExit})
         {
             if (function)
                 napi_release_threadsafe_function(function, napi_tsfn_abort);
@@ -359,12 +471,13 @@ bool installJsHostCallbacks(napi_env env, napi_value object)
 
     {
         const std::lock_guard lock(jsHost.mutex);
-        jsHost.pointerVisible  = pointerVisible;
-        jsHost.systemPointer   = systemPointer;
-        jsHost.customPointer   = customPointer;
-        jsHost.virtualKeyboard = virtualKeyboard;
-        jsHost.configureWindow = configureWindow;
-        jsHost.requestExit     = requestExit;
+        jsHost.pointerVisible       = pointerVisible;
+        jsHost.systemPointer        = systemPointer;
+        jsHost.customPointer        = customPointer;
+        jsHost.virtualKeyboard      = virtualKeyboard;
+        jsHost.configureWindow      = configureWindow;
+        jsHost.executeWindowCommand = executeWindowCommand;
+        jsHost.requestExit          = requestExit;
     }
 
     sf::priv::Harmony::HostCallbacks callbacks;
@@ -418,6 +531,22 @@ bool installJsHostCallbacks(napi_env env, napi_value object)
             napi_call_threadsafe_function(jsHost.configureWindow, value.get(), napi_tsfn_nonblocking) == napi_ok)
             (void)value.release(); // NOLINT(bugprone-unused-return-value) - The queued callback owns the payload.
     };
+    if (executeWindowCommand)
+    {
+        callbacks.executeWindowCommand = [](const sf::priv::Harmony::WindowCommand& command, void*)
+        {
+            auto value = std::make_unique<sf::priv::Harmony::WindowCommand>(command);
+
+            const std::lock_guard lock(jsHost.mutex);
+            if (jsHost.executeWindowCommand &&
+                napi_call_threadsafe_function(jsHost.executeWindowCommand, value.get(), napi_tsfn_nonblocking) == napi_ok)
+            {
+                (void)value.release(); // NOLINT(bugprone-unused-return-value) - The queued callback owns the payload.
+                return true;
+            }
+            return false;
+        };
+    }
     callbacks.requestExit = [](void*)
     {
         const std::lock_guard lock(jsHost.mutex);
@@ -482,6 +611,26 @@ napi_value makeBoolean(napi_env env, bool value)
     napi_value result{};
     napi_get_boolean(env, value, &result);
     return result;
+}
+
+
+bool readWindowState(napi_env env, const napi_value* arguments, sf::priv::Harmony::WindowState& state)
+{
+    std::int32_t  x{};
+    std::int32_t  y{};
+    std::uint32_t width{};
+    std::uint32_t height{};
+    if (napi_get_value_int32(env, arguments[0], &x) != napi_ok || napi_get_value_int32(env, arguments[1], &y) != napi_ok ||
+        napi_get_value_uint32(env, arguments[2], &width) != napi_ok ||
+        napi_get_value_uint32(env, arguments[3], &height) != napi_ok ||
+        napi_get_value_bool(env, arguments[4], &state.visible) != napi_ok ||
+        napi_get_value_bool(env, arguments[5], &state.focused) != napi_ok ||
+        napi_get_value_bool(env, arguments[6], &state.fullscreen) != napi_ok)
+        return false;
+
+    state.position   = {x, y};
+    state.clientSize = {width, height};
+    return true;
 }
 
 
@@ -613,6 +762,15 @@ napi_value initializeHost(napi_env env, napi_callback_info info)
     // generation is canceled if destroy wins while Attach is in progress.
     const bool inputMethodAvailable = sf::priv::Harmony::initializeInputMethod(windowId);
 
+    // Publish the Stage ID before commit can start sfmlMain. The 2-in-1
+    // backend uses it for native property queries and cursor confinement.
+    {
+        auto&                 host = sf::priv::Harmony::getHostState();
+        const std::lock_guard lock(host.mutex);
+        if (!host.destroyed)
+            host.windowId = windowId;
+    }
+
     if (!sf::priv::Harmony::commitHostInitialization(hostToken))
     {
         rollbackHostInitialization(hostToken, initializationRegistration, true);
@@ -632,6 +790,51 @@ napi_value initializeHost(napi_env env, napi_callback_info info)
 napi_value onForeground(napi_env env, napi_callback_info)
 {
     sf::priv::Harmony::notifyForeground();
+    return makeBoolean(env, true);
+}
+
+
+napi_value completeWindowCommand(napi_env env, napi_callback_info info)
+{
+    std::array<napi_value, 9> arguments{};
+    std::size_t               count = arguments.size();
+    if (napi_get_cb_info(env, info, &count, arguments.data(), nullptr, nullptr) != napi_ok || count != arguments.size())
+        return makeBoolean(env, false);
+
+    std::uint32_t                  requestId{};
+    bool                           success{};
+    sf::priv::Harmony::WindowState state;
+    if (napi_get_value_uint32(env, arguments[0], &requestId) != napi_ok || requestId == 0 ||
+        napi_get_value_bool(env, arguments[1], &success) != napi_ok || !readWindowState(env, arguments.data() + 2, state))
+        return makeBoolean(env, false);
+
+    return makeBoolean(env, sf::priv::Harmony::completeWindowCommand(requestId, success, state));
+}
+
+
+napi_value isWindowCommandPending(napi_env env, napi_callback_info info)
+{
+    napi_value    argument{};
+    std::size_t   count = 1;
+    std::uint32_t requestId{};
+    if (napi_get_cb_info(env, info, &count, &argument, nullptr, nullptr) != napi_ok || count != 1 ||
+        napi_get_value_uint32(env, argument, &requestId) != napi_ok || requestId == 0)
+        return makeBoolean(env, false);
+
+    return makeBoolean(env, sf::priv::Harmony::isWindowCommandPending(requestId));
+}
+
+
+napi_value updateWindowState(napi_env env, napi_callback_info info)
+{
+    std::array<napi_value, 7>      arguments{};
+    std::size_t                    count = arguments.size();
+    sf::priv::Harmony::WindowState state;
+    if (napi_get_cb_info(env, info, &count, arguments.data(), nullptr, nullptr) != napi_ok ||
+        count != arguments.size() || !readWindowState(env, arguments.data(), state))
+        return makeBoolean(env, false);
+
+    sf::priv::Harmony::updateWindowState(state);
     return makeBoolean(env, true);
 }
 
@@ -787,6 +990,9 @@ napi_value initializeNativeApp(napi_env env, napi_value exports)
         napi_property_descriptor{"initializeHost", nullptr, ::initializeHost, nullptr, nullptr, nullptr, napi_default, nullptr},
         napi_property_descriptor{"onForeground", nullptr, ::onForeground, nullptr, nullptr, nullptr, napi_default, nullptr},
         napi_property_descriptor{"onBackground", nullptr, ::onBackground, nullptr, nullptr, nullptr, napi_default, nullptr},
+        napi_property_descriptor{"completeWindowCommand", nullptr, ::completeWindowCommand, nullptr, nullptr, nullptr, napi_default, nullptr},
+        napi_property_descriptor{"isWindowCommandPending", nullptr, ::isWindowCommandPending, nullptr, nullptr, nullptr, napi_default, nullptr},
+        napi_property_descriptor{"updateWindowState", nullptr, ::updateWindowState, nullptr, nullptr, nullptr, napi_default, nullptr},
         napi_property_descriptor{"onXComponentDestroy", nullptr, ::onXComponentDestroy, nullptr, nullptr, nullptr, napi_default, registeredComponent},
         napi_property_descriptor{"onDestroy", nullptr, ::onDestroy, nullptr, nullptr, nullptr, napi_default, nullptr},
         napi_property_descriptor{"submitText", nullptr, ::submitText, nullptr, nullptr, nullptr, napi_default, nullptr},

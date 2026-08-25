@@ -98,29 +98,154 @@ void main()
 }
 )";
 
-bool allowsDefaultStage(std::string_view source)
+bool isGlslWhitespace(char character)
 {
-    const std::size_t directive = source.find("#version");
-    if (directive == std::string_view::npos)
-        return true;
+    return character == ' ' || character == '\t' || character == '\r' || character == '\n' || character == '\f' ||
+           character == '\v';
+}
 
-    std::size_t position = directive + std::string_view("#version").size();
-    while ((position < source.size()) && ((source[position] == ' ') || (source[position] == '\t')))
+bool startsWith(std::string_view value, std::string_view prefix)
+{
+    return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
+}
+
+std::optional<unsigned int> getGlslVersion(std::string_view source)
+{
+    std::size_t position = startsWith(source, "\xEF\xBB\xBF") ? 3 : 0;
+    while (position < source.size())
+    {
+        while (position < source.size() && isGlslWhitespace(source[position]))
+            ++position;
+
+        if (position + 1 < source.size() && source[position] == '/' && source[position + 1] == '/')
+        {
+            position = source.find('\n', position + 2);
+            if (position == std::string_view::npos)
+                return std::nullopt;
+            continue;
+        }
+
+        if (position + 1 < source.size() && source[position] == '/' && source[position + 1] == '*')
+        {
+            position = source.find("*/", position + 2);
+            if (position == std::string_view::npos)
+                return std::nullopt;
+            position += 2;
+            continue;
+        }
+
+        break;
+    }
+
+    if (position >= source.size() || source[position] != '#')
+        return std::nullopt;
+
+    ++position;
+    while (position < source.size() && (source[position] == ' ' || source[position] == '\t'))
+        ++position;
+
+    constexpr std::string_view directive = "version";
+    if (!startsWith(source.substr(position), directive) ||
+        (position + directive.size() < source.size() && !isGlslWhitespace(source[position + directive.size()])))
+        return std::nullopt;
+
+    position += directive.size();
+    while (position < source.size() && (source[position] == ' ' || source[position] == '\t'))
         ++position;
 
     unsigned int version = 0;
-    while ((position < source.size()) && (source[position] >= '0') && (source[position] <= '9'))
+    while (position < source.size() && source[position] >= '0' && source[position] <= '9')
     {
         version = version * 10 + static_cast<unsigned int>(source[position] - '0');
         ++position;
     }
 
+    return version;
+}
+
+bool allowsDefaultStage(std::string_view source)
+{
+    const std::optional version = getGlslVersion(source);
+    if (!version)
+        return true;
+
 #ifdef SFML_OPENGL_ES
-    return version == 100;
+    return *version == 100;
 #else
-    return version == 110;
+    return *version == 110;
 #endif
 }
+
+#if defined(SFML_SYSTEM_HARMONY) && defined(SFML_OPENGL_ES)
+constexpr std::string_view harmonyTextureIdentifier = "texture";
+constexpr std::string_view harmonyTextureAliasBase  = "sf_HarmonyCurrentTexture";
+
+bool isGlslIdentifierCharacter(char character)
+{
+    return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+           (character >= '0' && character <= '9') || character == '_';
+}
+
+std::string replaceGlslIdentifier(std::string_view source, std::string_view identifier, std::string_view replacement)
+{
+    std::string result;
+    result.reserve(source.size());
+
+    std::size_t copyPosition = 0;
+    std::size_t position     = source.find(identifier);
+    while (position != std::string_view::npos)
+    {
+        const bool startsIdentifier = position > 0 && isGlslIdentifierCharacter(source[position - 1]);
+        const bool endsIdentifier   = position + identifier.size() < source.size() &&
+                                    isGlslIdentifierCharacter(source[position + identifier.size()]);
+        if (!startsIdentifier && !endsIdentifier)
+        {
+            result.append(source.substr(copyPosition, position - copyPosition));
+            result.append(replacement);
+            copyPosition = position + identifier.size();
+        }
+
+        position = source.find(identifier, position + identifier.size());
+    }
+
+    result.append(source.substr(copyPosition));
+    return result;
+}
+
+std::string chooseHarmonyTextureAlias(std::string_view vertexShaderCode,
+                                      std::string_view geometryShaderCode,
+                                      std::string_view fragmentShaderCode)
+{
+    std::string alias{harmonyTextureAliasBase};
+    while (vertexShaderCode.find(alias) != std::string_view::npos ||
+           geometryShaderCode.find(alias) != std::string_view::npos ||
+           fragmentShaderCode.find(alias) != std::string_view::npos)
+        alias.push_back('_');
+    return alias;
+}
+
+std::string prepareHarmonyEmbeddedProfileSource(std::string_view source, std::string_view textureAlias, bool& textureAliased)
+{
+    const std::optional version = getGlslVersion(source);
+    if (version && *version != 100)
+        return std::string(source);
+
+    std::string preparedSource = replaceGlslIdentifier(source, harmonyTextureIdentifier, textureAlias);
+    textureAliased             = textureAliased || preparedSource != source;
+
+    if (version)
+        return preparedSource;
+
+    const bool  hasByteOrderMark = startsWith(preparedSource, "\xEF\xBB\xBF");
+    std::string versionedSource;
+    versionedSource.reserve(preparedSource.size() + std::string_view("#version 100\n").size());
+    if (hasByteOrderMark)
+        versionedSource.append(preparedSource.substr(0, 3));
+    versionedSource.append("#version 100\n");
+    versionedSource.append(preparedSource.substr(hasByteOrderMark ? 3 : 0));
+    return versionedSource;
+}
+#endif
 
 // Retrieve the maximum number of texture units available
 std::size_t getMaxTextureUnits()
@@ -966,6 +1091,19 @@ bool Shader::compile(std::string_view vertexShaderCode, std::string_view geometr
         return false;
     }
 
+#if defined(SFML_SYSTEM_HARMONY) && defined(SFML_OPENGL_ES)
+    const std::string harmonyTextureAlias = chooseHarmonyTextureAlias(vertexShaderCode, geometryShaderCode, fragmentShaderCode);
+    bool              harmonyTextureAliased      = false;
+    const std::string preparedVertexShaderCode   = prepareHarmonyEmbeddedProfileSource(vertexShaderCode,
+                                                                                     harmonyTextureAlias,
+                                                                                     harmonyTextureAliased);
+    const std::string preparedFragmentShaderCode = prepareHarmonyEmbeddedProfileSource(fragmentShaderCode,
+                                                                                       harmonyTextureAlias,
+                                                                                       harmonyTextureAliased);
+    vertexShaderCode                             = preparedVertexShaderCode;
+    fragmentShaderCode                           = preparedFragmentShaderCode;
+#endif
+
     // Create the program
     const GLuint shaderProgram = glCheck(glCreateProgram());
     if (!shaderProgram)
@@ -1058,6 +1196,15 @@ bool Shader::compile(std::string_view vertexShaderCode, std::string_view geometr
     m_currentTexture = -1;
     m_textures.clear();
     m_uniforms.clear();
+
+#if defined(SFML_SYSTEM_HARMONY) && defined(SFML_OPENGL_ES)
+    if (harmonyTextureAliased)
+    {
+        const int harmonyTextureLocation = glCheck(glGetUniformLocation(shaderProgram, harmonyTextureAlias.c_str()));
+        if (harmonyTextureLocation != -1)
+            m_uniforms.try_emplace(std::string(harmonyTextureIdentifier), harmonyTextureLocation);
+    }
+#endif
 
     m_shaderProgram             = shaderProgram;
     m_modelViewMatrix           = glCheck(glGetUniformLocation(shaderProgram, "sf_ModelViewMatrix"));

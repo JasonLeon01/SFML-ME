@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////
 //
-// SFML 3.1.0-ME OpenHarmony mobile diagnostics example
+// SFML 3.1.0-ME OpenHarmony/HarmonyOS diagnostics example
 //
 ////////////////////////////////////////////////////////////
 
@@ -16,10 +16,9 @@
 #include <SFML/System/FileInputStream.hpp>
 #include <SFML/System/Sleep.hpp>
 
-#include <GLES2/gl2.h>
-
 #include <EGL/egl.h>
 #include <SFML/Main.hpp>
+#include <SFML/OpenGL.hpp>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -48,6 +47,18 @@ namespace
 {
 constexpr unsigned int logDomain = 0x5346;
 constexpr const char*  logTag    = "SFML-Harmony";
+
+#if defined(SFML_HARMONY_2IN1)
+constexpr std::string_view deviceFormName = "2in1";
+#else
+constexpr std::string_view deviceFormName = "mobile";
+#endif
+
+#if defined(SFML_OPENGL_ES)
+constexpr std::string_view graphicsApiName = "OpenGL ES";
+#else
+constexpr std::string_view graphicsApiName = "OpenGL";
+#endif
 
 std::atomic<std::uint32_t> surfaceFallbackAcks{};
 std::atomic<std::uint32_t> surfaceRestoreAcks{};
@@ -154,7 +165,7 @@ struct RenderTextureDiagnostics
     bool depthOnly{};
     bool stencilOnly{};
     bool depthStencil{};
-    bool aaRejected{};
+    bool aaPath{};
     bool copyPixel{};
 };
 
@@ -200,6 +211,7 @@ struct Diagnostics
     unsigned int                                     surfaceResizeEvents{};
     std::uint64_t                                    glStateChecks{};
     GLenum                                           glError{GL_NO_ERROR};
+    std::string                                      glCapability{"QueryGL n/a"};
     std::string                                      srgbMipmap{"not tested"};
     std::array<SensorDiagnostics, sf::Sensor::Count> sensors;
     InputDiagnostics                                 input;
@@ -512,12 +524,27 @@ std::string glString(GLenum name)
     return value ? reinterpret_cast<const char*>(value) : "<unavailable>";
 }
 
+std::string queryGlCapability()
+{
+#if defined(SFML_HARMONY_2IN1)
+    using QueryGlFunction = EGLBoolean (*)();
+    const auto queryGl    = reinterpret_cast<QueryGlFunction>(eglGetProcAddress("OH_Graphics_QueryGL"));
+    if (!queryGl)
+        return "QueryGL missing";
+    return queryGl() == EGL_TRUE ? "QueryGL desktop=yes" : "QueryGL desktop=no";
+#else
+    return "QueryGL n/a";
+#endif
+}
+
+#if defined(SFML_OPENGL_ES)
 bool hasGlExtension(std::string_view extension)
 {
     const std::string extensions = " " + glString(GL_EXTENSIONS) + " ";
     const std::string token      = " " + std::string(extension) + " ";
     return extensions.find(token) != std::string::npos;
 }
+#endif
 
 GLenum getGlError()
 {
@@ -535,6 +562,9 @@ Function loadGlFunction(const char* name)
 
 void logGlIdentity()
 {
+    logInfo(std::string("SFML_DEVICE_FORM=") + std::string(deviceFormName));
+    logInfo(std::string("SFML_GRAPHICS_API=") + std::string(graphicsApiName));
+    logInfo(queryGlCapability());
     logInfo("GL_VENDOR=" + glString(GL_VENDOR));
     logInfo("GL_RENDERER=" + glString(GL_RENDERER));
     logInfo("GL_VERSION=" + glString(GL_VERSION));
@@ -1187,18 +1217,33 @@ RenderTextureDiagnostics checkRenderTextureConfigurations()
         logError(std::string("RenderTexture configuration check failed: ") + exception.what());
     }
 
-    try
+    const unsigned int maximumAa = sf::RenderTexture::getMaximumAntiAliasingLevel();
+    if (maximumAa == 0)
     {
-        sf::RenderTexture unsupportedAa({32, 32}, sf::ContextSettings{0, 0, 2});
-        static_cast<void>(unsupportedAa);
-    } catch (const sf::Exception&)
+        try
+        {
+            sf::RenderTexture unsupportedAa({32, 32}, sf::ContextSettings{0, 0, 2});
+            static_cast<void>(unsupportedAa);
+        } catch (const sf::Exception&)
+        {
+            result.aaPath = true;
+        }
+    }
+    else
     {
-        result.aaRejected = sf::RenderTexture::getMaximumAntiAliasingLevel() == 0;
+        try
+        {
+            const unsigned int requestedAa = std::min(2u, maximumAa);
+            result.aaPath = checkSmallRenderTexture(sf::ContextSettings{0, 0, requestedAa}, sf::Color(60, 70, 80));
+        } catch (const sf::Exception& exception)
+        {
+            logError(std::string("RenderTexture multisample check failed: ") + exception.what());
+        }
     }
 
     logInfo(std::string("RenderTexture color/depth/stencil/depth+stencil/copy/AA=") + (result.colorOnly ? "1" : "0") +
             (result.depthOnly ? "1" : "0") + (result.stencilOnly ? "1" : "0") + (result.depthStencil ? "1" : "0") +
-            (result.copyPixel ? "1" : "0") + (result.aaRejected ? "1" : "0"));
+            (result.copyPixel ? "1" : "0") + (result.aaPath ? "1" : "0"));
     return result;
 }
 
@@ -1452,9 +1497,10 @@ sf::String makeStatusText(const Diagnostics&           diagnostics,
     switch (page)
     {
         case 0:
-            stream << "GLES actual " << settings.majorVersion << '.' << settings.minorVersion << " / ES2 ABI "
-                   << flag(diagnostics.glVersion) << " sRGB " << flag(settings.sRgbCapable) << " GLerr 0x" << std::hex
-                   << diagnostics.glError << std::dec << '\n'
+            stream << graphicsApiName << " actual " << settings.majorVersion << '.' << settings.minorVersion << " / "
+                   << deviceFormName << ' ' << flag(diagnostics.glVersion) << " sRGB " << flag(settings.sRgbCapable)
+                   << " GLerr 0x" << std::hex << diagnostics.glError << std::dec << '\n'
+                   << diagnostics.glCapability << '\n'
                    << "raw Image/Texture/Shader " << flag(diagnostics.rawfile) << " sandbox "
                    << flag(diagnostics.sandbox) << '\n'
                    << "TCP4+6 " << flag(diagnostics.tcp) << " UDP4+6 " << flag(diagnostics.udp) << " DNS-local "
@@ -1542,7 +1588,7 @@ sf::String makeStatusText(const Diagnostics&           diagnostics,
                    << surface.persistenceFailures << '\n'
                    << "RT color/depth/stencil/combined " << flag(rt.colorOnly) << '/' << flag(rt.depthOnly) << '/'
                    << flag(rt.stencilOnly) << '/' << flag(rt.depthStencil) << '\n'
-                   << "RT copy+pixel " << flag(rt.copyPixel) << " AA>0 rejected " << flag(rt.aaRejected) << " maxAA "
+                   << "RT copy+pixel " << flag(rt.copyPixel) << " AA path " << flag(rt.aaPath) << " maxAA "
                    << sf::RenderTexture::getMaximumAntiAliasingLevel() << '\n'
                    << "Rotate, background/foreground, lock/unlock device\n"
                    << "Existing Texture + Shader + RenderTexture rechecked after restore";
@@ -1678,15 +1724,24 @@ int main()
     requested.depthBits         = 16;
     requested.stencilBits       = 8;
     requested.antiAliasingLevel = 4;
-    requested.majorVersion      = 3;
-    requested.minorVersion      = 2;
-    requested.sRgbCapable       = true;
+#if defined(SFML_OPENGL_ES)
+    requested.majorVersion = 2;
+    requested.minorVersion = 0;
+#else
+    requested.majorVersion = 3;
+    requested.minorVersion = 0;
+#endif
+    requested.sRgbCapable = true;
 
-    sf::RenderWindow window(sf::VideoMode({1000, 1600}),
-                            "SFML OpenHarmony diagnostics",
-                            sf::Style::Default,
-                            sf::State::Fullscreen,
-                            requested);
+#if defined(SFML_HARMONY_2IN1)
+    constexpr sf::Vector2u initialSize{1200, 800};
+    constexpr sf::State    initialState = sf::State::Windowed;
+#else
+    constexpr sf::Vector2u initialSize{1000, 1600};
+    constexpr sf::State    initialState = sf::State::Fullscreen;
+#endif
+
+    sf::RenderWindow window(sf::VideoMode(initialSize), "SFML OpenHarmony diagnostics", sf::Style::Default, initialState, requested);
     window.setVerticalSyncEnabled(true);
     window.setKeyRepeatEnabled(true);
 
@@ -1696,16 +1751,21 @@ int main()
     Diagnostics           diagnostics;
     ExternalTlsDiagnostic externalTls;
     const auto&           actualSettings = window.getSettings();
-    diagnostics.glVersion                = actualSettings.majorVersion >= 2;
-    diagnostics.rawfile                  = checkRawfile();
-    diagnostics.sandbox                  = checkSandboxFile();
-    const bool tcpV4                     = checkTcpLoopback(sf::IpAddress::LocalHostV4);
-    const bool tcpV6                     = checkTcpLoopback(sf::IpAddress::LocalHostV6);
-    const bool udpV4                     = checkUdpLoopback(sf::IpAddress::LocalHostV4);
-    const bool udpV6                     = checkUdpLoopback(sf::IpAddress::LocalHostV6);
-    diagnostics.tcp                      = tcpV4 && tcpV6;
-    diagnostics.udp                      = udpV4 && udpV6;
-    diagnostics.dns                      = checkDns();
+#if defined(SFML_OPENGL_ES)
+    diagnostics.glVersion = actualSettings.majorVersion >= 2;
+#else
+    diagnostics.glVersion = actualSettings.majorVersion >= 3;
+#endif
+    diagnostics.glCapability = queryGlCapability();
+    diagnostics.rawfile      = checkRawfile();
+    diagnostics.sandbox      = checkSandboxFile();
+    const bool tcpV4         = checkTcpLoopback(sf::IpAddress::LocalHostV4);
+    const bool tcpV6         = checkTcpLoopback(sf::IpAddress::LocalHostV6);
+    const bool udpV4         = checkUdpLoopback(sf::IpAddress::LocalHostV4);
+    const bool udpV6         = checkUdpLoopback(sf::IpAddress::LocalHostV6);
+    diagnostics.tcp          = tcpV4 && tcpV6;
+    diagnostics.udp          = udpV4 && udpV6;
+    diagnostics.dns          = checkDns();
 
     sf::Image   checkerboard;
     sf::Image   relativeRawfileImage;
@@ -1735,6 +1795,10 @@ int main()
         else
         {
             const bool generated = sRgbTexture.generateMipmap();
+#if !defined(SFML_OPENGL_ES)
+            diagnostics.srgb       = generated;
+            diagnostics.srgbMipmap = generated ? "desktop GL generated" : "desktop GL FAILED";
+#else
             if (actualSettings.majorVersion >= 3)
             {
                 diagnostics.srgb       = generated;
@@ -1750,6 +1814,7 @@ int main()
                 diagnostics.srgb       = !generated;
                 diagnostics.srgbMipmap = generated ? "ES2 EXT unexpectedly generated" : "ES2 EXT rejected (expected)";
             }
+#endif
         }
         logInfo("sRGB mipmap diagnostic: " + diagnostics.srgbMipmap);
     } catch (const sf::Exception& exception)
@@ -1791,7 +1856,7 @@ int main()
     try
     {
         renderTexture.emplace(sf::Vector2u{320, 320}, sf::ContextSettings{16, 8, 0});
-        diagnostics.renderTexture = diagnostics.renderTextures.aaRejected && diagnostics.renderTextures.copyPixel;
+        diagnostics.renderTexture = diagnostics.renderTextures.aaPath && diagnostics.renderTextures.copyPixel;
     } catch (const sf::Exception& exception)
     {
         logError(std::string("RenderTexture initialization failed: ") + exception.what());
