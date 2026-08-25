@@ -80,7 +80,7 @@ struct Sound::Impl : priv::MiniaudioUtils::SoundBase
         impl.status = Status::Stopped;
 
         // Seek back to the start of the sound when it finishes playing
-        if (const ma_result result = ma_sound_seek_to_pcm_frame(soundPtr, 0); result != MA_SUCCESS)
+        if (const ma_result result = ma_sound_seek_to_pcm_frame_if_no_pending_seek(soundPtr, 0); result != MA_SUCCESS)
             err() << "Failed to seek sound to frame 0: " << ma_result_description(result) << std::endl;
     }
 
@@ -217,6 +217,9 @@ Sound::~Sound()
 ////////////////////////////////////////////////////////////
 void Sound::play()
 {
+    ma_node_set_state(&m_impl->effectNode, ma_node_state_stopped);
+    priv::AudioDevice::waitForReadingComplete();
+
     if (m_impl->status == Status::Playing)
         setPlayingOffset(Time::Zero);
 
@@ -226,6 +229,7 @@ void Sound::play()
     }
     else
     {
+        ma_node_set_state(&m_impl->effectNode, ma_node_state_started);
         m_impl->status = Status::Playing;
     }
 }
@@ -234,12 +238,16 @@ void Sound::play()
 ////////////////////////////////////////////////////////////
 void Sound::pause()
 {
+    ma_node_set_state(&m_impl->effectNode, ma_node_state_stopped);
+
     if (const ma_result result = ma_sound_stop(&m_impl->sound); result != MA_SUCCESS)
     {
+        ma_node_set_state(&m_impl->effectNode, ma_node_state_started);
         err() << "Failed to stop playing sound: " << ma_result_description(result) << std::endl;
     }
     else
     {
+        priv::AudioDevice::waitForReadingComplete();
         if (m_impl->status == Status::Playing)
             m_impl->status = Status::Paused;
     }
@@ -249,15 +257,18 @@ void Sound::pause()
 ////////////////////////////////////////////////////////////
 void Sound::stop()
 {
+    ma_node_set_state(&m_impl->effectNode, ma_node_state_stopped);
+
     if (const ma_result result = ma_sound_stop(&m_impl->sound); result != MA_SUCCESS)
     {
+        ma_node_set_state(&m_impl->effectNode, ma_node_state_started);
         err() << "Failed to stop playing sound: " << ma_result_description(result) << std::endl;
     }
     else
     {
+        priv::AudioDevice::waitForReadingComplete();
         setPlayingOffset(Time::Zero);
         m_impl->status = Status::Stopped;
-        priv::AudioDevice::waitForReadingComplete();
     }
 }
 
@@ -297,18 +308,22 @@ void Sound::setPlayingOffset(Time timeOffset)
     if (m_impl->sound.pDataSource == nullptr || m_impl->sound.engineNode.pEngine == nullptr)
         return;
 
-    const auto frameIndex = priv::MiniaudioUtils::getFrameIndex(m_impl->sound, timeOffset);
-
-    if (m_impl->buffer)
-        m_impl->cursor = static_cast<std::size_t>(frameIndex * m_impl->buffer->getChannelCount());
+    static_cast<void>(priv::MiniaudioUtils::getFrameIndex(m_impl->sound, timeOffset));
 }
 
 
 ////////////////////////////////////////////////////////////
 void Sound::setEffectProcessor(EffectProcessor effectProcessor)
 {
+    const bool effectWasStarted = ma_node_get_state(&m_impl->effectNode) == ma_node_state_started;
+    ma_node_set_state(&m_impl->effectNode, ma_node_state_stopped);
+    priv::AudioDevice::waitForReadingComplete();
+
     m_impl->effectProcessor = std::move(effectProcessor);
     m_impl->connectEffect(bool{m_impl->effectProcessor});
+
+    if (effectWasStarted)
+        ma_node_set_state(&m_impl->effectNode, ma_node_state_started);
 }
 
 
