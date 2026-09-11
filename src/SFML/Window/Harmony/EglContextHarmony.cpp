@@ -60,12 +60,16 @@ namespace EglContextHarmonyImpl
 sf::ContextSettings normalizeSettings(sf::ContextSettings settings)
 {
 #ifdef SFML_OPENGL_ES
-    // The first Harmony backend intentionally exposes one share group made of
-    // OpenGL ES 2.0 contexts.  Do this again at the EGL boundary so callers
-    // cannot accidentally select an ES3 config even if they bypass the
-    // higher-level GlContext normalization.
-    settings.majorVersion   = 2;
-    settings.minorVersion   = 0;
+    if (settings.majorVersion < 3)
+    {
+        settings.majorVersion = 2;
+        settings.minorVersion = 0;
+    }
+    else if (settings.majorVersion > 3 || settings.minorVersion > 2)
+    {
+        settings.majorVersion = 3;
+        settings.minorVersion = 2;
+    }
     settings.attributeFlags = sf::ContextSettings::Default;
 #else
     // Harmony desktop OpenGL starts at 3.0 and currently exposes at most 4.2.
@@ -323,7 +327,8 @@ EglContextHarmony::EglContextHarmony(EglContextHarmony*                 shared,
             err() << "Failed to find an EGL window configuration matching the locked OpenGL ES share-group version"
                   << std::endl;
         else
-            err() << "Failed to find an EGL configuration supporting OpenGL ES 2" << std::endl;
+            err() << "Failed to find an EGL configuration supporting OpenGL ES " << effectiveSettings.majorVersion
+                  << "." << effectiveSettings.minorVersion << std::endl;
 #else
         err() << "Failed to find a desktop OpenGL EGL window configuration with pbuffer support"
               << (SF_GLAD_EGL_KHR_surfaceless_context ? " or a window configuration for surfaceless fallback"
@@ -402,7 +407,8 @@ EglContextHarmony::EglContextHarmony(EglContextHarmony* shared, const ContextSet
             err() << "Failed to find an EGL pbuffer configuration matching the locked OpenGL ES share-group version"
                   << std::endl;
         else
-            err() << "Failed to find an EGL configuration supporting OpenGL ES 2" << std::endl;
+            err() << "Failed to find an EGL configuration supporting OpenGL ES " << effectiveSettings.majorVersion
+                  << "." << effectiveSettings.minorVersion << std::endl;
 #else
         err() << "Failed to find a desktop OpenGL EGL pbuffer configuration"
               << (SF_GLAD_EGL_KHR_surfaceless_context ? " or a window configuration for surfaceless use"
@@ -581,12 +587,26 @@ void EglContextHarmony::createContext(EglContextHarmony*     shared,
     }
 
 #ifdef SFML_OPENGL_ES
-    (void)settings;
-    static constexpr std::array contextAttributes{EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
-    m_context = eglCheck(eglCreateContext(m_display, m_config, toShared, contextAttributes.data()));
+    m_settings.majorVersion = settings.majorVersion;
+    m_settings.minorVersion = settings.minorVersion;
+    if (settings.majorVersion >= 3 && (SF_GLAD_EGL_VERSION_1_5 || SF_GLAD_EGL_KHR_create_context))
+    {
+        const std::array contextAttributes{EGL_CONTEXT_MAJOR_VERSION,
+                                           static_cast<EGLint>(settings.majorVersion),
+                                           EGL_CONTEXT_MINOR_VERSION,
+                                           static_cast<EGLint>(settings.minorVersion),
+                                           EGL_NONE};
+        m_context = eglCheck(eglCreateContext(m_display, m_config, toShared, contextAttributes.data()));
+    }
+    else
+    {
+        const std::array contextAttributes{EGL_CONTEXT_CLIENT_VERSION, static_cast<EGLint>(settings.majorVersion), EGL_NONE};
+        m_context = eglCheck(eglCreateContext(m_display, m_config, toShared, contextAttributes.data()));
+    }
 
     if (m_context == EGL_NO_CONTEXT)
-        err() << "Failed to create an OpenGL ES context" << std::endl;
+        err() << "Failed to create a Harmony OpenGL ES " << settings.majorVersion << "." << settings.minorVersion
+              << " context" << std::endl;
 #else
     if (!SF_GLAD_EGL_VERSION_1_5 && !SF_GLAD_EGL_KHR_create_context)
     {
@@ -792,7 +812,7 @@ EGLConfig EglContextHarmony::getBestConfig(EGLDisplay             display,
         eglCheck(eglGetConfigAttrib(display, configs[i], EGL_SURFACE_TYPE, &surfaceType));
         eglCheck(eglGetConfigAttrib(display, configs[i], EGL_RENDERABLE_TYPE, &renderableType));
 #ifdef SFML_OPENGL_ES
-        constexpr int requiredRenderableType = EGL_OPENGL_ES2_BIT;
+        const int requiredRenderableType = settings.majorVersion >= 3 ? EGL_OPENGL_ES3_BIT_KHR : EGL_OPENGL_ES2_BIT;
 #else
         constexpr int requiredRenderableType = EGL_OPENGL_BIT;
 #endif
@@ -845,10 +865,7 @@ EGLConfig EglContextHarmony::getBestConfig(EGLDisplay             display,
 ////////////////////////////////////////////////////////////
 void EglContextHarmony::updateSettings()
 {
-#ifdef SFML_OPENGL_ES
-    m_settings.majorVersion = 2;
-    m_settings.minorVersion = 0;
-#else
+#ifndef SFML_OPENGL_ES
     m_settings.majorVersion = 3;
     m_settings.minorVersion = 0;
 #endif
