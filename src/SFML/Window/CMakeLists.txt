@@ -72,7 +72,21 @@ if(SFML_BUILD_VULKAN_BACKEND)
 endif()
 
 # add platform specific sources
-if(SFML_OS_WINDOWS)
+if(SFML_OS_EMSCRIPTEN)
+    set(PLATFORM_SRC
+        ${SRCROOT}/Emscripten/WebContext.cpp
+        ${SRCROOT}/Emscripten/WebContext.hpp
+        ${SRCROOT}/Emscripten/WindowImplWeb.cpp
+        ${SRCROOT}/Emscripten/WindowImplWeb.hpp
+        ${SRCROOT}/Emscripten/InputImpl.cpp
+        ${SRCROOT}/Emscripten/Input.hpp
+        ${SRCROOT}/Emscripten/Platform.cpp
+        ${SRCROOT}/Emscripten/CursorImpl.hpp
+        ${SRCROOT}/Emscripten/JoystickImpl.hpp
+        ${SRCROOT}/Emscripten/SensorImpl.hpp
+        ${SRCROOT}/Emscripten/ClipboardImpl.hpp
+    )
+elseif(SFML_OS_WINDOWS)
     set(PLATFORM_SRC
         ${SRCROOT}/Win32/CursorImpl.hpp
         ${SRCROOT}/Win32/CursorImpl.cpp
@@ -302,6 +316,9 @@ if(SFML_OS_LINUX OR SFML_OS_FREEBSD OR SFML_OS_OPENBSD OR SFML_OS_NETBSD)
     endif()
 endif()
 target_link_libraries(sfml-window PUBLIC SFML::System)
+if(SFML_OS_EMSCRIPTEN)
+    target_link_options(sfml-window PUBLIC -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sGL_ENABLE_GET_PROC_ADDRESS=1)
+endif()
 
 if(SFML_BUILD_OPENGL_BACKEND)
     target_include_directories(sfml-window SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/glad/include")

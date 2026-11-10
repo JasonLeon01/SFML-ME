@@ -632,8 +632,8 @@ Glyph Font::loadGlyph(std::uint32_t id, unsigned int characterSize, bool bold, f
         // Resize the pixel buffer to the new size and fill it with transparent white pixels
         m_pixelBuffer.resize(std::size_t{size.x} * std::size_t{size.y} * 4);
 
-        std::uint8_t* current = m_pixelBuffer.data();
-        std::uint8_t* end     = current + size.x * size.y * 4;
+        std::uint8_t* current = m_pixelBuffer.data(); // NOLINT(misc-const-correctness): writes through the incremented pointer
+        const std::uint8_t* end = current + size.x * size.y * 4;
 
         while (current != end)
         {

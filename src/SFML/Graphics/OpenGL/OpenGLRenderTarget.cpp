@@ -65,8 +65,8 @@ std::recursive_mutex& getMutex()
 // tracking the currently active RenderTarget within a given context
 std::uint64_t getUniqueId()
 {
-    const std::lock_guard lock(getMutex());
-    static std::uint64_t  id = 1; // start at 1, zero is "no RenderTarget"
+    const std::scoped_lock lock(getMutex());
+    static std::uint64_t   id = 1; // start at 1, zero is "no RenderTarget"
     return id++;
 }
 
@@ -82,8 +82,8 @@ ContextRenderTargetMap& getContextRenderTargetMap()
 // Check if a RenderTarget with the given ID is active in the current context
 bool isActive(std::uint64_t id)
 {
-    const std::lock_guard lock(getMutex());
-    const auto            it = getContextRenderTargetMap().find(sf::Context::getActiveContextId());
+    const std::scoped_lock lock(getMutex());
+    const auto             it = getContextRenderTargetMap().find(sf::Context::getActiveContextId());
     return (it != getContextRenderTargetMap().end()) && (it->second == id);
 }
 
@@ -420,7 +420,7 @@ void OpenGLRenderTarget::draw(RenderTarget&       target,
 bool OpenGLRenderTarget::setActive(bool active)
 {
     // Mark this RenderTarget as active or no longer active in the tracking map
-    const std::lock_guard lock(OpenGLRenderTargetImpl::getMutex());
+    const std::scoped_lock lock(OpenGLRenderTargetImpl::getMutex());
 
     const std::uint64_t contextId = Context::getActiveContextId();
     if (!contextId)
@@ -662,7 +662,7 @@ void OpenGLRenderTarget::resetGLStates(RenderTarget& target)
 
 // Workaround for states not being properly reset on
 // macOS unless a context switch really takes place
-#if defined(SFML_SYSTEM_MACOS)
+#ifdef SFML_SYSTEM_MACOS
     if (!target.setActive(false))
     {
         err() << "Failed to set render target inactive" << std::endl;
@@ -1016,7 +1016,7 @@ void OpenGLRenderTarget::drawProgrammable(
     {
         static std::mutex                                                      mutex;
         static std::unordered_map<std::uint64_t, std::weak_ptr<VertexObjects>> cache;
-        const std::lock_guard                                                  lock(mutex);
+        const std::scoped_lock                                                 lock(mutex);
         const auto                                                             context = Context::getActiveContextId();
         if (const auto it = cache.find(context); it != cache.end())
             if (auto value = it->second.lock())

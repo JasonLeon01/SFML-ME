@@ -38,7 +38,11 @@
 // Identify the operating system
 // see https://sourceforge.net/p/predef/wiki/Home/
 ////////////////////////////////////////////////////////////
-#if defined(_WIN32)
+#if defined(__EMSCRIPTEN__)
+
+#define SFML_SYSTEM_EMSCRIPTEN
+
+#elif defined(_WIN32)
 
 // Windows
 #define SFML_SYSTEM_WINDOWS

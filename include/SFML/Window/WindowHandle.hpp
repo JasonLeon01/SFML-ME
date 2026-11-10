@@ -62,6 +62,11 @@ using WindowHandle = void*;
 // Window handle is ANativeWindow* (void*) on Android
 using WindowHandle = void*;
 
+#elif defined(SFML_SYSTEM_EMSCRIPTEN)
+
+// CSS selector identifying the single host canvas.
+using WindowHandle = const char*;
+
 #elif defined(SFML_DOXYGEN)
 
 // Define type alias symbol so that Doxygen can attach some documentation to it
@@ -85,6 +90,7 @@ using WindowHandle = "platform-specific";
 /// macOS           | either \p NSWindow* or \p NSView*, disguised as \p void*
 /// iOS             | \p UIWindow*
 /// Android         | \p ANativeWindow*
+/// Web             | CSS selector of the host canvas (\p const \p char*)
 ///
 /// \par macOS Specification
 ///

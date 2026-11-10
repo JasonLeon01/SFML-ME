@@ -86,8 +86,8 @@ namespace sf::priv
 ////////////////////////////////////////////////////////////
 void ensureExtensionsInit()
 {
-    static std::mutex     mutex;
-    const std::lock_guard lock(mutex);
+    static std::mutex      mutex;
+    const std::scoped_lock lock(mutex);
 
     if (Context::getActiveContextId() == 0)
         throw Exception("Cannot initialize OpenGL entry points without an active context");

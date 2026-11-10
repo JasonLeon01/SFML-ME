@@ -51,9 +51,8 @@ namespace
 {
 namespace GraphicsBackendImpl
 {
-constexpr std::array drivers
-{
-#if defined(SFML_SYSTEM_WINDOWS)
+constexpr std::array drivers{
+#ifdef SFML_SYSTEM_WINDOWS
 #ifdef SFML_RENDER_DIRECTX
     GraphicsBackend::DirectX,
 #endif
@@ -61,16 +60,15 @@ constexpr std::array drivers
 // GraphicsBackend::Metal,
 #endif
 #ifdef SFML_RENDER_OPENGL
-        GraphicsBackend::OpenGL,
+    GraphicsBackend::OpenGL,
 #endif
 #ifdef SFML_RENDER_OPENGLES
-        GraphicsBackend::OpenGLES,
+    GraphicsBackend::OpenGLES,
 #endif
 #ifdef SFML_RENDER_VULKAN
-        GraphicsBackend::Vulkan,
+    GraphicsBackend::Vulkan,
 #endif
-        GraphicsBackend::Automatic
-};
+    GraphicsBackend::Automatic};
 
 using Settings = ContextSettings::BackendSettings;
 
@@ -220,8 +218,8 @@ Settings mergeRequirements(const Settings& startup, const Settings& target)
 bool setGraphicsBackend(GraphicsBackend backend, const ContextSettings::BackendSettings& settings)
 {
     using namespace GraphicsBackendImpl;
-    auto&                 state = registry();
-    const std::lock_guard lock(state.mutex);
+    auto&                  state = registry();
+    const std::scoped_lock lock(state.mutex);
 
     if (!isBuilt(backend) || !valid(backend, settings) || (state.device && !supports(*state.device, backend, settings)))
     {
@@ -240,8 +238,8 @@ bool setGraphicsBackend(GraphicsBackend backend, const ContextSettings::BackendS
 
 GraphicsBackend getGraphicsBackend()
 {
-    auto&                 state = GraphicsBackendImpl::registry();
-    const std::lock_guard lock(state.mutex);
+    auto&                  state = GraphicsBackendImpl::registry();
+    const std::scoped_lock lock(state.mutex);
     return state.committed ? state.device->backend : GraphicsBackend::Automatic;
 }
 

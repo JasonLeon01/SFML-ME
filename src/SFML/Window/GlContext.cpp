@@ -51,7 +51,10 @@
 #include <cstring>
 
 
-#if defined(SFML_SYSTEM_WINDOWS)
+#ifdef SFML_SYSTEM_EMSCRIPTEN
+#include <SFML/Window/Emscripten/WebContext.hpp>
+using ContextType = sf::priv::WebContext;
+#elif defined(SFML_SYSTEM_WINDOWS)
 
 #if defined(SFML_OPENGL_ES)
 
@@ -107,7 +110,7 @@ using ContextType = sf::priv::EglContext;
 
 #endif
 
-#if defined(SFML_SYSTEM_WINDOWS)
+#ifdef SFML_SYSTEM_WINDOWS
 
 using glEnableFuncType      = void(APIENTRY*)(GLenum);
 using glGetErrorFuncType    = GLenum(APIENTRY*)();
@@ -127,43 +130,43 @@ using glIsEnabledFuncType   = GLboolean (*)(GLenum);
 
 #endif
 
-#if !defined(GL_MULTISAMPLE)
+#ifndef GL_MULTISAMPLE
 #define GL_MULTISAMPLE 0x809D
 #endif
 
-#if !defined(GL_MAJOR_VERSION)
+#ifndef GL_MAJOR_VERSION
 #define GL_MAJOR_VERSION 0x821B
 #endif
 
-#if !defined(GL_MINOR_VERSION)
+#ifndef GL_MINOR_VERSION
 #define GL_MINOR_VERSION 0x821C
 #endif
 
-#if !defined(GL_NUM_EXTENSIONS)
+#ifndef GL_NUM_EXTENSIONS
 #define GL_NUM_EXTENSIONS 0x821D
 #endif
 
-#if !defined(GL_CONTEXT_FLAGS)
+#ifndef GL_CONTEXT_FLAGS
 #define GL_CONTEXT_FLAGS 0x821E
 #endif
 
-#if !defined(GL_FRAMEBUFFER_SRGB)
+#ifndef GL_FRAMEBUFFER_SRGB
 #define GL_FRAMEBUFFER_SRGB 0x8DB9
 #endif
 
-#if !defined(GL_CONTEXT_FLAG_DEBUG_BIT)
+#ifndef GL_CONTEXT_FLAG_DEBUG_BIT
 #define GL_CONTEXT_FLAG_DEBUG_BIT 0x00000002
 #endif
 
-#if !defined(GL_CONTEXT_PROFILE_MASK)
+#ifndef GL_CONTEXT_PROFILE_MASK
 #define GL_CONTEXT_PROFILE_MASK 0x9126
 #endif
 
-#if !defined(GL_CONTEXT_CORE_PROFILE_BIT)
+#ifndef GL_CONTEXT_CORE_PROFILE_BIT
 #define GL_CONTEXT_CORE_PROFILE_BIT 0x00000001
 #endif
 
-#if !defined(GL_CONTEXT_COMPATIBILITY_PROFILE_BIT)
+#ifndef GL_CONTEXT_COMPATIBILITY_PROFILE_BIT
 #define GL_CONTEXT_COMPATIBILITY_PROFILE_BIT 0x00000002
 #endif
 
@@ -208,7 +211,7 @@ struct GlContext::SharedContext
     ////////////////////////////////////////////////////////////
     explicit SharedContext(const ContextSettings& settings)
     {
-        const std::lock_guard lock(mutex);
+        const std::scoped_lock lock(mutex);
 
         context.emplace(nullptr, settings, Vector2u{1, 1});
         if (context->initialize(GlSettings(settings)))
@@ -252,15 +255,15 @@ struct GlContext::SharedContext
     ////////////////////////////////////////////////////////////
     static std::shared_ptr<SharedContext> current()
     {
-        const std::lock_guard lock(registry().mutex);
+        const std::scoped_lock lock(registry().mutex);
         return registry().shared.lock();
     }
 
     static std::shared_ptr<SharedContext> get(const ContextSettings& settings = {})
     {
-        const std::lock_guard lock(registry().mutex);
-        auto&                 weakSharedContext = registry().shared;
-        auto                  sharedContext     = weakSharedContext.lock();
+        const std::scoped_lock lock(registry().mutex);
+        auto&                  weakSharedContext = registry().shared;
+        auto                   sharedContext     = weakSharedContext.lock();
 
         if (!sharedContext)
         {
@@ -419,9 +422,9 @@ struct GlContext::Impl
     ////////////////////////////////////////////////////////////
     Impl()
     {
-        const std::lock_guard lock(registry().mutex);
-        auto&                 weakUnsharedGlObjects = registry().objects;
-        unsharedGlObjects                           = weakUnsharedGlObjects.lock();
+        const std::scoped_lock lock(registry().mutex);
+        auto&                  weakUnsharedGlObjects = registry().objects;
+        unsharedGlObjects                            = weakUnsharedGlObjects.lock();
 
         if (!unsharedGlObjects)
         {
@@ -598,7 +601,7 @@ std::unique_ptr<GlContext> GlContext::create(const ContextSettings& settings, co
     if (!shared)
         return {};
 
-    const std::lock_guard lock(shared->mutex);
+    const std::scoped_lock lock(shared->mutex);
     if (!shared->context->setActive(true))
         return {};
 
@@ -621,7 +624,7 @@ std::unique_ptr<GlContext> GlContext::create(const ContextSettings& settings, Ve
     if (!shared)
         return {};
 
-    const std::lock_guard lock(shared->mutex);
+    const std::scoped_lock lock(shared->mutex);
     if (!shared->context->setActive(true))
         return {};
 
@@ -702,6 +705,10 @@ const ContextSettings& GlContext::getSettings() const
 ////////////////////////////////////////////////////////////
 bool GlContext::setActive(bool active)
 {
+#ifdef SFML_SYSTEM_EMSCRIPTEN
+    if (active && WebContext::isLost())
+        return false;
+#endif
     auto& currentContext = GlContextImpl::CurrentContext::get();
 
     // Make sure we don't try to create the shared context here since
@@ -818,7 +825,7 @@ void GlContext::cleanupUnsharedResources()
     setActive(true);
 
     {
-        const std::lock_guard lock(Impl::registry().mutex);
+        const std::scoped_lock lock(Impl::registry().mutex);
 
         // Destroy the unshared objects contained in this context
         for (auto iter = m_impl->unsharedGlObjects->begin(); iter != m_impl->unsharedGlObjects->end();)

@@ -57,6 +57,10 @@
 #include <GL/gl.h>
 #endif
 
+#elif defined(SFML_SYSTEM_EMSCRIPTEN)
+
+#include <GLES3/gl3.h>
+
 #elif defined(SFML_SYSTEM_MACOS)
 
 #include <OpenGL/gl.h>

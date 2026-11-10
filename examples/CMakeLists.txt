@@ -1,3 +1,10 @@
+if(SFML_OS_EMSCRIPTEN)
+    if(SFML_BUILD_GRAPHICS AND SFML_BUILD_AUDIO)
+        add_subdirectory(tennis)
+    endif()
+    return()
+endif()
+
 # CLI based examples
 if(NOT SFML_OS_IOS AND NOT SFML_OS_ANDROID)
     if(SFML_BUILD_NETWORK)

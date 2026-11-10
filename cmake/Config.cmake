@@ -1,5 +1,8 @@
 # detect the OS
-if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    set(SFML_OS_EMSCRIPTEN 1)
+    set(OPENGL_ES 1)
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
     set(SFML_OS_WINDOWS 1)
 
     # don't use the OpenGL ES implementation on Windows

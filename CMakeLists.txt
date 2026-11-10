@@ -41,7 +41,12 @@ include(GNUInstallDirs)
 sfml_set_option(SFML_BUILD_WINDOW ON BOOL "ON to build SFML's Window module. This setting is ignored, if the graphics module is built.")
 sfml_set_option(SFML_BUILD_GRAPHICS ON BOOL "ON to build SFML's Graphics module.")
 sfml_set_option(SFML_BUILD_AUDIO ON BOOL "ON to build SFML's Audio module.")
-sfml_set_option(SFML_BUILD_NETWORK ON BOOL "ON to build SFML's Network module.")
+if(SFML_OS_EMSCRIPTEN)
+    set(SFML_NETWORK_DEFAULT OFF)
+else()
+    set(SFML_NETWORK_DEFAULT ON)
+endif()
+sfml_set_option(SFML_BUILD_NETWORK ${SFML_NETWORK_DEFAULT} BOOL "ON to build SFML's Network module.")
 
 if(SFML_BUILD_WINDOW OR SFML_BUILD_GRAPHICS)
     # add an option for choosing the OpenGL implementation
@@ -85,6 +90,16 @@ if(SFML_BUILD_WINDOW OR SFML_BUILD_GRAPHICS)
     endif()
 endif()
 
+if(SFML_OS_EMSCRIPTEN)
+    if(SFML_BUILD_NETWORK OR BUILD_SHARED_LIBS)
+        message(FATAL_ERROR "Web supports static libraries without the Network module")
+    endif()
+    if((SFML_BUILD_WINDOW OR SFML_BUILD_GRAPHICS) AND
+       (NOT SFML_BUILD_OPENGL_BACKEND OR NOT SFML_OPENGL_ES))
+        message(FATAL_ERROR "Web requires the OpenGL ES backend (WebGL 2)")
+    endif()
+endif()
+
 # macOS specific options
 if(SFML_OS_MACOS OR SFML_OS_IOS)
     # add an option to build frameworks instead of dylibs (release only)
@@ -110,7 +125,9 @@ endif()
 
 # Install directories
 # For miscellaneous files
-if(SFML_OS_WINDOWS OR SFML_OS_IOS)
+if(SFML_OS_EMSCRIPTEN)
+    set(DEFAULT_INSTALL_MISC_DIR share/SFML)
+elseif(SFML_OS_WINDOWS OR SFML_OS_IOS)
     set(DEFAULT_INSTALL_MISC_DIR .)
 elseif(SFML_OS_LINUX OR SFML_OS_FREEBSD OR SFML_OS_OPENBSD OR SFML_OS_NETBSD)
     set(DEFAULT_INSTALL_MISC_DIR share/SFML)
@@ -127,7 +144,7 @@ if(SFML_BUILD_GRAPHICS AND NOT SFML_BUILD_WINDOW)
 endif()
 
 # use bundled dependencies by default on these systems and system dependencies by default on all others (maintains old behavior)
-if(SFML_OS_WINDOWS OR SFML_OS_MACOS OR SFML_OS_IOS OR SFML_OS_ANDROID)
+if(SFML_OS_WINDOWS OR SFML_OS_MACOS OR SFML_OS_IOS OR SFML_OS_ANDROID OR SFML_OS_EMSCRIPTEN)
     set(SFML_USE_SYSTEM_DEPS_DEFAULT OFF)
 else()
     set(SFML_USE_SYSTEM_DEPS_DEFAULT ON)
@@ -438,6 +455,9 @@ add_custom_target(format
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} VERBATIM)
 
 sfml_set_option(CLANG_TIDY_EXECUTABLE clang-tidy STRING "Override clang-tidy executable, requires minimum version 14")
+sfml_set_option(CLANG_TIDY_CHECKS "" STRING "Additional clang-tidy check filters (empty uses .clang-tidy unchanged)")
 add_custom_target(tidy
-    COMMAND ${CMAKE_COMMAND} -DCLANG_TIDY_EXECUTABLE=${CLANG_TIDY_EXECUTABLE} -DPROJECT_BINARY_DIR=${PROJECT_BINARY_DIR} -P ./cmake/Tidy.cmake
+    COMMAND ${CMAKE_COMMAND} -DCLANG_TIDY_EXECUTABLE=${CLANG_TIDY_EXECUTABLE} -DPROJECT_BINARY_DIR=${PROJECT_BINARY_DIR}
+            "-DCLANG_TIDY_CHECKS=${CLANG_TIDY_CHECKS}"
+            -DSFML_OS_EMSCRIPTEN=${SFML_OS_EMSCRIPTEN} -DSFML_CXX_COMPILER=${CMAKE_CXX_COMPILER} -P ./cmake/Tidy.cmake
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} VERBATIM)

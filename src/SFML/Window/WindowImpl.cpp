@@ -42,7 +42,10 @@
 
 #include <cmath>
 
-#if defined(SFML_SYSTEM_WINDOWS)
+#ifdef SFML_SYSTEM_EMSCRIPTEN
+#include <SFML/Window/Emscripten/WindowImplWeb.hpp>
+using WindowImplType = sf::priv::WindowImplWeb;
+#elif defined(SFML_SYSTEM_WINDOWS)
 
 #include <SFML/Window/Win32/WindowImplWin32.hpp>
 using WindowImplType = sf::priv::WindowImplWin32;
@@ -122,6 +125,11 @@ std::unique_ptr<WindowImpl> WindowImpl::create(
         return {};
 #endif
 
+#ifdef SFML_SYSTEM_EMSCRIPTEN
+    if (!WindowImplWeb::canCreate())
+        return {};
+#endif
+
     // Fullscreen style requires some tests
     if (state == State::Fullscreen)
     {
@@ -169,6 +177,10 @@ std::unique_ptr<WindowImpl> WindowImpl::create(WindowHandle handle)
         return {};
 #endif
 
+#ifdef SFML_SYSTEM_EMSCRIPTEN
+    if (!WindowImplWeb::canCreate(handle))
+        return {};
+#endif
     return std::make_unique<WindowImplType>(handle);
 }
 

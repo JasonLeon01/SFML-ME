@@ -30,6 +30,9 @@
 #include <SFML/Window/WindowImpl.hpp>
 
 #include <SFML/System/Err.hpp>
+#ifdef SFML_SYSTEM_EMSCRIPTEN
+#include <SFML/System/Emscripten/Browser.hpp>
+#endif
 #include <SFML/System/Sleep.hpp>
 
 #include <ostream>
@@ -234,6 +237,10 @@ void Window::display()
     // Display the backbuffer on screen
     if (setActive())
         m_surface->display();
+#ifdef SFML_SYSTEM_EMSCRIPTEN
+    else
+        priv::sleepImpl(Time::Zero);
+#endif
 
     // Limit the framerate if needed
     if (m_frameTimeLimit != Time::Zero)
