@@ -29,7 +29,6 @@
 ////////////////////////////////////////////////////////////
 #include <SFML/Window/Export.hpp>
 
-#include <SFML/Window/Vulkan.hpp>
 #include <SFML/Window/WindowEnums.hpp>
 #include <SFML/Window/WindowHandle.hpp>
 
@@ -548,21 +547,6 @@ public:
     ////////////////////////////////////////////////////////////
     [[nodiscard]] WindowHandle getNativeHandle() const;
 
-    ////////////////////////////////////////////////////////////
-    /// \brief Create a Vulkan rendering surface
-    ///
-    /// \param instance  Vulkan instance
-    /// \param surface   Created surface
-    /// \param allocator Allocator to use
-    ///
-    /// \return `true` if surface creation was successful, `false` otherwise
-    ///
-    ////////////////////////////////////////////////////////////
-    [[nodiscard]] bool createVulkanSurface(const VkInstance&            instance,
-                                           VkSurfaceKHR&                surface,
-                                           const VkAllocationCallbacks* allocator = nullptr);
-
-protected:
     ////////////////////////////////////////////////////////////
     /// \brief Function called after the window has been created
     ///

@@ -37,7 +37,7 @@ TEST_CASE("[Graphics] sf::RenderWindow", runDisplayTests())
             CHECK(window.isOpen());
             CHECK(window.getSize() == sf::Vector2u(256, 256));
             CHECK(window.getNativeHandle() != sf::WindowHandle());
-            CHECK(window.getSettings().attributeFlags == sf::ContextSettings::Default);
+            CHECK(!std::holds_alternative<std::monostate>(window.getSettings().backend));
             CHECK(!window.isSrgb());
             CHECK(window.getView().getCenter() == sf::Vector2f(128, 128));
             CHECK(window.getView().getSize() == sf::Vector2f(256, 256));
@@ -55,7 +55,7 @@ TEST_CASE("[Graphics] sf::RenderWindow", runDisplayTests())
             CHECK(window.isOpen());
             CHECK(window.getSize() == sf::Vector2u(240, 300));
             CHECK(window.getNativeHandle() != sf::WindowHandle());
-            CHECK(window.getSettings().attributeFlags == sf::ContextSettings::Default);
+            CHECK(!std::holds_alternative<std::monostate>(window.getSettings().backend));
             CHECK(!window.isSrgb());
             CHECK(window.getView().getCenter() == sf::Vector2f(120, 150));
             CHECK(window.getView().getSize() == sf::Vector2f(240, 300));

@@ -36,7 +36,6 @@
 #include <SFML/Window/Sensor.hpp>
 #include <SFML/Window/SensorImpl.hpp>
 #include <SFML/Window/VideoMode.hpp>
-#include <SFML/Window/Vulkan.hpp>
 #include <SFML/Window/WindowEnums.hpp>
 #include <SFML/Window/WindowHandle.hpp>
 
@@ -293,17 +292,6 @@ public:
     ////////////////////////////////////////////////////////////
     [[nodiscard]] virtual bool hasFocus() const = 0;
 
-    ////////////////////////////////////////////////////////////
-    /// \brief Create a Vulkan rendering surface
-    ///
-    /// \param instance  Vulkan instance
-    /// \param surface   Created surface
-    /// \param allocator Allocator to use
-    ///
-    /// \return `true` if surface creation was successful, `false` otherwise
-    ///
-    ////////////////////////////////////////////////////////////
-    bool createVulkanSurface(const VkInstance& instance, VkSurfaceKHR& surface, const VkAllocationCallbacks* allocator) const;
 
 protected:
     ////////////////////////////////////////////////////////////

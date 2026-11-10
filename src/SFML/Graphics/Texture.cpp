@@ -25,11 +25,20 @@
 ////////////////////////////////////////////////////////////
 // Headers
 ////////////////////////////////////////////////////////////
+#include <SFML/Graphics/GraphicsDevice.hpp>
+
+#ifdef SFML_RENDER_GL
 #include <SFML/Graphics/GLCheck.hpp>
 #include <SFML/Graphics/GLExtensions.hpp>
+#include <SFML/Graphics/OpenGL/OpenGLResource.hpp>
+#include <SFML/Graphics/TextureSaver.hpp>
+#endif
+#ifdef SFML_RENDER_VULKAN
+#include <SFML/Graphics/Vulkan/VulkanWindowSurface.hpp>
+#endif
+
 #include <SFML/Graphics/Image.hpp>
 #include <SFML/Graphics/Texture.hpp>
-#include <SFML/Graphics/TextureSaver.hpp>
 
 #include <SFML/Window/Context.hpp>
 #include <SFML/Window/Window.hpp>
@@ -66,6 +75,9 @@ std::uint64_t getUniqueId() noexcept
 
 namespace sf
 {
+#ifdef SFML_RENDER_GL
+using TextureContextLock = priv::OpenGLResource::TransientContextLock;
+#endif
 ////////////////////////////////////////////////////////////
 Texture::Texture() : m_cacheId(TextureImpl::getUniqueId())
 {
@@ -146,13 +158,12 @@ Texture::Texture(Vector2u size, bool sRgb) : Texture()
 
 ////////////////////////////////////////////////////////////
 Texture::Texture(const Texture& copy) :
-    GlResource(copy),
     m_isSmooth(copy.m_isSmooth),
     m_sRgb(copy.m_sRgb),
     m_isRepeated(copy.m_isRepeated),
     m_cacheId(TextureImpl::getUniqueId())
 {
-    if (!copy.m_texture)
+    if (!copy.m_texture && !copy.m_vulkanImage)
     {
         return;
     }
@@ -171,14 +182,14 @@ Texture::Texture(const Texture& copy) :
 ////////////////////////////////////////////////////////////
 Texture::~Texture()
 {
-    // Destroy the OpenGL texture
+#ifdef SFML_RENDER_GL
     if (m_texture)
     {
-        const TransientContextLock lock;
-
-        const GLuint texture = m_texture;
+        const TextureContextLock lock;
+        const GLuint             texture = m_texture;
         glCheck(glDeleteTextures(1, &texture));
     }
+#endif
 
 #ifndef NDEBUG
     // Set m_texture and m_cacheId to an invalid value to help the assert and glIsTexture in bind detect trying
@@ -190,6 +201,8 @@ Texture::~Texture()
 
 ////////////////////////////////////////////////////////////
 Texture::Texture(Texture&& right) noexcept :
+    m_glContext(std::move(right.m_glContext)),
+    m_vulkanImage(std::move(right.m_vulkanImage)),
     m_size(std::exchange(right.m_size, {})),
     m_actualSize(std::exchange(right.m_actualSize, {})),
     m_texture(std::exchange(right.m_texture, 0)),
@@ -212,14 +225,17 @@ Texture& Texture::operator=(Texture&& right) noexcept
         return *this;
     }
 
-    // Destroy the OpenGL texture
+#ifdef SFML_RENDER_GL
     if (m_texture)
     {
-        const TransientContextLock lock;
-
-        const GLuint texture = m_texture;
+        const TextureContextLock lock;
+        const GLuint             texture = m_texture;
         glCheck(glDeleteTextures(1, &texture));
     }
+#endif
+
+    m_glContext   = std::move(right.m_glContext);
+    m_vulkanImage = std::move(right.m_vulkanImage);
 
     // Move old to new.
     m_size          = std::exchange(right.m_size, {});
@@ -246,7 +262,34 @@ bool Texture::resize(Vector2u size, bool sRgb)
         return false;
     }
 
-    const TransientContextLock lock;
+    const auto* device = priv::getGraphicsDevice();
+    if (!device)
+        return false;
+
+#ifdef SFML_RENDER_VULKAN
+    if (device->vulkan)
+    {
+        const auto lock  = device->vulkan->lock();
+        const auto limit = device->vulkan->context()->properties.limits.maxImageDimension2D;
+        if (size.x > limit || size.y > limit)
+            return false;
+
+        auto image = device->vulkan->makeTexture(size, sRgb);
+        if (!image)
+            return false;
+
+        m_vulkanImage = std::move(image);
+        m_size = m_actualSize = size;
+        m_sRgb                = sRgb;
+        m_pixelsFlipped       = false;
+        m_fboAttachment       = false;
+        m_hasMipmap           = false;
+        m_cacheId             = TextureImpl::getUniqueId();
+        return true;
+    }
+#endif
+#ifdef SFML_RENDER_GL
+    const TextureContextLock lock;
 
     // Make sure that extensions are initialized
     priv::ensureExtensionsInit();
@@ -269,6 +312,8 @@ bool Texture::resize(Vector2u size, bool sRgb)
     m_actualSize    = actualSize;
     m_pixelsFlipped = false;
     m_fboAttachment = false;
+
+    m_glContext = device->glContext;
 
     // Create the OpenGL texture if it doesn't exist yet
     if (!m_texture)
@@ -347,6 +392,10 @@ bool Texture::resize(Vector2u size, bool sRgb)
     m_hasMipmap = false;
 
     return true;
+#else
+    (void)sRgb;
+    return false;
+#endif
 }
 
 
@@ -385,14 +434,7 @@ bool Texture::loadFromImage(const Image& image, bool sRgb, const IntRect& area)
         ((area.position.x <= 0) && (area.position.y <= 0) && (area.size.x >= size.x) && (area.size.y >= size.y)))
     {
         // Load the entire image
-        if (resize(image.getSize(), sRgb))
-        {
-            update(image);
-            return true;
-        }
-
-        // Error message generated in called function.
-        return false;
+        return resize(image.getSize(), sRgb) && upload(image.getPixelsPtr(), image.getSize(), {});
     }
 
     // Load a sub-area of the image
@@ -408,35 +450,19 @@ bool Texture::loadFromImage(const Image& image, bool sRgb, const IntRect& area)
     rectangle.size.x     = std::min(rectangle.size.x, size.x - rectangle.position.x);
     rectangle.size.y     = std::min(rectangle.size.y, size.y - rectangle.position.y);
 
-    // Create the texture and upload the pixels
-    if (resize(Vector2u(rectangle.size), sRgb))
+    const auto croppedSize = Vector2u(rectangle.size);
+    if (!resize(croppedSize, sRgb))
+        return false;
+
+    const auto                stride = static_cast<std::size_t>(croppedSize.x) * 4;
+    std::vector<std::uint8_t> cropped(stride * croppedSize.y);
+    const auto*               src = image.getPixelsPtr() + 4 * (rectangle.position.x + size.x * rectangle.position.y);
+    for (unsigned int y = 0; y < croppedSize.y; ++y)
     {
-        const TransientContextLock lock;
-
-        // Make sure that the current texture binding will be preserved
-        const priv::TextureSaver save;
-
-        // Copy the pixels to the texture, row by row
-        const std::uint8_t* pixels = image.getPixelsPtr() + 4 * (rectangle.position.x + (size.x * rectangle.position.y));
-        glCheck(glBindTexture(GL_TEXTURE_2D, m_texture));
-        for (int i = 0; i < rectangle.size.y; ++i)
-        {
-            glCheck(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, i, rectangle.size.x, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixels));
-            pixels += 4 * size.x;
-        }
-
-        glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, m_isSmooth ? GL_LINEAR : GL_NEAREST));
-        m_hasMipmap = false;
-
-        // Force an OpenGL flush, so that the texture will appear updated
-        // in all contexts immediately (solves problems in multi-threaded apps)
-        glCheck(glFlush());
-
-        return true;
+        std::memcpy(cropped.data() + y * stride, src, stride);
+        src += 4 * size.x;
     }
-
-    // Error message generated in called function.
-    return false;
+    return upload(cropped.data(), croppedSize, {});
 }
 
 
@@ -450,11 +476,20 @@ Vector2u Texture::getSize() const
 ////////////////////////////////////////////////////////////
 Image Texture::copyToImage() const
 {
+#ifdef SFML_RENDER_VULKAN
+    if (m_vulkanImage)
+    {
+        const auto& device = priv::getGraphicsDevice()->vulkan;
+        const auto  lock   = device->lock();
+        return device->readImage(m_vulkanImage);
+    }
+#endif
+#ifdef SFML_RENDER_GL
     // Easy case: empty texture
     if (!m_texture)
         return {};
 
-    const TransientContextLock lock;
+    const TextureContextLock lock;
 
     // Make sure that the current texture binding will be preserved
     const priv::TextureSaver save;
@@ -544,6 +579,9 @@ Image Texture::copyToImage() const
 #endif // SFML_OPENGL_ES
 
     return {m_size, pixels.data()};
+#else
+    return {};
+#endif
 }
 
 
@@ -558,15 +596,37 @@ void Texture::update(const std::uint8_t* pixels)
 ////////////////////////////////////////////////////////////
 void Texture::update(const std::uint8_t* pixels, Vector2u size, Vector2u dest)
 {
+    if (!pixels || (!m_texture && !m_vulkanImage))
+        return;
+
     assert(dest.x + size.x <= m_size.x && "Destination x coordinate is outside of texture");
     assert(dest.y + size.y <= m_size.y && "Destination y coordinate is outside of texture");
 
-    if (!pixels || !m_texture)
-    {
-        return;
-    }
+    (void)upload(pixels, size, dest);
+}
 
-    const TransientContextLock lock;
+bool Texture::upload(const std::uint8_t* pixels, Vector2u size, Vector2u dest)
+{
+    if (!pixels || !size.x || !size.y)
+        return false;
+
+#ifdef SFML_RENDER_VULKAN
+    if (m_vulkanImage)
+    {
+        const auto& device = priv::getGraphicsDevice()->vulkan;
+        const auto  lock   = device->lock();
+        if (!device->upload(m_vulkanImage, pixels, size, dest))
+            return false;
+        m_hasMipmap = false;
+        m_cacheId   = TextureImpl::getUniqueId();
+        return true;
+    }
+#endif
+#ifdef SFML_RENDER_GL
+    if (!m_texture)
+        return false;
+
+    const TextureContextLock lock;
 
     // Make sure that the current texture binding will be preserved
     const priv::TextureSaver save;
@@ -590,6 +650,11 @@ void Texture::update(const std::uint8_t* pixels, Vector2u size, Vector2u dest)
     // Force an OpenGL flush, so that the texture data will appear updated
     // in all contexts immediately (solves problems in multi-threaded apps)
     glCheck(glFlush());
+    return true;
+#else
+    (void)dest;
+    return false;
+#endif
 }
 
 
@@ -604,16 +669,32 @@ void Texture::update(const Texture& texture)
 ////////////////////////////////////////////////////////////
 void Texture::update(const Texture& texture, Vector2u dest)
 {
+    if ((!m_texture && !m_vulkanImage) || (!texture.m_texture && !texture.m_vulkanImage))
+        return;
+
     assert(dest.x + texture.m_size.x <= m_size.x && "Destination x coordinate is outside of texture");
     assert(dest.y + texture.m_size.y <= m_size.y && "Destination y coordinate is outside of texture");
 
+#ifdef SFML_RENDER_VULKAN
+    if (m_vulkanImage && texture.m_vulkanImage)
+    {
+        const auto& device = priv::getGraphicsDevice()->vulkan;
+        const auto  lock   = device->lock();
+        if (device->copy(texture.m_vulkanImage, m_vulkanImage, dest))
+        {
+            m_hasMipmap = false;
+            m_cacheId   = TextureImpl::getUniqueId();
+        }
+        return;
+    }
+#endif
+#ifdef SFML_RENDER_GL
     if (!m_texture || !texture.m_texture)
         return;
 
-#ifndef SFML_OPENGL_ES
 
     {
-        const TransientContextLock lock;
+        const TextureContextLock lock;
 
         // Make sure that extensions are initialized
         priv::ensureExtensionsInit();
@@ -621,7 +702,7 @@ void Texture::update(const Texture& texture, Vector2u dest)
 
     if (GLEXT_framebuffer_object && GLEXT_framebuffer_blit)
     {
-        const TransientContextLock lock;
+        const TextureContextLock lock;
 
         // Save the current bindings so we can restore them after we are done
         GLint readFramebuffer = 0;
@@ -716,9 +797,9 @@ void Texture::update(const Texture& texture, Vector2u dest)
         return;
     }
 
-#endif // SFML_OPENGL_ES
 
     update(texture.copyToImage(), dest);
+#endif
 }
 
 
@@ -747,15 +828,31 @@ void Texture::update(const Window& window)
 ////////////////////////////////////////////////////////////
 void Texture::update(const Window& window, Vector2u dest)
 {
+    if (!window.isOpen() || (!m_texture && !m_vulkanImage))
+        return;
+
     assert(dest.x + window.getSize().x <= m_size.x && "Destination x coordinate is outside of texture");
     assert(dest.y + window.getSize().y <= m_size.y && "Destination y coordinate is outside of texture");
 
+#ifdef SFML_RENDER_VULKAN
+    if (m_vulkanImage)
+    {
+        const auto* surface = dynamic_cast<const priv::VulkanWindowSurface*>(window.getSurface());
+        if (surface && surface->copyTo(m_vulkanImage, dest))
+        {
+            m_hasMipmap = false;
+            m_cacheId   = TextureImpl::getUniqueId();
+        }
+        return;
+    }
+#endif
+#ifdef SFML_RENDER_GL
     if (!m_texture || !window.setActive(true))
     {
         return;
     }
 
-    const TransientContextLock lock;
+    const TextureContextLock lock;
 
     // Make sure that the current texture binding will be preserved
     const priv::TextureSaver save;
@@ -778,6 +875,7 @@ void Texture::update(const Window& window, Vector2u dest)
     // Force an OpenGL flush, so that the texture will appear updated
     // in all contexts immediately (solves problems in multi-threaded apps)
     glCheck(glFlush());
+#endif
 }
 
 
@@ -791,12 +889,13 @@ void Texture::setSmooth(bool smooth)
 
     m_isSmooth = smooth;
 
+#ifdef SFML_RENDER_GL
     if (!m_texture)
     {
         return;
     }
 
-    const TransientContextLock lock;
+    const TextureContextLock lock;
 
     // Make sure that the current texture binding will be preserved
     const priv::TextureSaver save;
@@ -814,6 +913,7 @@ void Texture::setSmooth(bool smooth)
     {
         glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, m_isSmooth ? GL_LINEAR : GL_NEAREST));
     }
+#endif
 }
 
 
@@ -841,12 +941,13 @@ void Texture::setRepeated(bool repeated)
 
     m_isRepeated = repeated;
 
+#ifdef SFML_RENDER_GL
     if (!m_texture)
     {
         return;
     }
 
-    const TransientContextLock lock;
+    const TextureContextLock lock;
 
     // Make sure that the current texture binding will be preserved
     const priv::TextureSaver save;
@@ -876,6 +977,7 @@ void Texture::setRepeated(bool repeated)
     glCheck(glBindTexture(GL_TEXTURE_2D, m_texture));
     glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, textureWrapParam));
     glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, textureWrapParam));
+#endif
 }
 
 
@@ -889,10 +991,20 @@ bool Texture::isRepeated() const
 ////////////////////////////////////////////////////////////
 bool Texture::generateMipmap()
 {
+#ifdef SFML_RENDER_VULKAN
+    if (m_vulkanImage)
+    {
+        const auto& device = priv::getGraphicsDevice()->vulkan;
+        const auto  lock   = device->lock();
+        m_hasMipmap        = device->generateMipmap(m_vulkanImage);
+        return m_hasMipmap;
+    }
+#endif
+#ifdef SFML_RENDER_GL
     if (!m_texture)
         return false;
 
-    const TransientContextLock lock;
+    const TextureContextLock lock;
 
     // Make sure that extensions are initialized
     priv::ensureExtensionsInit();
@@ -912,6 +1024,9 @@ bool Texture::generateMipmap()
     m_hasMipmap = true;
 
     return true;
+#else
+    return false;
+#endif
 }
 
 
@@ -921,101 +1036,95 @@ void Texture::invalidateMipmap()
     if (!m_hasMipmap)
         return;
 
-    const TransientContextLock lock;
+#ifdef SFML_RENDER_GL
+    if (m_texture)
+    {
+        const TextureContextLock lock;
 
-    // Make sure that the current texture binding will be preserved
-    const priv::TextureSaver save;
+        // Make sure that the current texture binding will be preserved
+        const priv::TextureSaver save;
 
-    glCheck(glBindTexture(GL_TEXTURE_2D, m_texture));
-    glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, m_isSmooth ? GL_LINEAR : GL_NEAREST));
+        glCheck(glBindTexture(GL_TEXTURE_2D, m_texture));
+        glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, m_isSmooth ? GL_LINEAR : GL_NEAREST));
+    }
+#endif
 
     m_hasMipmap = false;
 }
 
 
 ////////////////////////////////////////////////////////////
-void Texture::bind(const Texture* texture, CoordinateType coordinateType)
+std::array<float, 16> Texture::coordinateMatrix(const Texture* texture, CoordinateType coordinateType)
 {
-    const TransientContextLock lock;
+    std::array matrix{1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f};
+    if (!texture || !texture->m_actualSize.x || !texture->m_actualSize.y)
+        return matrix;
 
-    if (texture && texture->m_texture)
+    const auto width  = static_cast<float>(texture->m_actualSize.x);
+    const auto height = static_cast<float>(texture->m_actualSize.y);
+    if (coordinateType == CoordinateType::Pixels)
     {
-        // When debugging, ensure that the texture name is valid
-        assert((glIsTexture(texture->m_texture) == GL_TRUE) &&
-               "Texture to be bound is invalid, check if the texture is still being used after it has been destroyed");
-
-        // Bind the texture
-        glCheck(glBindTexture(GL_TEXTURE_2D, texture->m_texture));
-
-        // Check if we need to define a special texture matrix
-        if ((coordinateType == CoordinateType::Pixels) || texture->m_pixelsFlipped ||
-            ((coordinateType == CoordinateType::Normalized) && (texture->m_size != texture->m_actualSize)))
-        {
-            // clang-format off
-            std::array matrix = {1.f, 0.f, 0.f, 0.f,
-                                 0.f, 1.f, 0.f, 0.f,
-                                 0.f, 0.f, 1.f, 0.f,
-                                 0.f, 0.f, 0.f, 1.f};
-            // clang-format on
-
-            // If non-normalized coordinates (= pixels) are requested, we need to
-            // setup scale factors that convert the range [0 .. size] to [0 .. 1]
-            if (coordinateType == CoordinateType::Pixels)
-            {
-                matrix[0] = 1.f / static_cast<float>(texture->m_actualSize.x);
-                matrix[5] = 1.f / static_cast<float>(texture->m_actualSize.y);
-            }
-
-            // If normalized coordinates are used when NPOT textures aren't supported,
-            // then we need to setup scale factors to make the coordinates relative to the actual POT size
-            if ((coordinateType == CoordinateType::Normalized) && (texture->m_size != texture->m_actualSize))
-            {
-                matrix[0] = static_cast<float>(texture->m_size.x) / static_cast<float>(texture->m_actualSize.x);
-                matrix[5] = static_cast<float>(texture->m_size.y) / static_cast<float>(texture->m_actualSize.y);
-            }
-
-            // If pixels are flipped we must invert the Y axis
-            if (texture->m_pixelsFlipped)
-            {
-                matrix[5]  = -matrix[5];
-                matrix[13] = static_cast<float>(texture->m_size.y) / static_cast<float>(texture->m_actualSize.y);
-            }
-
-            // Load the matrix
-            glCheck(glMatrixMode(GL_TEXTURE));
-            glCheck(glLoadMatrixf(matrix.data()));
-        }
-        else
-        {
-            // Reset the texture matrix
-            glCheck(glMatrixMode(GL_TEXTURE));
-            glCheck(glLoadIdentity());
-        }
-
-        // Go back to model-view mode (sf::RenderTarget relies on it)
-        glCheck(glMatrixMode(GL_MODELVIEW));
+        matrix[0] = 1.f / width;
+        matrix[5] = 1.f / height;
     }
     else
     {
-        // Bind no texture
-        glCheck(glBindTexture(GL_TEXTURE_2D, 0));
-
-        // Reset the texture matrix
-        glCheck(glMatrixMode(GL_TEXTURE));
-        glCheck(glLoadIdentity());
-
-        // Go back to model-view mode (sf::RenderTarget relies on it)
-        glCheck(glMatrixMode(GL_MODELVIEW));
+        matrix[0] = static_cast<float>(texture->m_size.x) / width;
+        matrix[5] = static_cast<float>(texture->m_size.y) / height;
     }
+
+    if (texture->m_pixelsFlipped)
+    {
+        matrix[5]  = -matrix[5];
+        matrix[13] = static_cast<float>(texture->m_size.y) / height;
+    }
+    return matrix;
+}
+
+void Texture::bind(const Texture* texture, CoordinateType coordinateType)
+{
+#ifdef SFML_RENDER_GL
+    if (const auto* device = priv::getGraphicsDevice(); device && device->glContext)
+    {
+        const TextureContextLock lock;
+        priv::ensureExtensionsInit();
+        glCheck(glBindTexture(GL_TEXTURE_2D, texture ? texture->m_texture : 0));
+#ifndef SFML_OPENGL_ES
+        if (std::get<OpenGLSettings>(device->settings).profile != OpenGLProfile::Core)
+        {
+            const auto matrix = coordinateMatrix(texture, coordinateType);
+            glCheck(glMatrixMode(GL_TEXTURE));
+            glCheck(glLoadMatrixf(matrix.data()));
+            glCheck(glMatrixMode(GL_MODELVIEW));
+        }
+#else
+        (void)coordinateType;
+#endif
+        return;
+    }
+#else
+    (void)texture;
+    (void)coordinateType;
+#endif
+    err() << "Texture::bind requires OpenGL" << std::endl;
 }
 
 
 ////////////////////////////////////////////////////////////
 unsigned int Texture::getMaximumSize()
 {
+    const auto* device = priv::getGraphicsDevice();
+    if (!device)
+        return 0;
+
+#ifdef SFML_RENDER_VULKAN
+    if (device->vulkan)
+        return device->vulkan->context()->properties.limits.maxImageDimension2D;
+#endif
+#ifdef SFML_RENDER_GL
     static const unsigned int size = []
     {
-        const TransientContextLock transientLock;
+        const TextureContextLock transientLock;
 
         GLint value = 0;
 
@@ -1028,6 +1137,9 @@ unsigned int Texture::getMaximumSize()
     }();
 
     return size;
+#else
+    return 0;
+#endif
 }
 
 
@@ -1045,6 +1157,8 @@ Texture& Texture::operator=(const Texture& right)
 ////////////////////////////////////////////////////////////
 void Texture::swap(Texture& right) noexcept
 {
+    std::swap(m_glContext, right.m_glContext);
+    std::swap(m_vulkanImage, right.m_vulkanImage);
     std::swap(m_size, right.m_size);
     std::swap(m_actualSize, right.m_actualSize);
     std::swap(m_texture, right.m_texture);
@@ -1068,6 +1182,7 @@ unsigned int Texture::getNativeHandle() const
 ////////////////////////////////////////////////////////////
 unsigned int Texture::getValidSize(unsigned int size)
 {
+#ifdef SFML_RENDER_GL
     if (GLEXT_texture_non_power_of_two)
     {
         // If hardware supports NPOT textures, then just return the unmodified size
@@ -1080,6 +1195,9 @@ unsigned int Texture::getValidSize(unsigned int size)
         powerOfTwo *= 2;
 
     return powerOfTwo;
+#else
+    return size;
+#endif
 }
 
 

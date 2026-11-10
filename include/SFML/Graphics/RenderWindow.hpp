@@ -178,6 +178,11 @@ public:
     ////////////////////////////////////////////////////////////
     [[nodiscard]] bool setActive(bool active = true) override;
 
+    using Window::create;
+    void create(VideoMode mode, const String& title, std::uint32_t style, State state, const ContextSettings& settings) override;
+    void create(WindowHandle handle, const ContextSettings& settings) override;
+    void close() override;
+
 protected:
     ////////////////////////////////////////////////////////////
     /// \brief Function called after the window has been created
@@ -199,6 +204,10 @@ protected:
     void onResize() override;
 
 private:
+    [[nodiscard]] std::unique_ptr<priv::WindowSurface> createSurface(const ContextSettings&  settings,
+                                                                     const priv::WindowImpl& owner,
+                                                                     unsigned int            bitsPerPixel) override;
+
     ////////////////////////////////////////////////////////////
     // Member data
     ////////////////////////////////////////////////////////////

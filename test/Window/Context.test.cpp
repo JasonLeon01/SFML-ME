@@ -28,7 +28,7 @@ TEST_CASE("[Window] sf::Context", runDisplayTests())
     SECTION("Construction")
     {
         const sf::Context context;
-        CHECK(context.getSettings().majorVersion > 0);
+        CHECK(!std::holds_alternative<std::monostate>(context.getSettings().backend));
         CHECK(sf::Context::getActiveContext() == &context);
         CHECK(sf::Context::getActiveContextId() != 0);
     }
@@ -41,7 +41,7 @@ TEST_CASE("[Window] sf::Context", runDisplayTests())
             {
                 sf::Context       movedContext;
                 const sf::Context context(std::move(movedContext));
-                CHECK(context.getSettings().majorVersion > 0);
+                CHECK(!std::holds_alternative<std::monostate>(context.getSettings().backend));
                 CHECK(sf::Context::getActiveContext() == &context);
                 CHECK(sf::Context::getActiveContextId() != 0);
             }
@@ -54,7 +54,7 @@ TEST_CASE("[Window] sf::Context", runDisplayTests())
                 CHECK(sf::Context::getActiveContextId() == 0);
 
                 const sf::Context context(std::move(movedContext));
-                CHECK(context.getSettings().majorVersion > 0);
+                CHECK(!std::holds_alternative<std::monostate>(context.getSettings().backend));
                 CHECK(sf::Context::getActiveContext() == nullptr);
                 CHECK(sf::Context::getActiveContextId() == 0);
             }
@@ -71,7 +71,7 @@ TEST_CASE("[Window] sf::Context", runDisplayTests())
                 CHECK(sf::Context::getActiveContextId() != 0);
 
                 context = std::move(movedContext);
-                CHECK(context.getSettings().majorVersion > 0);
+                CHECK(!std::holds_alternative<std::monostate>(context.getSettings().backend));
                 CHECK(sf::Context::getActiveContext() == &context);
                 CHECK(sf::Context::getActiveContextId() != 0);
             }
@@ -85,7 +85,7 @@ TEST_CASE("[Window] sf::Context", runDisplayTests())
 
                 sf::Context context;
                 context = std::move(movedContext);
-                CHECK(context.getSettings().majorVersion > 0);
+                CHECK(!std::holds_alternative<std::monostate>(context.getSettings().backend));
                 CHECK(sf::Context::getActiveContext() == nullptr);
                 CHECK(sf::Context::getActiveContextId() == 0);
             }
@@ -131,7 +131,7 @@ TEST_CASE("[Window] sf::Context", runDisplayTests())
 
         {
             const sf::Context context;
-            CHECK(context.getSettings().majorVersion > 0);
+            CHECK(!std::holds_alternative<std::monostate>(context.getSettings().backend));
             CHECK(sf::Context::getActiveContext() == &context);
             CHECK(sf::Context::getActiveContextId() != 0);
         }

@@ -33,13 +33,19 @@
 #include <SFML/Graphics/PrimitiveType.hpp>
 #include <SFML/Graphics/RenderStates.hpp>
 
-#include <SFML/Window/GlResource.hpp>
+#include <memory>
 
 #include <cstddef>
 
 
 namespace sf
 {
+namespace priv
+{
+struct VulkanBuffer;
+class VulkanRenderTarget;
+} // namespace priv
+
 class RenderTarget;
 struct Vertex;
 
@@ -47,7 +53,7 @@ struct Vertex;
 /// \brief Vertex buffer storage for one or more 2D primitives
 ///
 ////////////////////////////////////////////////////////////
-class SFML_GRAPHICS_API VertexBuffer : public Drawable, private GlResource
+class SFML_GRAPHICS_API VertexBuffer : public Drawable
 {
 public:
     ////////////////////////////////////////////////////////////
@@ -236,6 +242,7 @@ public:
     /// or implement a temporary workaround until a bug is fixed.
     ///
     /// \return OpenGL handle of the vertex buffer or 0 if not yet created
+    /// Returns zero when the resource belongs to the Vulkan backend.
     ///
     ////////////////////////////////////////////////////////////
     [[nodiscard]] unsigned int getNativeHandle() const;
@@ -334,6 +341,10 @@ private:
     ////////////////////////////////////////////////////////////
     // Member data
     ////////////////////////////////////////////////////////////
+    friend class priv::VulkanRenderTarget;
+    std::shared_ptr<void>               m_glContext;
+    std::shared_ptr<priv::VulkanBuffer> m_vulkanBuffer;
+
     unsigned int  m_buffer{};                             //!< Internal buffer identifier
     std::size_t   m_size{};                               //!< Size in Vertices of the currently allocated buffer
     PrimitiveType m_primitiveType{PrimitiveType::Points}; //!< Type of primitives to draw

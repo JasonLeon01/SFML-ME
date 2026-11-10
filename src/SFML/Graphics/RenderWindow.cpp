@@ -25,13 +25,24 @@
 ////////////////////////////////////////////////////////////
 // Headers
 ////////////////////////////////////////////////////////////
+#include <SFML/Graphics/GraphicsDevice.hpp>
+
+#ifdef SFML_RENDER_GL
 #include <SFML/Graphics/GLCheck.hpp>
 #include <SFML/Graphics/GLExtensions.hpp>
-#include <SFML/Graphics/Image.hpp>
 #include <SFML/Graphics/RenderTextureImplFBO.hpp>
+#endif
+#ifdef SFML_RENDER_VULKAN
+#include <SFML/Graphics/Vulkan/VulkanRenderTarget.hpp>
+#include <SFML/Graphics/Vulkan/VulkanWindowSurface.hpp>
+
+#include <SFML/Window/WindowImpl.hpp>
+#endif
+#include <SFML/Graphics/Image.hpp>
 #include <SFML/Graphics/RenderWindow.hpp>
 
 #include <SFML/Window/VideoMode.hpp>
+#include <SFML/Window/WindowSurface.hpp>
 
 
 namespace sf
@@ -40,7 +51,7 @@ namespace sf
 RenderWindow::RenderWindow(VideoMode mode, const String& title, std::uint32_t style, State state, const ContextSettings& settings)
 {
     // Don't call the base class constructor because it contains virtual function calls
-    Window::create(mode, title, style, state, settings);
+    create(mode, title, style, state, settings);
 }
 
 
@@ -48,7 +59,7 @@ RenderWindow::RenderWindow(VideoMode mode, const String& title, std::uint32_t st
 RenderWindow::RenderWindow(VideoMode mode, const String& title, State state, const ContextSettings& settings)
 {
     // Don't call the base class constructor because it contains virtual function calls
-    Window::create(mode, title, sf::Style::Default, state, settings);
+    create(mode, title, sf::Style::Default, state, settings);
 }
 
 
@@ -56,7 +67,49 @@ RenderWindow::RenderWindow(VideoMode mode, const String& title, State state, con
 RenderWindow::RenderWindow(WindowHandle handle, const ContextSettings& settings)
 {
     // Don't call the base class constructor because it contains virtual function calls
-    Window::create(handle, settings);
+    create(handle, settings);
+}
+
+
+////////////////////////////////////////////////////////////
+void RenderWindow::create(VideoMode mode, const String& title, std::uint32_t style, State state, const ContextSettings& settings)
+{
+    (void)priv::withGraphicsDevice(settings,
+                                   [&](const priv::GraphicsDevice&, const ContextSettings& effective)
+                                   {
+                                       Window::create(mode, title, style, state, effective);
+                                       return isOpen();
+                                   });
+}
+
+void RenderWindow::create(WindowHandle handle, const ContextSettings& settings)
+{
+    (void)priv::withGraphicsDevice(settings,
+                                   [&](const priv::GraphicsDevice&, const ContextSettings& effective)
+                                   {
+                                       Window::create(handle, effective);
+                                       return isOpen();
+                                   });
+}
+
+void RenderWindow::close()
+{
+    m_backend.reset();
+    Window::close();
+}
+
+std::unique_ptr<priv::WindowSurface> RenderWindow::createSurface(const ContextSettings&  settings,
+                                                                 const priv::WindowImpl& owner,
+                                                                 unsigned int            bitsPerPixel)
+{
+#ifdef SFML_RENDER_VULKAN
+    if (std::holds_alternative<VulkanSettings>(settings.backend))
+    {
+        const auto* device = priv::getGraphicsDevice();
+        return priv::VulkanWindowSurface::create(device->vulkan, owner.getNativeHandle(), owner.getSize(), settings);
+    }
+#endif
+    return Window::createSurface(settings, owner, bitsPerPixel);
 }
 
 
@@ -90,6 +143,10 @@ bool RenderWindow::setActive(bool active)
     if (result)
         result = RenderTarget::setActive(active);
 
+#ifdef SFML_RENDER_GL
+    if (std::holds_alternative<VulkanSettings>(getSettings().backend))
+        return result;
+
     // If FBOs are available, make sure none are bound when we
     // try to draw to the default framebuffer of the RenderWindow
     if (active && result && priv::RenderTextureImplFBO::isAvailable())
@@ -98,6 +155,7 @@ bool RenderWindow::setActive(bool active)
 
         return true;
     }
+#endif
 
     return result;
 }
@@ -106,12 +164,19 @@ bool RenderWindow::setActive(bool active)
 ////////////////////////////////////////////////////////////
 void RenderWindow::onCreate()
 {
-    if (priv::RenderTextureImplFBO::isAvailable())
+#ifdef SFML_RENDER_VULKAN
+    if (auto* surface = dynamic_cast<priv::VulkanWindowSurface*>(getSurface()))
+        m_backend = surface->renderTarget();
+#endif
+#ifdef SFML_RENDER_GL
+    if (!m_backend && priv::RenderTextureImplFBO::isAvailable())
     {
         // Retrieve the framebuffer ID we have to bind when targeting the window for rendering
         // We assume that this window's context is still active at this point
         glCheck(glGetIntegerv(GLEXT_GL_FRAMEBUFFER_BINDING, reinterpret_cast<GLint*>(&m_defaultFrameBuffer)));
     }
+
+#endif
 
     // Just initialize the render target part
     RenderTarget::initialize();
@@ -121,6 +186,10 @@ void RenderWindow::onCreate()
 ////////////////////////////////////////////////////////////
 void RenderWindow::onResize()
 {
+#ifdef SFML_RENDER_VULKAN
+    if (auto* surface = dynamic_cast<priv::VulkanWindowSurface*>(getSurface()))
+        surface->resize(getSize());
+#endif
     // Update the current view (recompute the viewport, which is stored in relative coordinates)
     setView(getView());
 }

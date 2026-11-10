@@ -25,14 +25,22 @@
 ////////////////////////////////////////////////////////////
 // Headers
 ////////////////////////////////////////////////////////////
+#include <SFML/Graphics/GraphicsDevice.hpp>
+#ifdef SFML_RENDER_GL
 #include <SFML/Graphics/GLCheck.hpp>
 #include <SFML/Graphics/GLExtensions.hpp>
+#include <SFML/Graphics/OpenGL/OpenGLResource.hpp>
+#endif
+#ifdef SFML_RENDER_VULKAN
+#include <SFML/Graphics/Vulkan/VulkanDevice.hpp>
+#endif
 #include <SFML/Graphics/RenderTarget.hpp>
 #include <SFML/Graphics/Vertex.hpp>
 #include <SFML/Graphics/VertexBuffer.hpp>
 
 #include <SFML/System/Err.hpp>
 
+#include <limits>
 #include <ostream>
 #include <utility>
 
@@ -40,6 +48,7 @@
 #include <cstring>
 
 
+#ifdef SFML_RENDER_GL
 namespace
 {
 // A nested named namespace is used here to allow unity builds of SFML.
@@ -59,10 +68,14 @@ GLenum usageToGlEnum(sf::VertexBuffer::Usage usage)
 }
 } // namespace VertexBufferImpl
 } // namespace
+#endif
 
 
 namespace sf
 {
+#ifdef SFML_RENDER_GL
+using VertexContextLock = priv::OpenGLResource::TransientContextLock;
+#endif
 ////////////////////////////////////////////////////////////
 VertexBuffer::VertexBuffer(PrimitiveType type) : m_primitiveType(type)
 {
@@ -82,12 +95,9 @@ VertexBuffer::VertexBuffer(PrimitiveType type, Usage usage) : m_primitiveType(ty
 
 
 ////////////////////////////////////////////////////////////
-VertexBuffer::VertexBuffer(const VertexBuffer& copy) :
-    GlResource(copy),
-    m_primitiveType(copy.m_primitiveType),
-    m_usage(copy.m_usage)
+VertexBuffer::VertexBuffer(const VertexBuffer& copy) : m_primitiveType(copy.m_primitiveType), m_usage(copy.m_usage)
 {
-    if (copy.m_buffer && copy.m_size)
+    if (copy.m_size)
     {
         if (!create(copy.m_size))
         {
@@ -104,22 +114,39 @@ VertexBuffer::VertexBuffer(const VertexBuffer& copy) :
 ////////////////////////////////////////////////////////////
 VertexBuffer::~VertexBuffer()
 {
+#ifdef SFML_RENDER_GL
     if (m_buffer)
     {
-        const TransientContextLock contextLock;
+        const VertexContextLock contextLock;
 
         glCheck(GLEXT_glDeleteBuffers(1, &m_buffer));
     }
+#endif
 }
 
 
 ////////////////////////////////////////////////////////////
 bool VertexBuffer::create(std::size_t vertexCount)
 {
-    if (!isAvailable())
+    const auto* device = priv::getGraphicsDevice();
+    if (!device || vertexCount > std::numeric_limits<std::ptrdiff_t>::max() / sizeof(Vertex))
         return false;
 
-    const TransientContextLock contextLock;
+#ifdef SFML_RENDER_VULKAN
+    if (device->vulkan)
+    {
+        const auto lock   = device->vulkan->lock();
+        auto       buffer = device->vulkan->makeBuffer(vertexCount * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        if (!buffer)
+            return false;
+        m_vulkanBuffer = std::move(buffer);
+        m_size         = vertexCount;
+        return true;
+    }
+#endif
+#ifdef SFML_RENDER_GL
+    const VertexContextLock contextLock;
+    priv::ensureExtensionsInit();
 
     if (!m_buffer)
         glCheck(GLEXT_glGenBuffers(1, &m_buffer));
@@ -137,9 +164,13 @@ bool VertexBuffer::create(std::size_t vertexCount)
                                VertexBufferImpl::usageToGlEnum(m_usage)));
     glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, 0));
 
-    m_size = vertexCount;
+    m_glContext = device->glContext;
+    m_size      = vertexCount;
 
     return true;
+#else
+    return false;
+#endif
 }
 
 
@@ -160,17 +191,35 @@ bool VertexBuffer::update(const Vertex* vertices)
 ////////////////////////////////////////////////////////////
 bool VertexBuffer::update(const Vertex* vertices, std::size_t vertexCount, unsigned int offset)
 {
-    // Sanity checks
-    if (!m_buffer)
+    if (!vertices || (!m_buffer && !m_vulkanBuffer) ||
+        vertexCount > std::numeric_limits<std::ptrdiff_t>::max() / sizeof(Vertex) ||
+        (offset && (offset > m_size || vertexCount > m_size - offset)))
         return false;
 
-    if (!vertices)
-        return false;
-
-    if (offset && (offset + vertexCount > m_size))
-        return false;
-
-    const TransientContextLock contextLock;
+#ifdef SFML_RENDER_VULKAN
+    if (m_vulkanBuffer)
+    {
+        const auto& device = priv::getGraphicsDevice()->vulkan;
+        const auto  lock   = device->lock();
+        if (!offset && vertexCount >= m_size)
+        {
+            auto replacement = device->makeBuffer(vertexCount * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+            if (!replacement)
+                return false;
+            m_vulkanBuffer = std::move(replacement);
+            m_size         = vertexCount;
+        }
+        else if (m_vulkanBuffer.use_count() > 1 && !device->flush())
+        {
+            // Earlier draws refer to the old contents of this buffer.
+            return false;
+        }
+        m_vulkanBuffer->write(static_cast<VkDeviceSize>(offset) * sizeof(Vertex), vertices, vertexCount * sizeof(Vertex));
+        return true;
+    }
+#endif
+#ifdef SFML_RENDER_GL
+    const VertexContextLock contextLock;
 
     glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, m_buffer));
 
@@ -193,28 +242,45 @@ bool VertexBuffer::update(const Vertex* vertices, std::size_t vertexCount, unsig
     glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, 0));
 
     return true;
+#else
+    return false;
+#endif
 }
 
 
 ////////////////////////////////////////////////////////////
-bool VertexBuffer::update([[maybe_unused]] const VertexBuffer& vertexBuffer)
+bool VertexBuffer::update(const VertexBuffer& vertexBuffer)
 {
-#ifdef SFML_OPENGL_ES
+    if (&vertexBuffer == this)
+        return m_buffer || m_vulkanBuffer;
 
-    return false;
-
-#else
-
+#ifdef SFML_RENDER_VULKAN
+    if (m_vulkanBuffer && vertexBuffer.m_vulkanBuffer)
+    {
+        const auto& device = priv::getGraphicsDevice()->vulkan;
+        const auto  lock   = device->lock();
+        auto replacement = device->makeBuffer(vertexBuffer.m_size * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        if (!replacement)
+            return false;
+        replacement->write(0, vertexBuffer.m_vulkanBuffer->mapped, vertexBuffer.m_size * sizeof(Vertex));
+        m_vulkanBuffer = std::move(replacement);
+        m_size         = vertexBuffer.m_size;
+        return true;
+    }
+#endif
+#ifdef SFML_RENDER_GL
     if (!m_buffer || !vertexBuffer.m_buffer)
         return false;
 
-    const TransientContextLock contextLock;
+    const VertexContextLock contextLock;
 
     // Make sure that extensions are initialized
     priv::ensureExtensionsInit();
 
     if (GLEXT_copy_buffer)
     {
+        if (m_size != vertexBuffer.m_size && !create(vertexBuffer.m_size))
+            return false;
         glCheck(GLEXT_glBindBuffer(GLEXT_GL_COPY_READ_BUFFER, vertexBuffer.m_buffer));
         glCheck(GLEXT_glBindBuffer(GLEXT_GL_COPY_WRITE_BUFFER, m_buffer));
 
@@ -230,6 +296,7 @@ bool VertexBuffer::update([[maybe_unused]] const VertexBuffer& vertexBuffer)
         return true;
     }
 
+#ifndef SFML_OPENGL_ES
     glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, m_buffer));
     glCheck(GLEXT_glBufferData(GLEXT_GL_ARRAY_BUFFER,
                                static_cast<GLsizeiptrARB>(sizeof(Vertex) * vertexBuffer.m_size),
@@ -242,19 +309,25 @@ bool VertexBuffer::update([[maybe_unused]] const VertexBuffer& vertexBuffer)
 
     const void* const source = glCheck(GLEXT_glMapBuffer(GLEXT_GL_ARRAY_BUFFER, GLEXT_GL_READ_ONLY));
 
-    std::memcpy(destination, source, sizeof(Vertex) * vertexBuffer.m_size);
+    if (destination && source)
+        std::memcpy(destination, source, sizeof(Vertex) * vertexBuffer.m_size);
 
-    const GLboolean sourceResult = glCheck(GLEXT_glUnmapBuffer(GLEXT_GL_ARRAY_BUFFER));
+    const bool sourceResult = source && glCheck(GLEXT_glUnmapBuffer(GLEXT_GL_ARRAY_BUFFER)) == GL_TRUE;
 
     glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, m_buffer));
 
-    const GLboolean destinationResult = glCheck(GLEXT_glUnmapBuffer(GLEXT_GL_ARRAY_BUFFER));
+    const bool destinationResult = destination && glCheck(GLEXT_glUnmapBuffer(GLEXT_GL_ARRAY_BUFFER)) == GL_TRUE;
 
     glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, 0));
 
-    return (sourceResult == GL_TRUE) && (destinationResult == GL_TRUE);
-
-#endif // SFML_OPENGL_ES
+    m_size = vertexBuffer.m_size;
+    return sourceResult && destinationResult;
+#else
+    return false;
+#endif
+#else
+    return false;
+#endif
 }
 
 
@@ -272,6 +345,8 @@ VertexBuffer& VertexBuffer::operator=(const VertexBuffer& right)
 ////////////////////////////////////////////////////////////
 void VertexBuffer::swap(VertexBuffer& right) noexcept
 {
+    std::swap(m_glContext, right.m_glContext);
+    std::swap(m_vulkanBuffer, right.m_vulkanBuffer);
     std::swap(m_size, right.m_size);
     std::swap(m_buffer, right.m_buffer);
     std::swap(m_primitiveType, right.m_primitiveType);
@@ -289,12 +364,18 @@ unsigned int VertexBuffer::getNativeHandle() const
 ////////////////////////////////////////////////////////////
 void VertexBuffer::bind(const VertexBuffer* vertexBuffer)
 {
-    if (!isAvailable())
+#ifdef SFML_RENDER_GL
+    if (const auto* device = priv::getGraphicsDevice(); device && device->glContext)
+    {
+        const VertexContextLock lock;
+        priv::ensureExtensionsInit();
+        glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, vertexBuffer ? vertexBuffer->m_buffer : 0));
         return;
-
-    const TransientContextLock lock;
-
-    glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, vertexBuffer ? vertexBuffer->m_buffer : 0));
+    }
+#else
+    (void)vertexBuffer;
+#endif
+    err() << "VertexBuffer::bind requires OpenGL" << std::endl;
 }
 
 
@@ -329,24 +410,14 @@ VertexBuffer::Usage VertexBuffer::getUsage() const
 ////////////////////////////////////////////////////////////
 bool VertexBuffer::isAvailable()
 {
-    static const bool available = []
-    {
-        const TransientContextLock contextLock;
-
-        // Make sure that extensions are initialized
-        priv::ensureExtensionsInit();
-
-        return GLEXT_vertex_buffer_object != 0;
-    }();
-
-    return available;
+    return priv::getGraphicsDevice() != nullptr;
 }
 
 
 ////////////////////////////////////////////////////////////
 void VertexBuffer::draw(RenderTarget& target, RenderStates states) const
 {
-    if (m_buffer && m_size)
+    if (m_size)
         target.draw(*this, 0, m_size, states);
 }
 

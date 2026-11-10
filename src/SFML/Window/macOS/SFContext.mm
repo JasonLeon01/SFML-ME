@@ -122,6 +122,9 @@ GlFunctionPointer SFContext::getFunction(const char* name)
 ////////////////////////////////////////////////////////////
 bool SFContext::makeCurrent(bool current)
 {
+    if (current && !m_context)
+        return false;
+
     const AutoreleasePool pool;
     if (current)
     {
@@ -157,7 +160,7 @@ void SFContext::createContext(SFContext* shared, unsigned int bitsPerPixel, cons
 {
     const AutoreleasePool pool;
     // Save the settings. (OpenGL version is updated elsewhere.)
-    m_settings = settings;
+    m_settings = GlSettings(settings);
 
     // Choose the attributes of OGL context.
     std::vector<NSOpenGLPixelFormatAttribute> attrs;
@@ -212,34 +215,18 @@ void SFContext::createContext(SFContext* shared, unsigned int bitsPerPixel, cons
 
     // 1.x/2.x are mapped to 2.1 since Apple only support that legacy version.
     // >=3.0 are mapped to a 3.2 core profile.
-    if (m_settings.majorVersion < 3)
+    const bool useCore = m_settings.profile == OpenGLProfile::Core ||
+                         (m_settings.profile == OpenGLProfile::Automatic && m_settings.majorVersion >= 3);
+    attrs.push_back(NSOpenGLPFAOpenGLProfile);
+    if (useCore)
     {
-        m_settings.attributeFlags &= ~static_cast<unsigned int>(ContextSettings::Core);
-        m_settings.majorVersion = 2;
-        m_settings.minorVersion = 1;
-        attrs.push_back(NSOpenGLPFAOpenGLProfile);
-        attrs.push_back(NSOpenGLProfileVersionLegacy);
+        const bool needs41 = m_settings.majorVersion > 3 || m_settings.minorVersion > 2;
+        attrs.push_back(needs41 ? NSOpenGLProfileVersion4_1Core : NSOpenGLProfileVersion3_2Core);
     }
     else
     {
-        if (!(m_settings.attributeFlags & ContextSettings::Core))
-        {
-            err() << "Warning. Compatibility profile not supported on this platform." << std::endl;
-            m_settings.attributeFlags |= ContextSettings::Core;
-        }
-        m_settings.majorVersion = 3;
-        m_settings.minorVersion = 2;
-        attrs.push_back(NSOpenGLPFAOpenGLProfile);
-        attrs.push_back(NSOpenGLProfileVersion3_2Core);
+        attrs.push_back(NSOpenGLProfileVersionLegacy);
     }
-
-    if (m_settings.attributeFlags & ContextSettings::Debug)
-    {
-        err() << "Warning. OpenGL debugging not supported on this platform." << std::endl;
-        m_settings.attributeFlags &= ~static_cast<unsigned int>(ContextSettings::Debug);
-    }
-
-    attrs.push_back(static_cast<NSOpenGLPixelFormatAttribute>(0)); // end of array
 
     // All macOS pixel formats are sRGB capable
     m_settings.sRgbCapable = true;

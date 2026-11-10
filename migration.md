@@ -6,6 +6,57 @@
 Welcome to SFML 3.1!  
 This release brings major improvements to text layout, networking, audio device management, and more.
 
+## SFML-ME graphics backends
+
+Configure the SFML build with `SFML_BUILD_OPENGL_BACKEND` and
+`SFML_BUILD_VULKAN_BACKEND`. When the OpenGL backend is enabled,
+`SFML_OPENGL_ES` selects GLES instead of desktop OpenGL. The Window and
+Graphics targets propagate `SFML_RENDER_OPENGL`, `SFML_RENDER_OPENGLES`,
+and `SFML_RENDER_VULKAN` for the backends present in that build.
+
+Choose a backend before the first graphics resource or capability query
+that uses a GPU. The following call requests Vulkan 1.3.
+
+~~~cpp
+if (!sf::setGraphicsBackend(sf::GraphicsBackend::Vulkan, sf::VulkanSettings{1, 3}))
+    return 1;
+
+sf::RenderWindow window(sf::VideoMode({800, 600}), "Vulkan");
+if (!window.isOpen())
+    return 1;
+~~~
+
+Automatic selection tries the compiled OpenGL variant before Vulkan.
+The first successful initialization fixes the device for the process.
+An explicit API version is a minimum requirement for that request.
+If the driver supplies a lower version or an incompatible profile,
+initialization fails. The built-in minimums are desktop OpenGL 2.0,
+OpenGL ES 3.0, and Vulkan 1.0.
+
+Move API settings into `ContextSettings::backend`. The depth, stencil,
+MSAA, and sRGB fields still configure individual targets. For example,
+`settings.backend = sf::OpenGLSettings{4, 1, sf::OpenGLProfile::Core}`
+requests a Core context. `Window::getSettings()` reports the created
+settings. Use `RenderWindow` for SFML Vulkan rendering or
+`WindowBase::getNativeHandle()` for external Vulkan WSI.
+
+Desktop Compatibility shaders keep the existing GLSL interface. Core and
+GLES shaders use SFML's `sf_Vertex`, `sf_Color`, and `sf_MultiTexCoord0`
+attributes, along with the `sf_ModelViewProjectionMatrix` and
+`sf_TextureMatrix` uniforms. A standalone custom stage can pair with
+the built-in stage using `sf_FrontColor` and `sf_TexCoord0` varyings.
+
+With Vulkan, the existing `Shader` loaders accept binary SPIR-V for the
+selected API version. Use `main` as the entry point. Vertex inputs are
+position (location 0, `vec2`), color (location 1, `vec4`), and texture
+coordinates (location 2, `vec2`). The default stages exchange color and
+normalized texture coordinates at locations 0 and 1. Set 0 provides
+the built-in draw uniform block at binding 0 (`mat4 transform` and
+`vec4 textureTransform` in std140 layout) and the current texture at
+binding 1. Use set 1 for user uniform buffers and combined 2D samplers.
+Keep SPIR-V variable names to bind values through `setUniform` and
+`setUniformArray`.
+
 ## Dependencies
 
 We've introduced a bunch of new dependencies to cover all the improvements:

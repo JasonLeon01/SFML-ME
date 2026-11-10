@@ -30,7 +30,8 @@
 #include <SFML/Config.hpp>
 
 #include <SFML/Window/Context.hpp>
-#include <SFML/Window/ContextSettings.hpp>
+#include <SFML/Window/GlSettings.hpp>
+#include <SFML/Window/WindowSurface.hpp>
 
 #include <SFML/System/Vector2.hpp>
 
@@ -47,7 +48,7 @@ class WindowImpl;
 /// \brief Abstract class representing an OpenGL context
 ///
 ////////////////////////////////////////////////////////////
-class GlContext
+class GlContext : public WindowSurface
 {
 public:
     ////////////////////////////////////////////////////////////
@@ -56,7 +57,8 @@ public:
     /// \return shared_ptr to the shared context
     ///
     ////////////////////////////////////////////////////////////
-    static std::shared_ptr<void> getSharedContext();
+    static std::shared_ptr<void>                               getSharedContext();
+    [[nodiscard]] SFML_WINDOW_API static std::shared_ptr<void> prepareSharedContext(ContextSettings& settings);
 
     ////////////////////////////////////////////////////////////
     /// \brief Register an OpenGL object to be destroyed when its containing context is destroyed
@@ -173,7 +175,7 @@ public:
     /// \brief Destructor
     ///
     ////////////////////////////////////////////////////////////
-    virtual ~GlContext();
+    ~GlContext() override;
 
     ////////////////////////////////////////////////////////////
     /// \brief Deleted copy constructor
@@ -197,7 +199,7 @@ public:
     /// \return Structure containing the settings
     ///
     ////////////////////////////////////////////////////////////
-    [[nodiscard]] const ContextSettings& getSettings() const;
+    [[nodiscard]] const ContextSettings& getSettings() const override;
 
     ////////////////////////////////////////////////////////////
     /// \brief Activate or deactivate the context as the current target for rendering
@@ -213,13 +215,13 @@ public:
     /// \return `true` if operation was successful, `false` otherwise
     ///
     ////////////////////////////////////////////////////////////
-    bool setActive(bool active);
+    bool setActive(bool active) override;
 
     ////////////////////////////////////////////////////////////
     /// \brief Display what has been rendered to the context so far
     ///
     ////////////////////////////////////////////////////////////
-    virtual void display() = 0;
+    void display() override = 0;
 
     ////////////////////////////////////////////////////////////
     /// \brief Enable or disable vertical synchronization
@@ -232,7 +234,7 @@ public:
     /// \param enabled `true` to enable v-sync, `false` to deactivate
     ///
     ////////////////////////////////////////////////////////////
-    virtual void setVerticalSyncEnabled(bool enabled) = 0;
+    void setVerticalSyncEnabled(bool enabled) override = 0;
 
 protected:
     ////////////////////////////////////////////////////////////
@@ -292,7 +294,7 @@ protected:
     ////////////////////////////////////////////////////////////
     // Member data
     ////////////////////////////////////////////////////////////
-    ContextSettings m_settings; //!< Creation settings of the context
+    GlSettings m_settings; //!< Creation settings of the context
 
 private:
     struct TransientContext;
@@ -304,19 +306,21 @@ private:
     /// \param requestedSettings Requested settings during context creation
     ///
     ////////////////////////////////////////////////////////////
-    void initialize(const ContextSettings& requestedSettings);
+    [[nodiscard]] bool initialize(const GlSettings& requestedSettings);
 
     ////////////////////////////////////////////////////////////
     /// \brief Check whether the context is compatible with the requested settings
     /// \param requestedSettings Requested settings during context creation
     ///
     ////////////////////////////////////////////////////////////
-    void checkSettings(const ContextSettings& requestedSettings) const;
+    void checkSettings(const GlSettings& requestedSettings) const;
 
     ////////////////////////////////////////////////////////////
     // Member data
     ////////////////////////////////////////////////////////////
-    const std::unique_ptr<Impl> m_impl; //!< Implementation details
+    std::shared_ptr<SharedContext> m_sharedContext;
+    ContextSettings                m_actualSettings;
+    const std::unique_ptr<Impl>    m_impl; //!< Implementation details
 };
 
 } // namespace sf::priv

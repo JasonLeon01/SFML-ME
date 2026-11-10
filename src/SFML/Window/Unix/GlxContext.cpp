@@ -116,7 +116,7 @@ GlxContext::GlxContext(GlxContext* shared) : GlxContext(shared, {}, {1, 1})
 GlxContext::GlxContext(GlxContext* shared, const ContextSettings& settings, const WindowImpl& owner, unsigned int /*bitsPerPixel*/)
 {
     // Save the creation settings
-    m_settings = settings;
+    m_settings = GlSettings(settings);
 
     // Open the connection with the X server
     m_display = openDisplay();
@@ -136,7 +136,7 @@ GlxContext::GlxContext(GlxContext* shared, const ContextSettings& settings, cons
 GlxContext::GlxContext(GlxContext* shared, const ContextSettings& settings, Vector2u size)
 {
     // Save the creation settings
-    m_settings = settings;
+    m_settings = GlSettings(settings);
 
     // Open the connection with the X server
     m_display = openDisplay();
@@ -554,7 +554,7 @@ void GlxContext::createSurface(::Window window)
 void GlxContext::createContext(GlxContext* shared)
 {
     // Get a working copy of the context settings
-    const ContextSettings settings = m_settings;
+    const GlSettings settings = m_settings;
 
     X11Ptr<XVisualInfo> visualInfo;
 
@@ -641,44 +641,35 @@ void GlxContext::createContext(GlxContext* shared)
         if (!config)
             err() << "Failed to get GLXFBConfig which corresponds to the window's visual" << std::endl;
 
-        while (config && !m_context && m_settings.majorVersion)
+        for (const auto profile : {settings.profile, OpenGLProfile::Core})
         {
-            std::vector<int> attributes;
+            if (!config)
+                break;
 
-            // Check if the user requested a specific context version (anything > 1.1)
-            if ((m_settings.majorVersion > 1) || ((m_settings.majorVersion == 1) && (m_settings.minorVersion > 1)))
+            if (m_context || (profile == OpenGLProfile::Core && settings.profile == OpenGLProfile::Compatibility))
+                break;
+
+            const bool core             = profile == OpenGLProfile::Core;
+            const auto [requestedMajor,
+                        requestedMinor] = core ? std::max(std::pair{settings.majorVersion, settings.minorVersion},
+                                                          std::pair{3u, 2u})
+                                               : std::pair{settings.majorVersion, settings.minorVersion};
+            std::vector<int> attributes{GLX_CONTEXT_MAJOR_VERSION_ARB,
+                                        static_cast<int>(requestedMajor),
+                                        GLX_CONTEXT_MINOR_VERSION_ARB,
+                                        static_cast<int>(requestedMinor)};
+            if (requestedMajor > 3 || (requestedMajor == 3 && requestedMinor >= 2))
             {
-                attributes.push_back(GLX_CONTEXT_MAJOR_VERSION_ARB);
-                attributes.push_back(static_cast<int>(m_settings.majorVersion));
-                attributes.push_back(GLX_CONTEXT_MINOR_VERSION_ARB);
-                attributes.push_back(static_cast<int>(m_settings.minorVersion));
-            }
-
-            // Check if setting the profile is supported
-            if (SF_GLAD_GLX_ARB_create_context_profile)
-            {
-                const int profile = (m_settings.attributeFlags & ContextSettings::Core)
-                                        ? GLX_CONTEXT_CORE_PROFILE_BIT_ARB
-                                        : GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB;
-                const int debug = (m_settings.attributeFlags & ContextSettings::Debug) ? GLX_CONTEXT_DEBUG_BIT_ARB : 0;
-
+                if (!SF_GLAD_GLX_ARB_create_context_profile)
+                    break;
                 attributes.push_back(GLX_CONTEXT_PROFILE_MASK_ARB);
-                attributes.push_back(profile);
-                attributes.push_back(GLX_CONTEXT_FLAGS_ARB);
-                attributes.push_back(debug);
+                attributes.push_back(core ? GLX_CONTEXT_CORE_PROFILE_BIT_ARB : GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB);
             }
-            else
+            if (settings.attributeFlags & GlSettings::Debug)
             {
-                if ((m_settings.attributeFlags & ContextSettings::Core) ||
-                    (m_settings.attributeFlags & ContextSettings::Debug))
-                    err() << "Selecting a profile during context creation is not supported,"
-                          << "disabling compatibility and debug" << std::endl;
-
-                m_settings.attributeFlags = ContextSettings::Default;
+                attributes.push_back(GLX_CONTEXT_FLAGS_ARB);
+                attributes.push_back(GLX_CONTEXT_DEBUG_BIT_ARB);
             }
-
-            // Append the terminating 0
-            attributes.push_back(0);
             attributes.push_back(0);
 
             // RAII GLX error handler (we simply ignore errors here)
@@ -697,42 +688,15 @@ void GlxContext::createContext(GlxContext* shared)
             // Create the context
             m_context = glXCreateContextAttribsARB(m_display.get(), *config, toShare, true, attributes.data());
 
-            if (!m_context)
-            {
-                // If we couldn't create the context, first try disabling flags,
-                // then lower the version number and try again -- stop at 0.0
-                // Invalid version numbers will be generated by this algorithm (like 3.9), but we really don't care
-                if (m_settings.attributeFlags != ContextSettings::Default)
-                {
-                    m_settings.attributeFlags = ContextSettings::Default;
-                }
-                else if (m_settings.minorVersion > 0)
-                {
-                    // If the minor version is not 0, we decrease it and try again
-                    --m_settings.minorVersion;
-
-                    m_settings.attributeFlags = settings.attributeFlags;
-                }
-                else
-                {
-                    // If the minor version is 0, we decrease the major version
-                    --m_settings.majorVersion;
-                    m_settings.minorVersion = 9;
-
-                    m_settings.attributeFlags = settings.attributeFlags;
-                }
-            }
+            if (settings.profile != OpenGLProfile::Automatic)
+                break;
         }
     }
 
     // If glXCreateContextAttribsARB failed, use glXCreateContext
     if (!m_context)
     {
-        // set the context version to 2.1 (arbitrary) and disable flags
-        m_settings.majorVersion   = 2;
-        m_settings.minorVersion   = 1;
-        m_settings.attributeFlags = ContextSettings::Default;
-
+        // The actual version and profile are checked after activation.
 #if defined(GLX_DEBUGGING)
         GlxErrorHandler handler(m_display.get());
 #endif

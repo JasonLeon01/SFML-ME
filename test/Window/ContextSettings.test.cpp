@@ -22,21 +22,20 @@ TEST_CASE("[Window] sf::ContextSettings")
             STATIC_CHECK(contextSettings.depthBits == 0);
             STATIC_CHECK(contextSettings.stencilBits == 0);
             STATIC_CHECK(contextSettings.antiAliasingLevel == 0);
-            STATIC_CHECK(contextSettings.majorVersion == 1);
-            STATIC_CHECK(contextSettings.minorVersion == 1);
-            STATIC_CHECK(contextSettings.attributeFlags == sf::ContextSettings::Default);
+            STATIC_CHECK(std::holds_alternative<std::monostate>(contextSettings.backend));
             STATIC_CHECK(contextSettings.sRgbCapable == false);
         }
 
         SECTION("Aggregate initialization -- Everything")
         {
-            constexpr sf::ContextSettings contextSettings{1, 1, 2, 3, 5, sf::ContextSettings::Core, true};
+            constexpr sf::ContextSettings contextSettings{1, 1, 2, true, sf::OpenGLSettings{4, 5, sf::OpenGLProfile::Core}};
             STATIC_CHECK(contextSettings.depthBits == 1);
             STATIC_CHECK(contextSettings.stencilBits == 1);
             STATIC_CHECK(contextSettings.antiAliasingLevel == 2);
-            STATIC_CHECK(contextSettings.majorVersion == 3);
-            STATIC_CHECK(contextSettings.minorVersion == 5);
-            STATIC_CHECK(contextSettings.attributeFlags == sf::ContextSettings::Core);
+            constexpr auto gl = std::get<sf::OpenGLSettings>(contextSettings.backend);
+            STATIC_CHECK(gl.majorVersion == 4);
+            STATIC_CHECK(gl.minorVersion == 5);
+            STATIC_CHECK(gl.profile == sf::OpenGLProfile::Core);
             STATIC_CHECK(contextSettings.sRgbCapable == true);
         }
     }

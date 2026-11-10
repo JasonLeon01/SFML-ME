@@ -10,15 +10,16 @@ set(SRC
     ${INCROOT}/CoordinateType.hpp
     ${INCROOT}/Export.hpp
     ${SRCROOT}/Font.cpp
+    ${SRCROOT}/GraphicsBackend.cpp
+    ${SRCROOT}/GraphicsDevice.hpp
+    ${SRCROOT}/RenderTargetBackend.hpp
+    ${SRCROOT}/ShaderUniformType.hpp
+    ${INCROOT}/GraphicsBackend.hpp
     ${INCROOT}/Font.hpp
     ${SRCROOT}/Glsl.cpp
     ${INCROOT}/Glsl.hpp
     ${INCROOT}/Glsl.inl
     ${INCROOT}/Glyph.hpp
-    ${SRCROOT}/GLCheck.cpp
-    ${SRCROOT}/GLCheck.hpp
-    ${SRCROOT}/GLExtensions.hpp
-    ${SRCROOT}/GLExtensions.cpp
     ${SRCROOT}/Image.cpp
     ${INCROOT}/Image.hpp
     ${INCROOT}/PrimitiveType.hpp
@@ -38,8 +39,6 @@ set(SRC
     ${INCROOT}/StencilMode.hpp
     ${SRCROOT}/Texture.cpp
     ${INCROOT}/Texture.hpp
-    ${SRCROOT}/TextureSaver.cpp
-    ${SRCROOT}/TextureSaver.hpp
     ${SRCROOT}/Transform.cpp
     ${INCROOT}/Transform.hpp
     ${INCROOT}/Transform.inl
@@ -86,17 +85,60 @@ source_group("render texture" FILES ${RENDER_TEXTURE_SRC})
 
 # define the sfml-graphics target
 sfml_add_library(Graphics
-                 SOURCES ${SRC} ${DRAWABLES_SRC} ${RENDER_TEXTURE_SRC}
+                 SOURCES ${SRC} ${DRAWABLES_SRC}
                  DEPENDENCIES "Dependencies.cmake.in")
 
 # setup dependencies
 target_link_libraries(sfml-graphics PUBLIC SFML::Window)
 
+if(SFML_BUILD_OPENGL_BACKEND)
+    target_compile_definitions(sfml-graphics PRIVATE SFML_RENDER_GL)
+    target_include_directories(sfml-graphics SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/glad/include")
+    target_sources(sfml-graphics PRIVATE
+        ${SRCROOT}/GLCheck.cpp
+        ${SRCROOT}/GLCheck.hpp
+        ${SRCROOT}/GLExtensions.cpp
+        ${SRCROOT}/GLExtensions.hpp
+        ${SRCROOT}/TextureSaver.cpp
+        ${SRCROOT}/TextureSaver.hpp
+        ${SRCROOT}/OpenGL/OpenGLRenderTarget.cpp
+        ${SRCROOT}/OpenGL/OpenGLRenderTarget.hpp
+        ${SRCROOT}/OpenGL/OpenGLResource.hpp
+        ${RENDER_TEXTURE_SRC}
+    )
+endif()
+
+if(SFML_BUILD_VULKAN_BACKEND)
+    target_compile_definitions(sfml-graphics PRIVATE VK_NO_PROTOTYPES)
+    include(FetchContent)
+    FetchContent_Declare(SpirvReflect
+        URL https://codeload.github.com/KhronosGroup/SPIRV-Reflect/zip/refs/tags/vulkan-sdk-1.4.321.0
+        URL_HASH SHA256=cc5f56f857c81ba1d14df2170667aba4ae652f970153f9f1b4c0ec566cea0ad8
+        SOURCE_SUBDIR sfml-unused
+    )
+    FetchContent_MakeAvailable(SpirvReflect)
+    add_library(sfml-spirv-reflect OBJECT "${spirvreflect_SOURCE_DIR}/spirv_reflect.c")
+    set_target_properties(sfml-spirv-reflect PROPERTIES POSITION_INDEPENDENT_CODE ON UNITY_BUILD OFF FOLDER Dependencies)
+    sfml_set_stdlib(sfml-spirv-reflect)
+    target_compile_options(sfml-spirv-reflect PRIVATE -w)
+    target_sources(sfml-graphics PRIVATE
+        $<TARGET_OBJECTS:sfml-spirv-reflect>
+        ${SRCROOT}/Vulkan/VulkanDevice.cpp
+        ${SRCROOT}/Vulkan/VulkanDevice.hpp
+        ${SRCROOT}/Vulkan/VulkanFunctions.inc
+        ${SRCROOT}/Vulkan/VulkanProgram.cpp
+        ${SRCROOT}/Vulkan/VulkanProgram.hpp
+        ${SRCROOT}/Vulkan/VulkanRenderTarget.cpp
+        ${SRCROOT}/Vulkan/VulkanRenderTarget.hpp
+        ${SRCROOT}/Vulkan/VulkanWindowSurface.cpp
+        ${SRCROOT}/Vulkan/VulkanWindowSurface.hpp
+    )
+    target_include_directories(sfml-graphics SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/vulkan" "${spirvreflect_SOURCE_DIR}")
+    install(FILES "${spirvreflect_SOURCE_DIR}/LICENSE" DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME SPIRV-Reflect-LICENSE)
+endif()
+
 # stb_image sources
 target_include_directories(sfml-graphics SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/stb_image")
-
-# glad sources
-target_include_directories(sfml-graphics SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/glad/include")
 
 # qoi sources
 target_include_directories(sfml-graphics SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/qoi")

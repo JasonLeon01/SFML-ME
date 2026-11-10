@@ -25,17 +25,24 @@
 ////////////////////////////////////////////////////////////
 // Headers
 ////////////////////////////////////////////////////////////
+#include <SFML/Graphics/GraphicsDevice.hpp>
 #include <SFML/Graphics/RenderTexture.hpp>
+#include <SFML/Graphics/RenderTextureImpl.hpp>
+
+#ifdef SFML_RENDER_GL
 #include <SFML/Graphics/RenderTextureImplDefault.hpp>
 #include <SFML/Graphics/RenderTextureImplFBO.hpp>
+#endif
+#ifdef SFML_RENDER_VULKAN
+#include <SFML/Graphics/Vulkan/VulkanRenderTarget.hpp>
+#endif
 
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Exception.hpp>
 
 #include <memory>
 #include <ostream>
-
-#include <cassert>
+#include <utility>
 
 
 namespace sf
@@ -67,53 +74,77 @@ RenderTexture& RenderTexture::operator=(RenderTexture&&) noexcept = default;
 ////////////////////////////////////////////////////////////
 bool RenderTexture::resize(Vector2u size, const ContextSettings& settings)
 {
-    // Create the texture
-    // Set texture to be in sRGB scale if requested
-    if (!m_texture.resize(size, settings.sRgbCapable))
-    {
-        err() << "Impossible to create render texture (failed to create the target texture)" << std::endl;
+    return priv::withGraphicsDevice(settings,
+                                    [&](const priv::GraphicsDevice& device, const ContextSettings& effective)
+                                    {
+                                        Texture texture;
+                                        texture.setRepeated(m_texture.isRepeated());
+                                        if (!texture.resize(size, settings.sRgbCapable))
+                                        {
+                                            err() << "Failed to create the render texture's color attachment" << std::endl;
+                                            return false;
+                                        }
+
+#ifdef SFML_RENDER_VULKAN
+                                        if (device.vulkan)
+                                        {
+                                            auto backend = priv::VulkanRenderTarget::create(device.vulkan,
+                                                                                            texture.m_vulkanImage,
+                                                                                            effective);
+                                            if (!backend)
+                                                return false;
+                                            m_backend = std::move(backend);
+                                            m_texture = std::move(texture);
+                                            RenderTarget::initialize();
+                                            return true;
+                                        }
+#else
+        (void)device;
+#endif
+#ifdef SFML_RENDER_GL
+                                        std::unique_ptr<priv::RenderTextureImpl> implementation;
+                                        if (priv::RenderTextureImplFBO::isAvailable())
+                                        {
+                                            implementation          = std::make_unique<priv::RenderTextureImplFBO>();
+                                            texture.m_fboAttachment = true;
+                                        }
+                                        else
+                                        {
+                                            implementation = std::make_unique<priv::RenderTextureImplDefault>();
+                                        }
+
+                                        if (!implementation->create(texture.m_actualSize, texture.m_texture, effective))
+                                            return false;
+
+                                        m_impl    = std::move(implementation);
+                                        m_texture = std::move(texture);
+                                        m_backend.reset();
+                                        RenderTarget::initialize();
+                                        return true;
+#else
         return false;
-    }
-
-    // We disable smoothing by default for render textures
-    setSmooth(false);
-
-    // Create the implementation
-    if (priv::RenderTextureImplFBO::isAvailable())
-    {
-        // Use frame-buffer object (FBO)
-        m_impl = std::make_unique<priv::RenderTextureImplFBO>();
-
-        // Mark the texture as being a framebuffer object attachment
-        m_texture.m_fboAttachment = true;
-    }
-    else
-    {
-        // Use default implementation
-        m_impl = std::make_unique<priv::RenderTextureImplDefault>();
-    }
-
-    // Initialize the render texture
-    // We pass the actual size of our texture since OpenGL ES requires that all attachments have identical sizes
-    if (!m_impl->create(m_texture.m_actualSize, m_texture.m_texture, settings))
-        return false;
-
-    // We can now initialize the render target part
-    RenderTarget::initialize();
-
-    return true;
+#endif
+                                    });
 }
 
 
 ////////////////////////////////////////////////////////////
 unsigned int RenderTexture::getMaximumAntiAliasingLevel()
 {
-    if (priv::RenderTextureImplFBO::isAvailable())
-    {
-        return priv::RenderTextureImplFBO::getMaximumAntiAliasingLevel();
-    }
+    const auto* device = priv::getGraphicsDevice();
+    if (!device)
+        return 0;
 
-    return priv::RenderTextureImplDefault::getMaximumAntiAliasingLevel();
+#ifdef SFML_RENDER_VULKAN
+    if (device->vulkan)
+        return priv::VulkanRenderTarget::getMaximumAntiAliasingLevel(*device->vulkan);
+#endif
+#ifdef SFML_RENDER_GL
+    if (priv::RenderTextureImplFBO::isAvailable())
+        return priv::RenderTextureImplFBO::getMaximumAntiAliasingLevel();
+#endif
+
+    return 0;
 }
 
 
@@ -155,7 +186,10 @@ bool RenderTexture::generateMipmap()
 ////////////////////////////////////////////////////////////
 bool RenderTexture::setActive(bool active)
 {
-    // Update RenderTarget tracking
+#ifdef SFML_RENDER_VULKAN
+    if (m_texture.m_vulkanImage)
+        return RenderTarget::setActive(active);
+#endif
     if (m_impl && m_impl->activate(active))
         return RenderTarget::setActive(active);
 
@@ -166,6 +200,15 @@ bool RenderTexture::setActive(bool active)
 ////////////////////////////////////////////////////////////
 void RenderTexture::display()
 {
+#ifdef SFML_RENDER_VULKAN
+    if (m_texture.m_vulkanImage)
+    {
+        static_cast<priv::VulkanRenderTarget&>(*m_backend).finish();
+        m_texture.invalidateMipmap();
+        return;
+    }
+#endif
+#ifdef SFML_RENDER_GL
     if (!m_impl)
         return;
 
@@ -186,6 +229,7 @@ void RenderTexture::display()
     m_impl->updateTexture(m_texture.m_texture);
     m_texture.m_pixelsFlipped = true;
     m_texture.invalidateMipmap();
+#endif
 }
 
 
@@ -199,8 +243,7 @@ Vector2u RenderTexture::getSize() const
 ////////////////////////////////////////////////////////////
 bool RenderTexture::isSrgb() const
 {
-    assert(m_impl && "RenderTexture::isSrgb() Must first initialize render texture");
-    return m_impl->isSrgb();
+    return m_impl ? m_impl->isSrgb() : m_texture.isSrgb();
 }
 
 

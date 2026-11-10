@@ -31,9 +31,8 @@
 
 #include <SFML/Graphics/Glsl.hpp>
 
-#include <SFML/Window/GlResource.hpp>
-
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -43,6 +42,15 @@
 
 namespace sf
 {
+
+namespace priv
+{
+class OpenGLRenderTarget;
+class VulkanRenderTarget;
+class VulkanProgram;
+enum class ShaderUniformType : unsigned char;
+} // namespace priv
+
 class InputStream;
 class Texture;
 
@@ -50,7 +58,7 @@ class Texture;
 /// \brief Shader class (vertex, geometry and fragment)
 ///
 ////////////////////////////////////////////////////////////
-class SFML_GRAPHICS_API Shader : GlResource
+class SFML_GRAPHICS_API Shader
 {
 public:
     ////////////////////////////////////////////////////////////
@@ -518,28 +526,28 @@ public:
     /// \brief Specify value for \p float uniform
     ///
     /// \param name Name of the uniform variable in GLSL
-    /// \param x    Value of the float scalar
+    /// \param value    Value of the float scalar
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, float x);
+    void setUniform(const std::string& name, float value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p vec2 uniform
     ///
     /// \param name   Name of the uniform variable in GLSL
-    /// \param vector Value of the vec2 vector
+    /// \param value Value of the vec2 vector
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, Glsl::Vec2 vector);
+    void setUniform(const std::string& name, Glsl::Vec2 value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p vec3 uniform
     ///
     /// \param name   Name of the uniform variable in GLSL
-    /// \param vector Value of the vec3 vector
+    /// \param value Value of the vec3 vector
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, const Glsl::Vec3& vector);
+    void setUniform(const std::string& name, const Glsl::Vec3& value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p vec4 uniform
@@ -554,37 +562,37 @@ public:
     /// to a `vec4(1.0, 0.5, 0.0, 1.0)` in the shader.
     ///
     /// \param name   Name of the uniform variable in GLSL
-    /// \param vector Value of the vec4 vector
+    /// \param value Value of the vec4 vector
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, const Glsl::Vec4& vector);
+    void setUniform(const std::string& name, const Glsl::Vec4& value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p int uniform
     ///
     /// \param name Name of the uniform variable in GLSL
-    /// \param x    Value of the int scalar
+    /// \param value    Value of the int scalar
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, int x);
+    void setUniform(const std::string& name, int value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p ivec2 uniform
     ///
     /// \param name   Name of the uniform variable in GLSL
-    /// \param vector Value of the ivec2 vector
+    /// \param value Value of the ivec2 vector
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, Glsl::Ivec2 vector);
+    void setUniform(const std::string& name, Glsl::Ivec2 value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p ivec3 uniform
     ///
     /// \param name   Name of the uniform variable in GLSL
-    /// \param vector Value of the ivec3 vector
+    /// \param value Value of the ivec3 vector
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, const Glsl::Ivec3& vector);
+    void setUniform(const std::string& name, const Glsl::Ivec3& value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p ivec4 uniform
@@ -598,64 +606,64 @@ public:
     /// mapped to `ivec4(255, 127, 0, 255)`.
     ///
     /// \param name   Name of the uniform variable in GLSL
-    /// \param vector Value of the ivec4 vector
+    /// \param value Value of the ivec4 vector
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, const Glsl::Ivec4& vector);
+    void setUniform(const std::string& name, const Glsl::Ivec4& value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p bool uniform
     ///
     /// \param name Name of the uniform variable in GLSL
-    /// \param x    Value of the bool scalar
+    /// \param value    Value of the bool scalar
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, bool x);
+    void setUniform(const std::string& name, bool value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p bvec2 uniform
     ///
     /// \param name   Name of the uniform variable in GLSL
-    /// \param vector Value of the bvec2 vector
+    /// \param value Value of the bvec2 vector
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, Glsl::Bvec2 vector);
+    void setUniform(const std::string& name, Glsl::Bvec2 value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p bvec3 uniform
     ///
     /// \param name   Name of the uniform variable in GLSL
-    /// \param vector Value of the bvec3 vector
+    /// \param value Value of the bvec3 vector
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, const Glsl::Bvec3& vector);
+    void setUniform(const std::string& name, const Glsl::Bvec3& value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p bvec4 uniform
     ///
     /// \param name   Name of the uniform variable in GLSL
-    /// \param vector Value of the bvec4 vector
+    /// \param value Value of the bvec4 vector
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, const Glsl::Bvec4& vector);
+    void setUniform(const std::string& name, const Glsl::Bvec4& value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p mat3 matrix
     ///
     /// \param name   Name of the uniform variable in GLSL
-    /// \param matrix Value of the mat3 matrix
+    /// \param value Value of the mat3 matrix
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, const Glsl::Mat3& matrix);
+    void setUniform(const std::string& name, const Glsl::Mat3& value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify value for \p mat4 matrix
     ///
     /// \param name   Name of the uniform variable in GLSL
-    /// \param matrix Value of the mat4 matrix
+    /// \param value Value of the mat4 matrix
     ///
     ////////////////////////////////////////////////////////////
-    void setUniform(const std::string& name, const Glsl::Mat4& matrix);
+    void setUniform(const std::string& name, const Glsl::Mat4& value);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify a texture as \p sampler2D uniform
@@ -722,61 +730,61 @@ public:
     /// \brief Specify values for \p float[] array uniform
     ///
     /// \param name        Name of the uniform variable in GLSL
-    /// \param scalarArray pointer to array of \p float values
+    /// \param values pointer to array of \p float values
     /// \param length      Number of elements in the array
     ///
     ////////////////////////////////////////////////////////////
-    void setUniformArray(const std::string& name, const float* scalarArray, std::size_t length);
+    void setUniformArray(const std::string& name, const float* values, std::size_t length);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify values for \p vec2[] array uniform
     ///
     /// \param name        Name of the uniform variable in GLSL
-    /// \param vectorArray pointer to array of \p vec2 values
+    /// \param values pointer to array of \p vec2 values
     /// \param length      Number of elements in the array
     ///
     ////////////////////////////////////////////////////////////
-    void setUniformArray(const std::string& name, const Glsl::Vec2* vectorArray, std::size_t length);
+    void setUniformArray(const std::string& name, const Glsl::Vec2* values, std::size_t length);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify values for \p vec3[] array uniform
     ///
     /// \param name        Name of the uniform variable in GLSL
-    /// \param vectorArray pointer to array of \p vec3 values
+    /// \param values pointer to array of \p vec3 values
     /// \param length      Number of elements in the array
     ///
     ////////////////////////////////////////////////////////////
-    void setUniformArray(const std::string& name, const Glsl::Vec3* vectorArray, std::size_t length);
+    void setUniformArray(const std::string& name, const Glsl::Vec3* values, std::size_t length);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify values for \p vec4[] array uniform
     ///
     /// \param name        Name of the uniform variable in GLSL
-    /// \param vectorArray pointer to array of \p vec4 values
+    /// \param values pointer to array of \p vec4 values
     /// \param length      Number of elements in the array
     ///
     ////////////////////////////////////////////////////////////
-    void setUniformArray(const std::string& name, const Glsl::Vec4* vectorArray, std::size_t length);
+    void setUniformArray(const std::string& name, const Glsl::Vec4* values, std::size_t length);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify values for \p mat3[] array uniform
     ///
     /// \param name        Name of the uniform variable in GLSL
-    /// \param matrixArray pointer to array of \p mat3 values
+    /// \param values pointer to array of \p mat3 values
     /// \param length      Number of elements in the array
     ///
     ////////////////////////////////////////////////////////////
-    void setUniformArray(const std::string& name, const Glsl::Mat3* matrixArray, std::size_t length);
+    void setUniformArray(const std::string& name, const Glsl::Mat3* values, std::size_t length);
 
     ////////////////////////////////////////////////////////////
     /// \brief Specify values for \p mat4[] array uniform
     ///
     /// \param name        Name of the uniform variable in GLSL
-    /// \param matrixArray pointer to array of \p mat4 values
+    /// \param values pointer to array of \p mat4 values
     /// \param length      Number of elements in the array
     ///
     ////////////////////////////////////////////////////////////
-    void setUniformArray(const std::string& name, const Glsl::Mat4* matrixArray, std::size_t length);
+    void setUniformArray(const std::string& name, const Glsl::Mat4* values, std::size_t length);
 
     ////////////////////////////////////////////////////////////
     /// \brief Get the underlying OpenGL handle of the shader.
@@ -786,6 +794,7 @@ public:
     /// or implement a temporary workaround until a bug is fixed.
     ///
     /// \return OpenGL handle of the shader or 0 if not yet loaded
+    /// Returns zero when the resource belongs to the Vulkan backend.
     ///
     ////////////////////////////////////////////////////////////
     [[nodiscard]] unsigned int getNativeHandle() const;
@@ -845,6 +854,14 @@ public:
     [[nodiscard]] static bool isGeometryAvailable();
 
 private:
+    friend class priv::OpenGLRenderTarget;
+    friend class priv::VulkanRenderTarget;
+
+    [[nodiscard]] bool loadDefaultOpenGL();
+    void setUniformData(const std::string& name, priv::ShaderUniformType type, const void* values, std::size_t count);
+    std::shared_ptr<void>                m_glContext;
+    std::shared_ptr<priv::VulkanProgram> m_vulkanProgram;
+
     ////////////////////////////////////////////////////////////
     /// \brief Compile the shader(s) and create the program
     ///

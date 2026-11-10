@@ -43,13 +43,37 @@ sfml_set_option(SFML_BUILD_GRAPHICS ON BOOL "ON to build SFML's Graphics module.
 sfml_set_option(SFML_BUILD_AUDIO ON BOOL "ON to build SFML's Audio module.")
 sfml_set_option(SFML_BUILD_NETWORK ON BOOL "ON to build SFML's Network module.")
 
-if(SFML_BUILD_WINDOW)
+if(SFML_BUILD_WINDOW OR SFML_BUILD_GRAPHICS)
     # add an option for choosing the OpenGL implementation
     sfml_set_option(SFML_OPENGL_ES ${OPENGL_ES} BOOL "ON to use an OpenGL ES implementation, OFF to use a desktop OpenGL implementation")
 
     # add an option for choosing whether to use the DRM windowing backend
     if(SFML_OS_LINUX)
         sfml_set_option(SFML_USE_DRM OFF BOOL "ON to use DRM windowing backend")
+    endif()
+endif()
+
+if(SFML_BUILD_WINDOW OR SFML_BUILD_GRAPHICS)
+    set(SFML_VULKAN_PLATFORM OFF)
+    if(SFML_OS_WINDOWS OR SFML_OS_ANDROID OR
+       ((SFML_OS_LINUX OR SFML_OS_FREEBSD OR SFML_OS_OPENBSD OR SFML_OS_NETBSD) AND NOT SFML_USE_DRM))
+        set(SFML_VULKAN_PLATFORM ON)
+    endif()
+
+    sfml_set_option(SFML_BUILD_OPENGL_BACKEND ON BOOL "Build the OpenGL or OpenGL ES backend")
+    sfml_set_option(SFML_BUILD_VULKAN_BACKEND ${SFML_VULKAN_PLATFORM} BOOL "Build the Vulkan backend")
+    if(SFML_BUILD_VULKAN_BACKEND AND NOT SFML_VULKAN_PLATFORM)
+        message(FATAL_ERROR "The Vulkan backend is unavailable on this windowing platform")
+    endif()
+    if(SFML_BUILD_GRAPHICS AND NOT (SFML_BUILD_OPENGL_BACKEND OR SFML_BUILD_VULKAN_BACKEND))
+        message(FATAL_ERROR "SFML Graphics requires at least one rendering backend")
+    endif()
+    if((SFML_OS_MACOS OR SFML_OS_IOS OR SFML_USE_DRM) AND NOT SFML_BUILD_OPENGL_BACKEND)
+        message(FATAL_ERROR "This windowing platform requires the OpenGL backend")
+    endif()
+    if(SFML_BUILD_OPENGL_BACKEND AND
+       ((SFML_OS_MACOS AND SFML_OPENGL_ES) OR ((SFML_OS_IOS OR SFML_OS_ANDROID) AND NOT SFML_OPENGL_ES)))
+        message(FATAL_ERROR "The selected OpenGL profile is unavailable on this platform")
     endif()
 endif()
 
@@ -111,12 +135,6 @@ if(SFML_COMPILER_MSVC)
     if(CMAKE_CXX_COMPILER_LAUNCHER)
         set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
     endif()
-endif()
-
-# define SFML_OPENGL_ES if needed
-if(SFML_OPENGL_ES)
-    add_definitions(-DSFML_OPENGL_ES)
-    add_definitions(-DGL_GLEXT_PROTOTYPES)
 endif()
 
 # define an option for choosing between static and dynamic C runtime (Windows only)

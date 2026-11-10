@@ -32,11 +32,11 @@
 #include <SFML/Graphics/CoordinateType.hpp>
 #include <SFML/Graphics/Rect.hpp>
 
-#include <SFML/Window/GlResource.hpp>
-
 #include <SFML/System/Vector2.hpp>
 
+#include <array>
 #include <filesystem>
+#include <memory>
 
 #include <cstddef>
 #include <cstdint>
@@ -44,6 +44,15 @@
 
 namespace sf
 {
+
+namespace priv
+{
+class OpenGLRenderTarget;
+struct VulkanImage;
+class VulkanRenderTarget;
+class VulkanProgram;
+} // namespace priv
+
 class InputStream;
 class Window;
 class Image;
@@ -52,7 +61,7 @@ class Image;
 /// \brief Image living on the graphics card that can be used for drawing
 ///
 ////////////////////////////////////////////////////////////
-class SFML_GRAPHICS_API Texture : GlResource
+class SFML_GRAPHICS_API Texture
 {
 public:
     ////////////////////////////////////////////////////////////
@@ -662,6 +671,7 @@ public:
     /// or implement a temporary workaround until a bug is fixed.
     ///
     /// \return OpenGL handle of the texture or 0 if not yet created
+    /// Returns zero when the resource belongs to the Vulkan backend.
     ///
     ////////////////////////////////////////////////////////////
     [[nodiscard]] unsigned int getNativeHandle() const;
@@ -714,7 +724,14 @@ public:
 private:
     friend class Text;
     friend class RenderTexture;
-    friend class RenderTarget;
+    friend class priv::OpenGLRenderTarget;
+    friend class priv::VulkanRenderTarget;
+    friend class priv::VulkanProgram;
+
+    [[nodiscard]] static std::array<float, 16> coordinateMatrix(const Texture* texture, CoordinateType coordinateType);
+    [[nodiscard]] bool                         upload(const std::uint8_t* pixels, Vector2u size, Vector2u dest);
+    std::shared_ptr<void>                      m_glContext;
+    std::shared_ptr<priv::VulkanImage>         m_vulkanImage;
 
     ////////////////////////////////////////////////////////////
     /// \brief Get a valid image size according to hardware support

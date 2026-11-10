@@ -34,7 +34,9 @@
 #include <SFML/Window/WindowEnums.hpp> // Prevent conflict with macro None from Xlib
 
 #include <glad/egl.h>
-#if defined(SFML_SYSTEM_LINUX) && !defined(SFML_USE_DRM)
+#if (defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_FREEBSD) || defined(SFML_SYSTEM_OPENBSD) || \
+     defined(SFML_SYSTEM_NETBSD)) &&                                                               \
+    !defined(SFML_USE_DRM)
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #endif
@@ -50,7 +52,7 @@ public:
     /// \param shared Context to share the new one with (can be a null pointer)
     ///
     ////////////////////////////////////////////////////////////
-    EglContext(EglContext* shared);
+    explicit EglContext(EglContext* shared);
 
     ////////////////////////////////////////////////////////////
     /// \brief Create a new context attached to a window
@@ -65,8 +67,6 @@ public:
 
     ////////////////////////////////////////////////////////////
     /// \brief Create a new context that embeds its own rendering target
-    /// \warning This constructor is currently not implemented; use a different overload.
-    ///
     /// \param shared   Context to share the new one with
     /// \param settings Creation parameters
     /// \param size     Back buffer width and height, in pixels
@@ -79,6 +79,9 @@ public:
     ///
     ////////////////////////////////////////////////////////////
     ~EglContext() override;
+#ifdef SFML_SYSTEM_ANDROID
+    void setNativeWindow(WindowHandle handle) override;
+#endif
 
     ////////////////////////////////////////////////////////////
     /// \brief Get the address of an OpenGL function
@@ -128,7 +131,7 @@ public:
     /// \param settings     Creation parameters
     ///
     ////////////////////////////////////////////////////////////
-    void createContext(EglContext* shared);
+    void createContext(EglContext* shared, const GlSettings& settings);
 
     ////////////////////////////////////////////////////////////
     /// \brief Create the EGL surface
@@ -160,9 +163,14 @@ public:
     /// \return The best EGL config
     ///
     ////////////////////////////////////////////////////////////
-    static EGLConfig getBestConfig(EGLDisplay display, unsigned int bitsPerPixel, const ContextSettings& settings);
+    static EGLConfig getBestConfig(EGLDisplay             display,
+                                   unsigned int           bitsPerPixel,
+                                   const ContextSettings& settings,
+                                   EGLint                 surfaceType = EGL_WINDOW_BIT | EGL_PBUFFER_BIT);
 
-#if defined(SFML_SYSTEM_LINUX) && !defined(SFML_USE_DRM)
+#if (defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_FREEBSD) || defined(SFML_SYSTEM_OPENBSD) || \
+     defined(SFML_SYSTEM_NETBSD)) &&                                                               \
+    !defined(SFML_USE_DRM)
     ////////////////////////////////////////////////////////////
     /// \brief Select the best EGL visual for a given set of settings
     ///

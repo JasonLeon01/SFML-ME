@@ -1,3 +1,4 @@
+#include <SFML/Graphics/GraphicsBackend.hpp>
 #include <SFML/Graphics/RenderTexture.hpp>
 
 // Other 1st party headers
@@ -46,7 +47,7 @@ TEST_CASE("[Graphics] sf::RenderTexture", runDisplayTests())
             CHECK(!texture.isSmooth());
             CHECK(!texture.isSrgb());
             CHECK(!texture.isRepeated());
-            CHECK(texture.getNativeHandle() != 0);
+            CHECK((texture.getNativeHandle() != 0) == (sf::getGraphicsBackend() != sf::GraphicsBackend::Vulkan));
         }
     }
 
@@ -69,7 +70,7 @@ TEST_CASE("[Graphics] sf::RenderTexture", runDisplayTests())
         CHECK(!texture.isSmooth());
         CHECK(!texture.isSrgb());
         CHECK(!texture.isRepeated());
-        CHECK(texture.getNativeHandle() != 0);
+        CHECK((texture.getNativeHandle() != 0) == (sf::getGraphicsBackend() != sf::GraphicsBackend::Vulkan));
     }
 
     SECTION("resize()")
