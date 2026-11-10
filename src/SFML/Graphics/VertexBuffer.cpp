@@ -26,6 +26,9 @@
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Graphics/GraphicsDevice.hpp>
+#ifdef SFML_RENDER_DIRECTX
+#include <SFML/Graphics/DirectX/DirectXDevice.hpp>
+#endif
 #ifdef SFML_RENDER_GL
 #include <SFML/Graphics/GLCheck.hpp>
 #include <SFML/Graphics/GLExtensions.hpp>
@@ -132,6 +135,17 @@ bool VertexBuffer::create(std::size_t vertexCount)
     if (!device || vertexCount > std::numeric_limits<std::ptrdiff_t>::max() / sizeof(Vertex))
         return false;
 
+#ifdef SFML_RENDER_DIRECTX
+    if (device->directX)
+    {
+        auto buffer = device->directX->makeBuffer(vertexCount * sizeof(Vertex));
+        if (!buffer)
+            return false;
+        m_directXBuffer = std::move(buffer);
+        m_size          = vertexCount;
+        return true;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (device->vulkan)
     {
@@ -191,11 +205,32 @@ bool VertexBuffer::update(const Vertex* vertices)
 ////////////////////////////////////////////////////////////
 bool VertexBuffer::update(const Vertex* vertices, std::size_t vertexCount, unsigned int offset)
 {
-    if (!vertices || (!m_buffer && !m_vulkanBuffer) ||
+    if (!vertices || (!m_buffer && !m_vulkanBuffer && !m_directXBuffer) ||
         vertexCount > std::numeric_limits<std::ptrdiff_t>::max() / sizeof(Vertex) ||
         (offset && (offset > m_size || vertexCount > m_size - offset)))
         return false;
 
+#ifdef SFML_RENDER_DIRECTX
+    if (m_directXBuffer)
+    {
+        const auto& device = priv::getGraphicsDevice()->directX;
+        const auto  lock   = device->lock();
+        if (device->isLost() || vertexCount > std::numeric_limits<UINT>::max() / sizeof(Vertex))
+            return false;
+        if (!offset && vertexCount >= m_size && !create(vertexCount))
+            return false;
+        if (!vertexCount)
+            return true;
+        const D3D11_BOX box{static_cast<UINT>(offset * sizeof(Vertex)),
+                            0,
+                            0,
+                            static_cast<UINT>((offset + vertexCount) * sizeof(Vertex)),
+                            1,
+                            1};
+        device->context()->UpdateSubresource(m_directXBuffer->buffer.get(), 0, &box, vertices, 0, 0);
+        return device->check(device->device()->GetDeviceRemovedReason(), "update vertex buffer");
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanBuffer)
     {
@@ -252,8 +287,24 @@ bool VertexBuffer::update(const Vertex* vertices, std::size_t vertexCount, unsig
 bool VertexBuffer::update(const VertexBuffer& vertexBuffer)
 {
     if (&vertexBuffer == this)
-        return m_buffer || m_vulkanBuffer;
+        return m_buffer || m_vulkanBuffer || m_directXBuffer;
 
+#ifdef SFML_RENDER_DIRECTX
+    if (m_directXBuffer && vertexBuffer.m_directXBuffer)
+    {
+        const auto& device = priv::getGraphicsDevice()->directX;
+        const auto  lock   = device->lock();
+        if (device->isLost())
+            return false;
+        auto replacement = device->makeBuffer(vertexBuffer.m_size * sizeof(Vertex));
+        if (!replacement)
+            return false;
+        device->context()->CopyResource(replacement->buffer.get(), vertexBuffer.m_directXBuffer->buffer.get());
+        m_directXBuffer = std::move(replacement);
+        m_size          = vertexBuffer.m_size;
+        return true;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanBuffer && vertexBuffer.m_vulkanBuffer)
     {
@@ -347,6 +398,7 @@ void VertexBuffer::swap(VertexBuffer& right) noexcept
 {
     std::swap(m_glContext, right.m_glContext);
     std::swap(m_vulkanBuffer, right.m_vulkanBuffer);
+    std::swap(m_directXBuffer, right.m_directXBuffer);
     std::swap(m_size, right.m_size);
     std::swap(m_buffer, right.m_buffer);
     std::swap(m_primitiveType, right.m_primitiveType);

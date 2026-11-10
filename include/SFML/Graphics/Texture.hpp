@@ -49,6 +49,9 @@ namespace priv
 {
 class OpenGLRenderTarget;
 struct VulkanImage;
+struct DirectXImage;
+class DirectXRenderTarget;
+class DirectXProgram;
 class VulkanRenderTarget;
 class VulkanProgram;
 } // namespace priv
@@ -671,7 +674,7 @@ public:
     /// or implement a temporary workaround until a bug is fixed.
     ///
     /// \return OpenGL handle of the texture or 0 if not yet created
-    /// Returns zero when the resource belongs to the Vulkan backend.
+    /// Returns zero when the resource belongs to a non-OpenGL backend.
     ///
     ////////////////////////////////////////////////////////////
     [[nodiscard]] unsigned int getNativeHandle() const;
@@ -726,12 +729,15 @@ private:
     friend class RenderTexture;
     friend class priv::OpenGLRenderTarget;
     friend class priv::VulkanRenderTarget;
+    friend class priv::DirectXRenderTarget;
+    friend class priv::DirectXProgram;
     friend class priv::VulkanProgram;
 
     [[nodiscard]] static std::array<float, 16> coordinateMatrix(const Texture* texture, CoordinateType coordinateType);
     [[nodiscard]] bool                         upload(const std::uint8_t* pixels, Vector2u size, Vector2u dest);
     std::shared_ptr<void>                      m_glContext;
     std::shared_ptr<priv::VulkanImage>         m_vulkanImage;
+    std::shared_ptr<priv::DirectXImage>        m_directXImage;
 
     ////////////////////////////////////////////////////////////
     /// \brief Get a valid image size according to hardware support

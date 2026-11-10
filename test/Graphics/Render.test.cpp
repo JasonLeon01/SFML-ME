@@ -311,7 +311,8 @@ TEST_CASE("[Graphics] Render resources before opening a window", runDisplayTests
 
     const auto backend = sf::getGraphicsBackend();
     CHECK(backend != sf::GraphicsBackend::Automatic);
-    CHECK_FALSE(sf::setGraphicsBackend(sf::GraphicsBackend::DirectX));
+    CHECK_FALSE(sf::setGraphicsBackend(
+        backend == sf::GraphicsBackend::DirectX ? sf::GraphicsBackend::Vulkan : sf::GraphicsBackend::DirectX));
     CHECK(sf::getGraphicsBackend() == backend);
     CHECK_FALSE(
         offscreen.resize({16, 16},
@@ -323,6 +324,8 @@ TEST_CASE("[Graphics] Render resources before opening a window", runDisplayTests
                                                  ? sf::ContextSettings::BackendSettings{sf::OpenGLSettings{99, 0}}
                                              : backend == sf::GraphicsBackend::OpenGLES
                                                  ? sf::ContextSettings::BackendSettings{sf::OpenGLESSettings{99, 0}}
+                                             : backend == sf::GraphicsBackend::DirectX
+                                                 ? sf::ContextSettings::BackendSettings{sf::DirectXSettings{99, 0}}
                                                  : sf::ContextSettings::BackendSettings{sf::VulkanSettings{99, 0}}}));
     CHECK(offscreen.getSize() == sf::Vector2u(32, 24));
 
@@ -341,6 +344,14 @@ TEST_CASE("[Graphics] Render custom shader on selected backend", runDisplayTests
     if (sf::getGraphicsBackend() == sf::GraphicsBackend::Vulkan)
     {
         REQUIRE(shader.loadFromFile("shader-vulkan.frag.spv", sf::Shader::Type::Fragment));
+    }
+    else if (sf::getGraphicsBackend() == sf::GraphicsBackend::DirectX)
+    {
+        constexpr std::string_view source = R"(
+cbuffer Colors : register(b1) { float4 shades[2]; };
+float4 main() : SV_TARGET { return float4(shades[0].r, shades[1].g, shades[0].b, 1.0); }
+)";
+        REQUIRE(shader.loadFromMemory(source, sf::Shader::Type::Fragment));
     }
     else
     {

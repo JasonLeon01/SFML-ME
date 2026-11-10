@@ -27,6 +27,9 @@
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Graphics/GraphicsDevice.hpp>
+#ifdef SFML_RENDER_DIRECTX
+#include <SFML/Graphics/DirectX/DirectXProgram.hpp>
+#endif
 #include <SFML/Graphics/ShaderUniformType.hpp>
 
 #ifdef SFML_RENDER_GL
@@ -346,6 +349,7 @@ Shader::~Shader()
 Shader::Shader(Shader&& source) noexcept :
     m_glContext(std::move(source.m_glContext)),
     m_vulkanProgram(std::move(source.m_vulkanProgram)),
+    m_directXProgram(std::move(source.m_directXProgram)),
     m_shaderProgram(std::exchange(source.m_shaderProgram, 0u)),
     m_currentTexture(std::exchange(source.m_currentTexture, -1)),
     m_textures(std::move(source.m_textures)),
@@ -361,6 +365,7 @@ Shader& Shader::operator=(Shader&& right) noexcept
     Shader temporary(std::move(right));
     std::swap(m_glContext, temporary.m_glContext);
     std::swap(m_vulkanProgram, temporary.m_vulkanProgram);
+    std::swap(m_directXProgram, temporary.m_directXProgram);
     std::swap(m_shaderProgram, temporary.m_shaderProgram);
     std::swap(m_currentTexture, temporary.m_currentTexture);
     std::swap(m_textures, temporary.m_textures);
@@ -642,6 +647,13 @@ void Shader::setUniform(const std::string& name, const Glsl::Mat4& value)
 
 void Shader::setUniform(const std::string& name, const Texture& texture)
 {
+#ifdef SFML_RENDER_DIRECTX
+    if (m_directXProgram)
+    {
+        m_directXProgram->setSampler(name, &texture, false);
+        return;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanProgram)
     {
@@ -689,6 +701,13 @@ void Shader::setUniform(const std::string& name, const Texture& texture)
 ////////////////////////////////////////////////////////////
 void Shader::setUniform(const std::string& name, CurrentTextureType)
 {
+#ifdef SFML_RENDER_DIRECTX
+    if (m_directXProgram)
+    {
+        m_directXProgram->setSampler(name, nullptr, true);
+        return;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanProgram)
     {
@@ -757,6 +776,13 @@ void Shader::setUniformData(const std::string& name, ShaderUniformType type, con
     if (!values || !count)
         return;
 
+#ifdef SFML_RENDER_DIRECTX
+    if (m_directXProgram)
+    {
+        m_directXProgram->setUniform(name, type, values, count);
+        return;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanProgram)
     {
@@ -847,7 +873,12 @@ void Shader::bind(const Shader* shader)
 
 bool Shader::isAvailable()
 {
-    return priv::getGraphicsDevice() != nullptr;
+    const auto* device = priv::getGraphicsDevice();
+#ifdef SFML_RENDER_DIRECTX
+    if (device && device->directX)
+        return priv::DirectXProgram::compilerAvailable();
+#endif
+    return device != nullptr;
 }
 
 bool Shader::isGeometryAvailable()
@@ -856,6 +887,10 @@ bool Shader::isGeometryAvailable()
     if (!device)
         return false;
 
+#ifdef SFML_RENDER_DIRECTX
+    if (device->directX)
+        return priv::DirectXProgram::compilerAvailable();
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (device->vulkan)
         return device->vulkan->context()->features.geometryShader != VK_FALSE;
@@ -894,6 +929,16 @@ bool Shader::compile(std::string_view vertex, std::string_view geometry, std::st
         return false;
     }
 
+#ifdef SFML_RENDER_DIRECTX
+    if (device->directX)
+    {
+        auto shader = priv::DirectXProgram::create(*device->directX, vertex, geometry, fragment);
+        if (!shader)
+            return false;
+        m_directXProgram = std::move(shader);
+        return true;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (device->vulkan)
     {

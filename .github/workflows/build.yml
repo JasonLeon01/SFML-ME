@@ -29,6 +29,7 @@ jobs:
         platform:
         - { name: Windows VS2022 x86,             os: windows-2025, flags: -DSFML_USE_MESA3D=ON -GNinja }
         - { name: Windows VS2022 x64,             os: windows-2025, flags: -DSFML_USE_MESA3D=ON -GNinja }
+        - { name: Windows VS2022 DirectX only,     os: windows-2025, flags: -DSFML_BUILD_OPENGL_BACKEND=OFF -DSFML_BUILD_VULKAN_BACKEND=OFF -GNinja }
         - { name: Windows VS2022 arm64,           os: windows-2025, flags: -DSFML_USE_MESA3D=OFF -GNinja -DSFML_BUILD_TEST_SUITE=OFF }
         - { name: Windows VS2022 ClangCL MSBuild, os: windows-2022, flags: -DSFML_USE_MESA3D=ON -G "Visual Studio 17 2022" -T ClangCL } # ninja doesn't support specifying the toolset, so use the ClangCL toolset to test building with MSBuild as well
         - { name: Windows VS2022 OpenGL ES,       os: windows-2025, flags: -DSFML_USE_MESA3D=ON -DSFML_OPENGL_ES=ON -GNinja }

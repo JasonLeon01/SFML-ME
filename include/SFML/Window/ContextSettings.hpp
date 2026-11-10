@@ -56,12 +56,20 @@ struct VulkanSettings
     unsigned int minorVersion{};
 };
 
+/// Minimum Direct3D feature level, using the Direct3D 11 API.
+/// Supported levels are 10_0, 10_1, 11_0, 11_1, 12_0 and 12_1.
+struct DirectXSettings
+{
+    unsigned int majorVersion{10};
+    unsigned int minorVersion{};
+};
+
 /// Framebuffer options and minimum API version for a rendering target.
 /// An empty backend setting inherits the current graphics device's configuration.
 /// Window::getSettings() reports the actual settings selected by the driver.
 struct ContextSettings
 {
-    using BackendSettings = std::variant<std::monostate, OpenGLSettings, OpenGLESSettings, VulkanSettings>;
+    using BackendSettings = std::variant<std::monostate, OpenGLSettings, OpenGLESSettings, VulkanSettings, DirectXSettings>;
 
     unsigned int    depthBits{};
     unsigned int    stencilBits{};

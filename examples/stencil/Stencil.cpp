@@ -24,13 +24,15 @@ int main(int argc, char** argv)
     if (argc > 1)
     {
         const std::string_view backendName = (argc == 3 && std::string_view{argv[1]} == "--backend") ? argv[2] : "";
-        if (backendName != "opengl" && backendName != "vulkan")
+        if (backendName != "opengl" && backendName != "vulkan" && backendName != "directx")
         {
-            sf::err() << "Usage: stencil [--backend opengl|vulkan]\n";
+            sf::err() << "Usage: stencil [--backend opengl|vulkan|directx]\n";
             return EXIT_FAILURE;
         }
 
-        const auto backend = backendName == "opengl" ? sf::GraphicsBackend::OpenGL : sf::GraphicsBackend::Vulkan;
+        const auto backend = backendName == "opengl"    ? sf::GraphicsBackend::OpenGL
+                             : backendName == "directx" ? sf::GraphicsBackend::DirectX
+                                                        : sf::GraphicsBackend::Vulkan;
         if (!sf::setGraphicsBackend(backend))
             return EXIT_FAILURE;
     }
@@ -45,7 +47,9 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
 
     const auto backend = sf::getGraphicsBackend();
-    if (backend == sf::GraphicsBackend::OpenGL)
+    if (backend == sf::GraphicsBackend::DirectX)
+        window.setTitle("SFML Stencil (DirectX)");
+    else if (backend == sf::GraphicsBackend::OpenGL)
         window.setTitle("SFML Stencil (OpenGL)");
     else if (backend == sf::GraphicsBackend::OpenGLES)
         window.setTitle("SFML Stencil (OpenGL ES)");

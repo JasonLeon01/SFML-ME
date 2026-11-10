@@ -9,10 +9,12 @@ This release brings major improvements to text layout, networking, audio device 
 ## SFML-ME graphics backends
 
 Configure the SFML build with `SFML_BUILD_OPENGL_BACKEND` and
-`SFML_BUILD_VULKAN_BACKEND`. When the OpenGL backend is enabled,
+`SFML_BUILD_VULKAN_BACKEND`, and `SFML_BUILD_DIRECTX_BACKEND`. DirectX uses
+Direct3D 11 and is enabled by default on Windows only. When the OpenGL backend is enabled,
 `SFML_OPENGL_ES` selects GLES instead of desktop OpenGL. The Window and
 Graphics targets propagate `SFML_RENDER_OPENGL`, `SFML_RENDER_OPENGLES`,
-and `SFML_RENDER_VULKAN` for the backends present in that build.
+and `SFML_RENDER_VULKAN` for the backends present in that build. The Graphics
+target additionally propagates `SFML_RENDER_DIRECTX` when DirectX is enabled.
 
 Choose a backend before the first graphics resource or capability query
 that uses a GPU. The following call requests Vulkan 1.3.
@@ -26,12 +28,32 @@ if (!window.isOpen())
     return 1;
 ~~~
 
-Automatic selection tries the compiled OpenGL variant before Vulkan.
+On Windows, automatic selection tries DirectX, then the compiled OpenGL
+variant, then Vulkan. Other platforms retain OpenGL/GLES before Vulkan.
 The first successful initialization fixes the device for the process.
 An explicit API version is a minimum requirement for that request.
 If the driver supplies a lower version or an incompatible profile,
 initialization fails. The built-in minimums are desktop OpenGL 2.0,
-OpenGL ES 3.0, and Vulkan 1.0.
+OpenGL ES 3.0, Vulkan 1.0, and Direct3D feature level 10_0.
+
+Use `sf::setGraphicsBackend(sf::GraphicsBackend::DirectX, sf::DirectXSettings{11, 0})`
+to require feature level 11_0 before creating resources. The supported feature
+levels are 10_0, 10_1, 11_0, 11_1, 12_0 and 12_1. These are hardware capability
+requirements, not API versions: even 12_0 and 12_1 use the Direct3D 11 API.
+The device chooses the highest supported level satisfying the request.
+Explicit requests never fall back to another backend or a lower feature level.
+Windows retains its Windows 7 API baseline. WARP software rendering is used
+only by the test harness, not by automatic selection in applications.
+
+`DirectXSettings` is an additional alternative in `ContextSettings::backend`.
+Recompile applications against the updated headers and libraries. Existing
+rendering, shader loading and uniform function signatures are unchanged.
+GL object handles return zero on DirectX, and GL-specific binding/state
+operations are unavailable, as with Vulkan. `sf::Window` and `sf::Context`
+continue to provide native OpenGL contexts; use `sf::RenderWindow` for DirectX.
+Align single-pixel points and lines to pixel centers, for example
+`{x + 0.5f, y + 0.5f}`. Pixels exactly on primitive edges follow the selected
+API's rasterization rules and can differ between backends.
 
 Move API settings into `ContextSettings::backend`. The depth, stencil,
 MSAA, and sRGB fields still configure individual targets. For example,
@@ -56,6 +78,44 @@ the built-in draw uniform block at binding 0 (`mat4 transform` and
 binding 1. Use set 1 for user uniform buffers and combined 2D samplers.
 Keep SPIR-V variable names to bind values through `setUniform` and
 `setUniformArray`.
+
+With DirectX, the existing `Shader` loaders accept self-contained HLSL source,
+with `main` as the entry point. GLSL is not translated. Compilation uses Shader
+Model 4.0 at feature level 10_0, 4.1 at 10_1, and 5.0 at 11_0 or higher.
+Loading custom shaders requires `d3dcompiler_47.dll`; deploy the appropriate
+Windows SDK redistributable with applications on systems that do not provide
+it. Built-in shaders are precompiled and do not require that DLL.
+
+Vertex inputs are `float2 POSITION`, `float4 COLOR0`, and `float2 TEXCOORD0`.
+The built-in stages exchange `float4 SV_POSITION`, `float4 COLOR0`, and
+`float2 TEXCOORD0`, in that order. Declare this complete input signature when
+using interpolated data with a built-in stage, even if some fields are unused;
+Direct3D also requires the semantic register locations to match. A fragment
+shader returns `SV_TARGET`. Missing vertex or
+fragment stages are supplied by SFML, including geometry-only shader loads.
+The following block is reserved at `b0`; user constant buffers start at `b1`.
+
+~~~hlsl
+cbuffer SFMLDraw : register(b0)
+{
+    column_major float4x4 sf_ModelViewProjectionMatrix;
+    float4 sf_TextureTransform;
+};
+~~~
+
+The matrix maps SFML vertex positions to clip space. Normalize texture
+coordinates with `uv * sf_TextureTransform.xy + sf_TextureTransform.zw`.
+Bind a `Texture2D` and its `SamplerState` at matching `tN`/`sN` registers
+(`N < 16`); pass the texture variable's name to the existing `setUniform`
+overloads. `sf_Texture` defaults to the current drawing texture at `t0/s0`.
+Other texture names can use `Shader::CurrentTexture` explicitly. Constants
+are reflected by name across all stages, including array padding and row- or
+column-major matrices. `sf::Glsl` value types remain the CPU-side uniform types.
+
+The `stencil` example accepts `--backend directx`, `--backend opengl`, or
+`--backend vulkan`; omitting the option uses the automatic priority.
+The `shader` and `island` examples explicitly select OpenGL for their existing
+desktop GLSL resources.
 
 ## Dependencies
 

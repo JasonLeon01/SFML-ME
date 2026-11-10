@@ -43,6 +43,8 @@ namespace sf
 namespace priv
 {
 struct VulkanBuffer;
+struct DirectXBuffer;
+class DirectXRenderTarget;
 class VulkanRenderTarget;
 } // namespace priv
 
@@ -242,7 +244,7 @@ public:
     /// or implement a temporary workaround until a bug is fixed.
     ///
     /// \return OpenGL handle of the vertex buffer or 0 if not yet created
-    /// Returns zero when the resource belongs to the Vulkan backend.
+    /// Returns zero when the resource belongs to a non-OpenGL backend.
     ///
     ////////////////////////////////////////////////////////////
     [[nodiscard]] unsigned int getNativeHandle() const;
@@ -342,8 +344,10 @@ private:
     // Member data
     ////////////////////////////////////////////////////////////
     friend class priv::VulkanRenderTarget;
-    std::shared_ptr<void>               m_glContext;
-    std::shared_ptr<priv::VulkanBuffer> m_vulkanBuffer;
+    friend class priv::DirectXRenderTarget;
+    std::shared_ptr<void>                m_glContext;
+    std::shared_ptr<priv::VulkanBuffer>  m_vulkanBuffer;
+    std::shared_ptr<priv::DirectXBuffer> m_directXBuffer;
 
     unsigned int  m_buffer{};                             //!< Internal buffer identifier
     std::size_t   m_size{};                               //!< Size in Vertices of the currently allocated buffer

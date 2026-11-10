@@ -26,6 +26,9 @@
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Graphics/GraphicsDevice.hpp>
+#ifdef SFML_RENDER_DIRECTX
+#include <SFML/Graphics/DirectX/DirectXWindowSurface.hpp>
+#endif
 
 #ifdef SFML_RENDER_GL
 #include <SFML/Graphics/GLCheck.hpp>
@@ -163,7 +166,7 @@ Texture::Texture(const Texture& copy) :
     m_isRepeated(copy.m_isRepeated),
     m_cacheId(TextureImpl::getUniqueId())
 {
-    if (!copy.m_texture && !copy.m_vulkanImage)
+    if (!copy.m_texture && !copy.m_vulkanImage && !copy.m_directXImage)
     {
         return;
     }
@@ -203,6 +206,7 @@ Texture::~Texture()
 Texture::Texture(Texture&& right) noexcept :
     m_glContext(std::move(right.m_glContext)),
     m_vulkanImage(std::move(right.m_vulkanImage)),
+    m_directXImage(std::move(right.m_directXImage)),
     m_size(std::exchange(right.m_size, {})),
     m_actualSize(std::exchange(right.m_actualSize, {})),
     m_texture(std::exchange(right.m_texture, 0)),
@@ -234,8 +238,9 @@ Texture& Texture::operator=(Texture&& right) noexcept
     }
 #endif
 
-    m_glContext   = std::move(right.m_glContext);
-    m_vulkanImage = std::move(right.m_vulkanImage);
+    m_glContext    = std::move(right.m_glContext);
+    m_vulkanImage  = std::move(right.m_vulkanImage);
+    m_directXImage = std::move(right.m_directXImage);
 
     // Move old to new.
     m_size          = std::exchange(right.m_size, {});
@@ -266,6 +271,20 @@ bool Texture::resize(Vector2u size, bool sRgb)
     if (!device)
         return false;
 
+#ifdef SFML_RENDER_DIRECTX
+    if (device->directX)
+    {
+        auto image = device->directX->makeTexture(size, sRgb);
+        if (!image)
+            return false;
+        m_directXImage = std::move(image);
+        m_size = m_actualSize = size;
+        m_sRgb                = sRgb;
+        m_pixelsFlipped = m_fboAttachment = m_hasMipmap = false;
+        m_cacheId                                       = TextureImpl::getUniqueId();
+        return true;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (device->vulkan)
     {
@@ -476,6 +495,10 @@ Vector2u Texture::getSize() const
 ////////////////////////////////////////////////////////////
 Image Texture::copyToImage() const
 {
+#ifdef SFML_RENDER_DIRECTX
+    if (m_directXImage)
+        return priv::getGraphicsDevice()->directX->readImage(*m_directXImage);
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanImage)
     {
@@ -596,7 +619,7 @@ void Texture::update(const std::uint8_t* pixels)
 ////////////////////////////////////////////////////////////
 void Texture::update(const std::uint8_t* pixels, Vector2u size, Vector2u dest)
 {
-    if (!pixels || (!m_texture && !m_vulkanImage))
+    if (!pixels || (!m_texture && !m_vulkanImage && !m_directXImage))
         return;
 
     assert(dest.x + size.x <= m_size.x && "Destination x coordinate is outside of texture");
@@ -610,6 +633,16 @@ bool Texture::upload(const std::uint8_t* pixels, Vector2u size, Vector2u dest)
     if (!pixels || !size.x || !size.y)
         return false;
 
+#ifdef SFML_RENDER_DIRECTX
+    if (m_directXImage)
+    {
+        if (!priv::getGraphicsDevice()->directX->upload(*m_directXImage, pixels, size, dest))
+            return false;
+        m_hasMipmap = false;
+        m_cacheId   = TextureImpl::getUniqueId();
+        return true;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanImage)
     {
@@ -669,12 +702,24 @@ void Texture::update(const Texture& texture)
 ////////////////////////////////////////////////////////////
 void Texture::update(const Texture& texture, Vector2u dest)
 {
-    if ((!m_texture && !m_vulkanImage) || (!texture.m_texture && !texture.m_vulkanImage))
+    if ((!m_texture && !m_vulkanImage && !m_directXImage) ||
+        (!texture.m_texture && !texture.m_vulkanImage && !texture.m_directXImage))
         return;
 
     assert(dest.x + texture.m_size.x <= m_size.x && "Destination x coordinate is outside of texture");
     assert(dest.y + texture.m_size.y <= m_size.y && "Destination y coordinate is outside of texture");
 
+#ifdef SFML_RENDER_DIRECTX
+    if (m_directXImage && texture.m_directXImage)
+    {
+        if (priv::getGraphicsDevice()->directX->copy(*texture.m_directXImage, *m_directXImage, dest))
+        {
+            m_hasMipmap = false;
+            m_cacheId   = TextureImpl::getUniqueId();
+        }
+        return;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanImage && texture.m_vulkanImage)
     {
@@ -828,12 +873,24 @@ void Texture::update(const Window& window)
 ////////////////////////////////////////////////////////////
 void Texture::update(const Window& window, Vector2u dest)
 {
-    if (!window.isOpen() || (!m_texture && !m_vulkanImage))
+    if (!window.isOpen() || (!m_texture && !m_vulkanImage && !m_directXImage))
         return;
 
     assert(dest.x + window.getSize().x <= m_size.x && "Destination x coordinate is outside of texture");
     assert(dest.y + window.getSize().y <= m_size.y && "Destination y coordinate is outside of texture");
 
+#ifdef SFML_RENDER_DIRECTX
+    if (m_directXImage)
+    {
+        const auto* surface = dynamic_cast<const priv::DirectXWindowSurface*>(window.getSurface());
+        if (surface && surface->copyTo(m_directXImage, dest))
+        {
+            m_hasMipmap = false;
+            m_cacheId   = TextureImpl::getUniqueId();
+        }
+        return;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanImage)
     {
@@ -991,6 +1048,13 @@ bool Texture::isRepeated() const
 ////////////////////////////////////////////////////////////
 bool Texture::generateMipmap()
 {
+#ifdef SFML_RENDER_DIRECTX
+    if (m_directXImage)
+    {
+        m_hasMipmap = priv::getGraphicsDevice()->directX->generateMipmap(*m_directXImage);
+        return m_hasMipmap;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanImage)
     {
@@ -1117,6 +1181,10 @@ unsigned int Texture::getMaximumSize()
     if (!device)
         return 0;
 
+#ifdef SFML_RENDER_DIRECTX
+    if (device->directX)
+        return device->directX->maximumTextureSize();
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (device->vulkan)
         return device->vulkan->context()->properties.limits.maxImageDimension2D;
@@ -1159,6 +1227,7 @@ void Texture::swap(Texture& right) noexcept
 {
     std::swap(m_glContext, right.m_glContext);
     std::swap(m_vulkanImage, right.m_vulkanImage);
+    std::swap(m_directXImage, right.m_directXImage);
     std::swap(m_size, right.m_size);
     std::swap(m_actualSize, right.m_actualSize);
     std::swap(m_texture, right.m_texture);

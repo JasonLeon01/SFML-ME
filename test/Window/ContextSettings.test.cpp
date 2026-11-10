@@ -16,6 +16,16 @@ TEST_CASE("[Window] sf::ContextSettings")
 
     SECTION("Construction")
     {
+        SECTION("DirectX feature level")
+        {
+            constexpr sf::DirectXSettings defaults;
+            STATIC_CHECK(defaults.majorVersion == 10);
+            STATIC_CHECK(defaults.minorVersion == 0);
+            constexpr sf::ContextSettings settings{0, 8, 4, true, sf::DirectXSettings{11, 1}};
+            constexpr auto                directX = std::get<sf::DirectXSettings>(settings.backend);
+            STATIC_CHECK(directX.majorVersion == 11);
+            STATIC_CHECK(directX.minorVersion == 1);
+        }
         SECTION("Aggregate initialization -- Nothing")
         {
             constexpr sf::ContextSettings contextSettings;

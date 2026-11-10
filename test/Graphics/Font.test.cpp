@@ -66,7 +66,7 @@ TEST_CASE("[Graphics] sf::Font", runDisplayTests())
                 CHECK(texture.isSmooth());
                 CHECK(!texture.isSrgb());
                 CHECK(!texture.isRepeated());
-                CHECK((texture.getNativeHandle() != 0) == (sf::getGraphicsBackend() != sf::GraphicsBackend::Vulkan));
+                CHECK((texture.getNativeHandle() != 0) == hasOpenGLGraphicsBackend());
                 CHECK(font.isSmooth());
             }
         }
@@ -103,7 +103,7 @@ TEST_CASE("[Graphics] sf::Font", runDisplayTests())
                 CHECK(texture.isSmooth());
                 CHECK(!texture.isSrgb());
                 CHECK(!texture.isRepeated());
-                CHECK((texture.getNativeHandle() != 0) == (sf::getGraphicsBackend() != sf::GraphicsBackend::Vulkan));
+                CHECK((texture.getNativeHandle() != 0) == hasOpenGLGraphicsBackend());
                 CHECK(font.isSmooth());
             }
         }
@@ -131,7 +131,7 @@ TEST_CASE("[Graphics] sf::Font", runDisplayTests())
             CHECK(texture.isSmooth());
             CHECK(!texture.isSrgb());
             CHECK(!texture.isRepeated());
-            CHECK((texture.getNativeHandle() != 0) == (sf::getGraphicsBackend() != sf::GraphicsBackend::Vulkan));
+            CHECK((texture.getNativeHandle() != 0) == hasOpenGLGraphicsBackend());
             CHECK(font.isSmooth());
         }
     }
@@ -171,7 +171,7 @@ TEST_CASE("[Graphics] sf::Font", runDisplayTests())
             CHECK(texture.isSmooth());
             CHECK(!texture.isSrgb());
             CHECK(!texture.isRepeated());
-            CHECK((texture.getNativeHandle() != 0) == (sf::getGraphicsBackend() != sf::GraphicsBackend::Vulkan));
+            CHECK((texture.getNativeHandle() != 0) == hasOpenGLGraphicsBackend());
             CHECK(font.isSmooth());
         }
     }
@@ -210,7 +210,7 @@ TEST_CASE("[Graphics] sf::Font", runDisplayTests())
             CHECK(texture.isSmooth());
             CHECK(!texture.isSrgb());
             CHECK(!texture.isRepeated());
-            CHECK((texture.getNativeHandle() != 0) == (sf::getGraphicsBackend() != sf::GraphicsBackend::Vulkan));
+            CHECK((texture.getNativeHandle() != 0) == hasOpenGLGraphicsBackend());
             CHECK(font.isSmooth());
         }
     }
@@ -248,7 +248,7 @@ TEST_CASE("[Graphics] sf::Font", runDisplayTests())
             CHECK(texture.isSmooth());
             CHECK(!texture.isSrgb());
             CHECK(!texture.isRepeated());
-            CHECK((texture.getNativeHandle() != 0) == (sf::getGraphicsBackend() != sf::GraphicsBackend::Vulkan));
+            CHECK((texture.getNativeHandle() != 0) == hasOpenGLGraphicsBackend());
             CHECK(font.isSmooth());
         }
     }

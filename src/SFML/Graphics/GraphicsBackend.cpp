@@ -24,6 +24,10 @@
 
 #include <SFML/Graphics/GraphicsDevice.hpp>
 
+#ifdef SFML_RENDER_DIRECTX
+#include <SFML/Graphics/DirectX/DirectXDevice.hpp>
+#endif
+
 #ifdef SFML_RENDER_GL
 #include <SFML/Window/GlContext.hpp>
 #endif
@@ -50,12 +54,14 @@ namespace GraphicsBackendImpl
 constexpr std::array drivers
 {
 #if defined(SFML_SYSTEM_WINDOWS)
-// GraphicsBackend::DirectX,
+#ifdef SFML_RENDER_DIRECTX
+    GraphicsBackend::DirectX,
+#endif
 #elif defined(SFML_SYSTEM_MACOS) || defined(SFML_SYSTEM_IOS)
 // GraphicsBackend::Metal,
 #endif
 #ifdef SFML_RENDER_OPENGL
-    GraphicsBackend::OpenGL,
+        GraphicsBackend::OpenGL,
 #endif
 #ifdef SFML_RENDER_OPENGLES
         GraphicsBackend::OpenGLES,
@@ -111,6 +117,8 @@ GraphicsBackend backendOf(const Settings& settings)
         return GraphicsBackend::OpenGLES;
     if (std::holds_alternative<VulkanSettings>(settings))
         return GraphicsBackend::Vulkan;
+    if (std::holds_alternative<DirectXSettings>(settings))
+        return GraphicsBackend::DirectX;
     return GraphicsBackend::Automatic;
 }
 
@@ -137,6 +145,8 @@ Settings defaults(GraphicsBackend backend)
             return OpenGLESSettings{};
         case GraphicsBackend::Vulkan:
             return VulkanSettings{};
+        case GraphicsBackend::DirectX:
+            return DirectXSettings{};
         default:
             return {};
     }
@@ -144,6 +154,9 @@ Settings defaults(GraphicsBackend backend)
 
 bool valid(GraphicsBackend backend, const Settings& settings)
 {
+    if (const auto* directX = std::get_if<DirectXSettings>(&settings))
+        return backend == GraphicsBackend::DirectX && directX->majorVersion >= 10 && directX->majorVersion <= 12 &&
+               directX->minorVersion <= 1;
     return std::holds_alternative<std::monostate>(settings) ||
            (backendOf(settings) == backend && versionOf(settings) >= versionOf(defaults(backend)));
 }
@@ -282,9 +295,21 @@ bool withGraphicsDevice(const ContextSettings&                                  
 
         auto initialization    = ContextSettings{};
         initialization.backend = requirements;
-        GraphicsDevice device{driver, requirements, {}, {}};
+        GraphicsDevice device{driver, requirements, {}, {}, {}};
 
-        if (driver == GraphicsBackend::Vulkan)
+        if (driver == GraphicsBackend::DirectX)
+        {
+#ifdef SFML_RENDER_DIRECTX
+            device.directX = DirectXDevice::create(std::get<DirectXSettings>(requirements));
+            if (!device.directX)
+            {
+                reportFailure(driver, requirements);
+                continue;
+            }
+            device.settings = device.directX->settings();
+#endif
+        }
+        else if (driver == GraphicsBackend::Vulkan)
         {
 #ifdef SFML_RENDER_VULKAN
             device.vulkan = VulkanDevice::create(std::get<VulkanSettings>(requirements));

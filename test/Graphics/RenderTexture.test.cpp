@@ -6,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <GraphicsUtil.hpp>
 #include <WindowUtil.hpp>
 #include <type_traits>
 
@@ -47,7 +48,7 @@ TEST_CASE("[Graphics] sf::RenderTexture", runDisplayTests())
             CHECK(!texture.isSmooth());
             CHECK(!texture.isSrgb());
             CHECK(!texture.isRepeated());
-            CHECK((texture.getNativeHandle() != 0) == (sf::getGraphicsBackend() != sf::GraphicsBackend::Vulkan));
+            CHECK((texture.getNativeHandle() != 0) == hasOpenGLGraphicsBackend());
         }
     }
 
@@ -70,7 +71,7 @@ TEST_CASE("[Graphics] sf::RenderTexture", runDisplayTests())
         CHECK(!texture.isSmooth());
         CHECK(!texture.isSrgb());
         CHECK(!texture.isRepeated());
-        CHECK((texture.getNativeHandle() != 0) == (sf::getGraphicsBackend() != sf::GraphicsBackend::Vulkan));
+        CHECK((texture.getNativeHandle() != 0) == hasOpenGLGraphicsBackend());
     }
 
     SECTION("resize()")

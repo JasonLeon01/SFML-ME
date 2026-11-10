@@ -47,12 +47,15 @@ std::shared_ptr<void> GlContext::prepareSharedContext(ContextSettings&)
     return {};
 }
 
-void GlContext::registerUnsharedGlObject(std::shared_ptr<void>)
+void GlContext::registerUnsharedGlObject(std::shared_ptr<void> object)
 {
+    // Preserve the consuming interface without retaining objects in a GL-less build.
+    object.reset();
 }
 
-void GlContext::unregisterUnsharedGlObject(std::shared_ptr<void>)
+void GlContext::unregisterUnsharedGlObject(std::shared_ptr<void> object)
 {
+    object.reset();
 }
 
 void GlContext::acquireTransientContext()

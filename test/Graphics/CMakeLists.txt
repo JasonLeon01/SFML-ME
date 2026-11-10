@@ -35,11 +35,37 @@ if(SFML_OS_WINDOWS)
         WindowHandleWin32.test.cpp
     )
 endif()
+if(SFML_BUILD_DIRECTX_BACKEND)
+    list(APPEND GRAPHICS_SRC DirectX.test.cpp)
+endif()
 sfml_add_test(test-sfml-graphics "${GRAPHICS_SRC}" SFML::Graphics)
 target_compile_definitions(test-sfml-graphics PRIVATE SFML_GRAPHICS_TEST_MAIN)
+if(SFML_BUILD_DIRECTX_BACKEND)
+    target_compile_definitions(test-sfml-graphics PRIVATE SFML_DIRECTX_TESTS)
+    target_include_directories(test-sfml-graphics PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    if(SFML_RUN_DISPLAY_TESTS)
+        foreach(mode IN ITEMS directx-warp directx-min directx-high directx-unavailable)
+            add_test(NAME sfml-graphics-${mode}
+                     COMMAND test-sfml-graphics --sfml-${mode}
+                     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+            set_tests_properties(sfml-graphics-${mode} PROPERTIES RUN_SERIAL TRUE)
+        endforeach()
+        if(SFML_BUILD_OPENGL_BACKEND OR SFML_BUILD_VULKAN_BACKEND)
+            add_test(NAME sfml-graphics-directx-fallback
+                     COMMAND test-sfml-graphics --sfml-directx-fallback
+                     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+            set_tests_properties(sfml-graphics-directx-fallback PROPERTIES RUN_SERIAL TRUE)
+        endif()
+    endif()
+endif()
+if(SFML_RUN_DISPLAY_TESTS AND SFML_BUILD_OPENGL_BACKEND AND SFML_OS_WINDOWS)
+    add_test(NAME sfml-graphics-opengl COMMAND test-sfml-graphics --sfml-opengl
+             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_tests_properties(sfml-graphics-opengl PROPERTIES RUN_SERIAL TRUE)
+endif()
 if(SFML_RUN_DISPLAY_TESTS AND SFML_BUILD_VULKAN_BACKEND AND SFML_OS_WINDOWS)
     add_test(NAME sfml-graphics-vulkan
-             COMMAND test-sfml-graphics --sfml-vulkan "*Render*"
+             COMMAND test-sfml-graphics --sfml-vulkan
              WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     set_tests_properties(sfml-graphics-vulkan PROPERTIES SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
 endif()

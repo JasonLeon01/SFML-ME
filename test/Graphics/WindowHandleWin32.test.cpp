@@ -217,7 +217,8 @@ TEST_CASE("[Window] sf::WindowHandle (Win32)")
             INFO("ExStyle: " << std::hex << exStyle << ", withMenu: " << withMenu);
             CHECK(renderWindow->getSettings().depthBits >= 1);
             CHECK(renderWindow->getSettings().stencilBits >= 1);
-            if (std::holds_alternative<sf::VulkanSettings>(renderWindow->getSettings().backend))
+            if (std::holds_alternative<sf::VulkanSettings>(renderWindow->getSettings().backend) ||
+                std::holds_alternative<sf::DirectXSettings>(renderWindow->getSettings().backend))
                 CHECK(renderWindow->getSettings().antiAliasingLevel == 0);
             else
                 CHECK(renderWindow->getSettings().antiAliasingLevel >= 1);

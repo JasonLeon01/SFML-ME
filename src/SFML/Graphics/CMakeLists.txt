@@ -91,6 +91,26 @@ sfml_add_library(Graphics
 # setup dependencies
 target_link_libraries(sfml-graphics PUBLIC SFML::Window)
 
+if(SFML_BUILD_DIRECTX_BACKEND)
+    target_compile_definitions(sfml-graphics PUBLIC SFML_RENDER_DIRECTX)
+    target_link_libraries(sfml-graphics PRIVATE d3d11 dxgi dxguid)
+    target_sources(sfml-graphics PRIVATE
+        ${SRCROOT}/DirectX/DirectXDevice.cpp
+        ${SRCROOT}/DirectX/DirectXDevice.hpp
+        ${SRCROOT}/DirectX/DirectXProgram.cpp
+        ${SRCROOT}/DirectX/DirectXProgram.hpp
+        ${SRCROOT}/DirectX/DirectXRenderTarget.cpp
+        ${SRCROOT}/DirectX/DirectXRenderTarget.hpp
+        ${SRCROOT}/DirectX/DirectXWindowSurface.cpp
+        ${SRCROOT}/DirectX/DirectXWindowSurface.hpp
+        ${SRCROOT}/DirectX/ComPtr.hpp
+        ${SRCROOT}/DirectX/BuiltInShaders.hpp
+    )
+    if(SFML_BUILD_TEST_SUITE)
+        target_compile_definitions(sfml-graphics PRIVATE SFML_DIRECTX_TESTS)
+    endif()
+endif()
+
 if(SFML_BUILD_OPENGL_BACKEND)
     target_compile_definitions(sfml-graphics PRIVATE SFML_RENDER_GL)
     target_include_directories(sfml-graphics SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/glad/include")

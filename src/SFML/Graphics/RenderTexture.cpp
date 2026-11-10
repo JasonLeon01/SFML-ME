@@ -26,6 +26,9 @@
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Graphics/GraphicsDevice.hpp>
+#ifdef SFML_RENDER_DIRECTX
+#include <SFML/Graphics/DirectX/DirectXRenderTarget.hpp>
+#endif
 #include <SFML/Graphics/RenderTexture.hpp>
 #include <SFML/Graphics/RenderTextureImpl.hpp>
 
@@ -85,6 +88,20 @@ bool RenderTexture::resize(Vector2u size, const ContextSettings& settings)
                                             return false;
                                         }
 
+#ifdef SFML_RENDER_DIRECTX
+                                        if (device.directX)
+                                        {
+                                            auto backend = priv::DirectXRenderTarget::create(device.directX,
+                                                                                             texture.m_directXImage,
+                                                                                             effective);
+                                            if (!backend)
+                                                return false;
+                                            m_backend = std::move(backend);
+                                            m_texture = std::move(texture);
+                                            RenderTarget::initialize();
+                                            return true;
+                                        }
+#endif
 #ifdef SFML_RENDER_VULKAN
                                         if (device.vulkan)
                                         {
@@ -135,6 +152,10 @@ unsigned int RenderTexture::getMaximumAntiAliasingLevel()
     if (!device)
         return 0;
 
+#ifdef SFML_RENDER_DIRECTX
+    if (device->directX)
+        return priv::DirectXRenderTarget::getMaximumAntiAliasingLevel(*device->directX);
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (device->vulkan)
         return priv::VulkanRenderTarget::getMaximumAntiAliasingLevel(*device->vulkan);
@@ -186,6 +207,10 @@ bool RenderTexture::generateMipmap()
 ////////////////////////////////////////////////////////////
 bool RenderTexture::setActive(bool active)
 {
+#ifdef SFML_RENDER_DIRECTX
+    if (m_texture.m_directXImage)
+        return RenderTarget::setActive(active);
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_texture.m_vulkanImage)
         return RenderTarget::setActive(active);
@@ -200,6 +225,14 @@ bool RenderTexture::setActive(bool active)
 ////////////////////////////////////////////////////////////
 void RenderTexture::display()
 {
+#ifdef SFML_RENDER_DIRECTX
+    if (m_texture.m_directXImage)
+    {
+        static_cast<priv::DirectXRenderTarget&>(*m_backend).finish();
+        m_texture.invalidateMipmap();
+        return;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_texture.m_vulkanImage)
     {

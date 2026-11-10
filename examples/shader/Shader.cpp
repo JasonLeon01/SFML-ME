@@ -377,6 +377,10 @@ std::optional<Geometry> tryLoadGeometry()
 ////////////////////////////////////////////////////////////
 int main()
 {
+    // These shader resources use desktop compatibility GLSL.
+    if (!sf::setGraphicsBackend(sf::GraphicsBackend::OpenGL, sf::OpenGLSettings{2, 0, sf::OpenGLProfile::Compatibility}))
+        return EXIT_FAILURE;
+
     // Exit early if shaders are not available
     if (!sf::Shader::isAvailable())
     {

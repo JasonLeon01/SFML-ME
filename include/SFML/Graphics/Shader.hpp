@@ -48,6 +48,8 @@ namespace priv
 class OpenGLRenderTarget;
 class VulkanRenderTarget;
 class VulkanProgram;
+class DirectXProgram;
+class DirectXRenderTarget;
 enum class ShaderUniformType : unsigned char;
 } // namespace priv
 
@@ -794,7 +796,7 @@ public:
     /// or implement a temporary workaround until a bug is fixed.
     ///
     /// \return OpenGL handle of the shader or 0 if not yet loaded
-    /// Returns zero when the resource belongs to the Vulkan backend.
+    /// Returns zero when the resource belongs to a non-OpenGL backend.
     ///
     ////////////////////////////////////////////////////////////
     [[nodiscard]] unsigned int getNativeHandle() const;
@@ -856,11 +858,13 @@ public:
 private:
     friend class priv::OpenGLRenderTarget;
     friend class priv::VulkanRenderTarget;
+    friend class priv::DirectXRenderTarget;
 
     [[nodiscard]] bool loadDefaultOpenGL();
     void setUniformData(const std::string& name, priv::ShaderUniformType type, const void* values, std::size_t count);
-    std::shared_ptr<void>                m_glContext;
-    std::shared_ptr<priv::VulkanProgram> m_vulkanProgram;
+    std::shared_ptr<void>                 m_glContext;
+    std::shared_ptr<priv::VulkanProgram>  m_vulkanProgram;
+    std::shared_ptr<priv::DirectXProgram> m_directXProgram;
 
     ////////////////////////////////////////////////////////////
     /// \brief Compile the shader(s) and create the program
