@@ -185,6 +185,8 @@ struct VulkanDevice::Impl
 
 VulkanContext::~VulkanContext()
 {
+    if (pipelineCache)
+        vk.DestroyPipelineCache(device, pipelineCache, nullptr);
     if (device && vk.DestroyDevice)
         vk.DestroyDevice(device, nullptr);
     if (instance && vk.DestroyInstance)
@@ -422,6 +424,11 @@ VulkanDevice::VulkanDevice(std::shared_ptr<VulkanContext> value) : m_impl(std::m
 
 bool VulkanDevice::initialize()
 {
+    VkPipelineCacheCreateInfo cache{};
+    cache.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+    if (context()->vk.CreatePipelineCache(context()->device, &cache, nullptr, &context()->pipelineCache) != VK_SUCCESS)
+        return false;
+
     const auto&             ctx = *context();
     VkCommandPoolCreateInfo pool{};
     pool.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -474,6 +481,53 @@ const std::shared_ptr<VulkanContext>& VulkanDevice::context() const
 bool VulkanDevice::isLost() const
 {
     return m_impl->lost;
+}
+
+bool VulkanDevice::loadPipelineCache(const void* data, std::size_t size)
+{
+    const auto            guard      = lock();
+    const auto&           ctx        = *context();
+    constexpr std::size_t headerSize = 4 * sizeof(std::uint32_t) + VK_UUID_SIZE;
+    if (m_impl->lost || !data || size < headerSize)
+        return false;
+
+    // Vulkan's version-one header is tightly packed and always little-endian.
+    const auto* bytes = static_cast<const std::uint8_t*>(data);
+    const auto  word  = [bytes](std::size_t offset)
+    {
+        return std::uint32_t{bytes[offset]} | (std::uint32_t{bytes[offset + 1]} << 8) |
+               (std::uint32_t{bytes[offset + 2]} << 16) | (std::uint32_t{bytes[offset + 3]} << 24);
+    };
+    if (word(0) != headerSize || word(4) != VK_PIPELINE_CACHE_HEADER_VERSION_ONE || word(8) != ctx.properties.vendorID ||
+        word(12) != ctx.properties.deviceID || std::memcmp(bytes + 16, ctx.properties.pipelineCacheUUID, VK_UUID_SIZE) != 0)
+        return false;
+
+    VkPipelineCacheCreateInfo info{};
+    info.sType           = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+    info.initialDataSize = size;
+    info.pInitialData    = data;
+    VkPipelineCache imported{};
+    if (ctx.vk.CreatePipelineCache(ctx.device, &info, nullptr, &imported) != VK_SUCCESS)
+        return false;
+    const auto result = ctx.vk.MergePipelineCaches(ctx.device, ctx.pipelineCache, 1, &imported);
+    ctx.vk.DestroyPipelineCache(ctx.device, imported, nullptr);
+    return result == VK_SUCCESS;
+}
+
+std::optional<std::vector<std::uint8_t>> VulkanDevice::getPipelineCacheData() const
+{
+    const auto guard = lock();
+    if (m_impl->lost)
+        return std::nullopt;
+    const auto& ctx = *context();
+    std::size_t size{};
+    if (ctx.vk.GetPipelineCacheData(ctx.device, ctx.pipelineCache, &size, nullptr) != VK_SUCCESS)
+        return std::nullopt;
+    std::vector<std::uint8_t> data(size);
+    if (ctx.vk.GetPipelineCacheData(ctx.device, ctx.pipelineCache, &size, data.data()) != VK_SUCCESS)
+        return std::nullopt;
+    data.resize(size);
+    return data;
 }
 
 VkCommandBuffer VulkanDevice::commands()

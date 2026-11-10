@@ -243,6 +243,28 @@ GraphicsBackend getGraphicsBackend()
     return state.committed ? state.device->backend : GraphicsBackend::Automatic;
 }
 
+bool loadPipelineCacheFromMemory(const void* data, std::size_t size)
+{
+    if (!data || !size)
+        return false;
+#ifdef SFML_RENDER_VULKAN
+    const auto* device = priv::getGraphicsDevice();
+    if (device && device->vulkan)
+        return device->vulkan->loadPipelineCache(data, size);
+#endif
+    return false;
+}
+
+std::optional<std::vector<std::uint8_t>> getPipelineCacheData()
+{
+#ifdef SFML_RENDER_VULKAN
+    const auto* device = priv::getGraphicsDevice();
+    if (device && device->vulkan)
+        return device->vulkan->getPipelineCacheData();
+#endif
+    return std::nullopt;
+}
+
 namespace priv
 {
 bool withGraphicsDevice(const ContextSettings&                                                    settings,

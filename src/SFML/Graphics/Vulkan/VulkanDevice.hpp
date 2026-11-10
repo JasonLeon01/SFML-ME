@@ -30,6 +30,7 @@
 
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 #include <vulkan_core.h>
 
@@ -61,6 +62,7 @@ struct VulkanContext
     VkInstance                       instance{};
     VkPhysicalDevice                 physicalDevice{};
     VkDevice                         device{};
+    VkPipelineCache                  pipelineCache{};
     std::uint32_t                    apiVersion{};
     VkPhysicalDeviceProperties       properties{};
     VkPhysicalDeviceMemoryProperties memory{};
@@ -120,6 +122,9 @@ public:
     [[nodiscard]] std::unique_lock<std::recursive_mutex> lock() const;
     [[nodiscard]] const std::shared_ptr<VulkanContext>&  context() const;
     [[nodiscard]] bool                                   isLost() const;
+
+    [[nodiscard]] bool                                     loadPipelineCache(const void* data, std::size_t size);
+    [[nodiscard]] std::optional<std::vector<std::uint8_t>> getPipelineCacheData() const;
 
     // Record commands and change resources while holding the device lock.
     [[nodiscard]] VkCommandBuffer commands();

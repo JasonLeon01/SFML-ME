@@ -558,7 +558,7 @@ VkPipeline VulkanProgram::getPipeline(const VulkanPipelineState& state, VkRender
 
     const auto& ctx = *m_impl->context;
     VkPipeline  result{};
-    if (ctx.vk.CreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline, nullptr, &result) != VK_SUCCESS)
+    if (ctx.vk.CreateGraphicsPipelines(ctx.device, ctx.pipelineCache, 1, &pipeline, nullptr, &result) != VK_SUCCESS)
     {
         err() << "Failed to create Vulkan graphics pipeline" << std::endl;
         return VK_NULL_HANDLE;

@@ -79,12 +79,36 @@ binding 1. Use set 1 for user uniform buffers and combined 2D samplers.
 Keep SPIR-V variable names to bind values through `setUniform` and
 `setUniformArray`.
 
-With DirectX, the existing `Shader` loaders accept self-contained HLSL source,
-with `main` as the entry point. GLSL is not translated. Compilation uses Shader
-Model 4.0 at feature level 10_0, 4.1 at 10_1, and 5.0 at 11_0 or higher.
+With DirectX, the existing `Shader` loaders accept self-contained HLSL source
+with `main` as the entry point, or precompiled DXBC bytecode (`.cso`). DXBC is
+detected by its header rather than the filename and bypasses `D3DCompile`.
+Source and bytecode can be mixed across stages. Retain reflection metadata
+for uniforms, resources and stage signatures; DXIL is not supported.
+GLSL is not translated. Source compilation uses Shader Model 4.0 at feature
+level 10_0, 4.1 at 10_1, and 5.0 at 11_0 or higher. Precompiled bytecode must
+target a shader model supported by the selected feature level.
 Loading custom shaders requires `d3dcompiler_47.dll`; deploy the appropriate
 Windows SDK redistributable with applications on systems that do not provide
-it. Built-in shaders are precompiled and do not require that DLL.
+it. DXBC loading uses that DLL for reflection only. Built-in shaders are
+precompiled and do not require that DLL. For SPIR-V or DXBC in memory, pass a
+`std::string_view` with an explicit byte length to preserve embedded zeros.
+
+SPIR-V and DXBC are intermediate bytecode, not driver pipeline caches. With
+Vulkan, use `sf::loadPipelineCacheFromMemory(data, size)` to merge a previously
+exported driver cache into the device cache before drawing. Use
+`sf::getPipelineCacheData()` after drawing or prewarming the required
+shader/render-state combinations to obtain an optional byte vector for the
+next run. These functions initialize the selected backend if necessary, so
+call `sf::setGraphicsBackend` first. The cache covers all custom and built-in
+shaders; SPIR-V is still required to create shader modules and pipelines.
+The application owns compilation/prewarming policy, file I/O, integrity checks
+and invalidation. Pass intact data from a previous export. Invalid or
+incompatible version-one headers (vendor, device, cache UUID) are rejected;
+they do not clear the existing cache. Driver/hardware changes can invalidate
+caches, and cache hits do not guarantee that all driver work is skipped.
+On other backends, import returns `false` and export returns `std::nullopt`.
+Direct3D 11 driver caching is managed by the OS/driver when supported; SFML
+cannot import or export that cache through the D3D11 API.
 
 Vertex inputs are `float2 POSITION`, `float4 COLOR0`, and `float2 TEXCOORD0`.
 The built-in stages exchange `float4 SV_POSITION`, `float4 COLOR0`, and

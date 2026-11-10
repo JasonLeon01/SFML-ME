@@ -127,11 +127,16 @@ bool makeConstants(DirectXDevice& device, UINT size, ComPtr<ID3D11Buffer>& buffe
     return device.check(device.device()->CreateBuffer(&description, nullptr, buffer.put()), "create shader constants");
 }
 
-bool reflect(DirectXDevice& device, ID3DBlob& bytecode, Stage& stage)
+bool reflect(DirectXDevice& device, std::string_view bytecode, Stage& stage)
 {
+    if (!compiler().reflect)
+    {
+        err() << "Shader reflection requires d3dcompiler_47.dll" << std::endl;
+        return false;
+    }
     ComPtr<ID3D11ShaderReflection> reflection;
-    if (!device.check(compiler().reflect(bytecode.GetBufferPointer(),
-                                         bytecode.GetBufferSize(),
+    if (!device.check(compiler().reflect(bytecode.data(),
+                                         bytecode.size(),
                                          IID_ID3D11ShaderReflection,
                                          reinterpret_cast<void**>(reflection.put())),
                       "reflect HLSL shader"))
@@ -291,6 +296,17 @@ bool compile(DirectXDevice& device, std::string_view source, const char* prefix,
     return device.check(result, "compile HLSL shader");
 }
 
+bool loadBytecode(DirectXDevice& device, std::string_view& code, const char* prefix, ComPtr<ID3DBlob>& compiled, Stage& stage)
+{
+    if (code.substr(0, 4) != "DXBC")
+    {
+        if (!compile(device, code, prefix, compiled))
+            return false;
+        code = {static_cast<const char*>(compiled->GetBufferPointer()), compiled->GetBufferSize()};
+    }
+    return reflect(device, code, stage);
+}
+
 struct UniformShape
 {
     unsigned int columns;
@@ -375,10 +391,10 @@ std::shared_ptr<DirectXProgram> DirectXProgram::create(DirectXDevice&   device,
     std::size_t      vertexSize = DirectXBuiltIn::vertex.size();
     if (!vertex.empty())
     {
-        if (!compile(device, vertex, "vs", vertexCode) || !reflect(device, *vertexCode.get(), impl.stages[0]))
+        if (!loadBytecode(device, vertex, "vs", vertexCode, impl.stages[0]))
             return {};
-        vertexData = vertexCode->GetBufferPointer();
-        vertexSize = vertexCode->GetBufferSize();
+        vertexData = vertex.data();
+        vertexSize = vertex.size();
     }
     else
     {
@@ -402,11 +418,8 @@ std::shared_ptr<DirectXProgram> DirectXProgram::create(DirectXDevice&   device,
         return {};
     if (!geometry.empty())
     {
-        if (!compile(device, geometry, "gs", geometryCode) || !reflect(device, *geometryCode.get(), impl.stages[1]) ||
-            !device.check(device.device()->CreateGeometryShader(geometryCode->GetBufferPointer(),
-                                                                geometryCode->GetBufferSize(),
-                                                                nullptr,
-                                                                impl.geometry.put()),
+        if (!loadBytecode(device, geometry, "gs", geometryCode, impl.stages[1]) ||
+            !device.check(device.device()->CreateGeometryShader(geometry.data(), geometry.size(), nullptr, impl.geometry.put()),
                           "create geometry shader"))
             return {};
     }
@@ -414,10 +427,10 @@ std::shared_ptr<DirectXProgram> DirectXProgram::create(DirectXDevice&   device,
     std::size_t fragmentSize = DirectXBuiltIn::fragment.size();
     if (!fragment.empty())
     {
-        if (!compile(device, fragment, "ps", fragmentCode) || !reflect(device, *fragmentCode.get(), impl.stages[2]))
+        if (!loadBytecode(device, fragment, "ps", fragmentCode, impl.stages[2]))
             return {};
-        fragmentData = fragmentCode->GetBufferPointer();
-        fragmentSize = fragmentCode->GetBufferSize();
+        fragmentData = fragment.data();
+        fragmentSize = fragment.size();
     }
     else
     {

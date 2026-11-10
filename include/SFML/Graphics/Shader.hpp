@@ -140,11 +140,8 @@ public:
     ///
     /// This constructor loads a single shader, vertex, geometry or
     /// fragment, identified by the second argument.
-    /// The source must be a text file containing a valid
-    /// shader in GLSL language. GLSL is a C-like language
-    /// dedicated to OpenGL shaders; you'll probably need to
-    /// read a good documentation for it before writing your
-    /// own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param filename Path of the vertex, geometry or fragment shader file to load
     /// \param type     Type of shader (vertex, geometry or fragment)
@@ -162,10 +159,8 @@ public:
     /// This constructor loads both the vertex and the fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The sources must be text files containing valid shaders
-    /// in GLSL language. GLSL is a C-like language dedicated to
-    /// OpenGL shaders; you'll probably need to read a good documentation
-    /// for it before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param vertexShaderFilename   Path of the vertex shader file to load
     /// \param fragmentShaderFilename Path of the fragment shader file to load
@@ -183,10 +178,8 @@ public:
     /// This constructor loads the vertex, geometry and fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The sources must be text files containing valid shaders
-    /// in GLSL language. GLSL is a C-like language dedicated to
-    /// OpenGL shaders; you'll probably need to read a good documentation
-    /// for it before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param vertexShaderFilename   Path of the vertex shader file to load
     /// \param geometryShaderFilename Path of the geometry shader file to load
@@ -206,12 +199,10 @@ public:
     ///
     /// This constructor loads a single shader, vertex, geometry
     /// or fragment, identified by the second argument.
-    /// The source code must be a valid shader in GLSL language.
-    /// GLSL is a C-like language dedicated to OpenGL shaders;
-    /// you'll probably need to read a good documentation for
-    /// it before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
-    /// \param shader String containing the source code of the shader
+    /// \param shader String view containing the source or bytecode of the shader
     /// \param type   Type of shader (vertex, geometry or fragment)
     ///
     /// \throws sf::Exception if loading was unsuccessful
@@ -227,13 +218,11 @@ public:
     /// This constructor loads both the vertex and the fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The sources must be valid shaders in GLSL language. GLSL is
-    /// a C-like language dedicated to OpenGL shaders; you'll
-    /// probably need to read a good documentation for it before
-    /// writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
-    /// \param vertexShader   String containing the source code of the vertex shader
-    /// \param fragmentShader String containing the source code of the fragment shader
+    /// \param vertexShader   String view containing the source or bytecode of the vertex shader
+    /// \param fragmentShader String view containing the source or bytecode of the fragment shader
     ///
     /// \throws sf::Exception if loading was unsuccessful
     ///
@@ -248,14 +237,12 @@ public:
     /// This constructor loads the vertex, geometry and fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The sources must be valid shaders in GLSL language. GLSL is
-    /// a C-like language dedicated to OpenGL shaders; you'll
-    /// probably need to read a good documentation for it before
-    /// writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
-    /// \param vertexShader   String containing the source code of the vertex shader
-    /// \param geometryShader String containing the source code of the geometry shader
-    /// \param fragmentShader String containing the source code of the fragment shader
+    /// \param vertexShader   String view containing the source or bytecode of the vertex shader
+    /// \param geometryShader String view containing the source or bytecode of the geometry shader
+    /// \param fragmentShader String view containing the source or bytecode of the fragment shader
     ///
     /// \throws sf::Exception if loading was unsuccessful
     ///
@@ -269,10 +256,8 @@ public:
     ///
     /// This constructor loads a single shader, vertex, geometry
     /// or fragment, identified by the second argument.
-    /// The source code must be a valid shader in GLSL language.
-    /// GLSL is a C-like language dedicated to OpenGL shaders;
-    /// you'll probably need to read a good documentation for it
-    /// before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param stream Source stream to read from
     /// \param type   Type of shader (vertex, geometry or fragment)
@@ -290,10 +275,8 @@ public:
     /// This constructor loads both the vertex and the fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The source codes must be valid shaders in GLSL language.
-    /// GLSL is a C-like language dedicated to OpenGL shaders;
-    /// you'll probably need to read a good documentation for
-    /// it before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param vertexShaderStream   Source stream to read the vertex shader from
     /// \param fragmentShaderStream Source stream to read the fragment shader from
@@ -311,10 +294,8 @@ public:
     /// This constructor loads the vertex, geometry and fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The source codes must be valid shaders in GLSL language.
-    /// GLSL is a C-like language dedicated to OpenGL shaders;
-    /// you'll probably need to read a good documentation for
-    /// it before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param vertexShaderStream   Source stream to read the vertex shader from
     /// \param geometryShaderStream Source stream to read the geometry shader from
@@ -332,11 +313,8 @@ public:
     ///
     /// This function loads a single shader, vertex, geometry or
     /// fragment, identified by the second argument.
-    /// The source must be a text file containing a valid
-    /// shader in GLSL language. GLSL is a C-like language
-    /// dedicated to OpenGL shaders; you'll probably need to
-    /// read a good documentation for it before writing your
-    /// own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param filename Path of the vertex, geometry or fragment shader file to load
     /// \param type     Type of shader (vertex, geometry or fragment)
@@ -354,10 +332,8 @@ public:
     /// This function loads both the vertex and the fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The sources must be text files containing valid shaders
-    /// in GLSL language. GLSL is a C-like language dedicated to
-    /// OpenGL shaders; you'll probably need to read a good documentation
-    /// for it before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param vertexShaderFilename   Path of the vertex shader file to load
     /// \param fragmentShaderFilename Path of the fragment shader file to load
@@ -376,10 +352,8 @@ public:
     /// This function loads the vertex, geometry and fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The sources must be text files containing valid shaders
-    /// in GLSL language. GLSL is a C-like language dedicated to
-    /// OpenGL shaders; you'll probably need to read a good documentation
-    /// for it before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param vertexShaderFilename   Path of the vertex shader file to load
     /// \param geometryShaderFilename Path of the geometry shader file to load
@@ -395,16 +369,14 @@ public:
                                     const std::filesystem::path& fragmentShaderFilename);
 
     ////////////////////////////////////////////////////////////
-    /// \brief Load the vertex, geometry or fragment shader from a source code in memory
+    /// \brief Load the vertex, geometry or fragment shader from source or bytecode in memory
     ///
     /// This function loads a single shader, vertex, geometry
     /// or fragment, identified by the second argument.
-    /// The source code must be a valid shader in GLSL language.
-    /// GLSL is a C-like language dedicated to OpenGL shaders;
-    /// you'll probably need to read a good documentation for
-    /// it before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
-    /// \param shader String containing the source code of the shader
+    /// \param shader String view containing the source or bytecode of the shader
     /// \param type   Type of shader (vertex, geometry or fragment)
     ///
     /// \return `true` if loading succeeded, `false` if it failed
@@ -415,18 +387,16 @@ public:
     [[nodiscard]] bool loadFromMemory(std::string_view shader, Type type);
 
     ////////////////////////////////////////////////////////////
-    /// \brief Load both the vertex and fragment shaders from source codes in memory
+    /// \brief Load both the vertex and fragment shaders from sources or bytecode in memory
     ///
     /// This function loads both the vertex and the fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The sources must be valid shaders in GLSL language. GLSL is
-    /// a C-like language dedicated to OpenGL shaders; you'll
-    /// probably need to read a good documentation for it before
-    /// writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
-    /// \param vertexShader   String containing the source code of the vertex shader
-    /// \param fragmentShader String containing the source code of the fragment shader
+    /// \param vertexShader   String view containing the source or bytecode of the vertex shader
+    /// \param fragmentShader String view containing the source or bytecode of the fragment shader
     ///
     /// \return `true` if loading succeeded, `false` if it failed
     ///
@@ -436,19 +406,17 @@ public:
     [[nodiscard]] bool loadFromMemory(std::string_view vertexShader, std::string_view fragmentShader);
 
     ////////////////////////////////////////////////////////////
-    /// \brief Load the vertex, geometry and fragment shaders from source codes in memory
+    /// \brief Load the vertex, geometry and fragment shaders from sources or bytecode in memory
     ///
     /// This function loads the vertex, geometry and fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The sources must be valid shaders in GLSL language. GLSL is
-    /// a C-like language dedicated to OpenGL shaders; you'll
-    /// probably need to read a good documentation for it before
-    /// writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
-    /// \param vertexShader   String containing the source code of the vertex shader
-    /// \param geometryShader String containing the source code of the geometry shader
-    /// \param fragmentShader String containing the source code of the fragment shader
+    /// \param vertexShader   String view containing the source or bytecode of the vertex shader
+    /// \param geometryShader String view containing the source or bytecode of the geometry shader
+    /// \param fragmentShader String view containing the source or bytecode of the fragment shader
     ///
     /// \return `true` if loading succeeded, `false` if it failed
     ///
@@ -464,10 +432,8 @@ public:
     ///
     /// This function loads a single shader, vertex, geometry
     /// or fragment, identified by the second argument.
-    /// The source code must be a valid shader in GLSL language.
-    /// GLSL is a C-like language dedicated to OpenGL shaders;
-    /// you'll probably need to read a good documentation for it
-    /// before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param stream Source stream to read from
     /// \param type   Type of shader (vertex, geometry or fragment)
@@ -485,10 +451,8 @@ public:
     /// This function loads both the vertex and the fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The source codes must be valid shaders in GLSL language.
-    /// GLSL is a C-like language dedicated to OpenGL shaders;
-    /// you'll probably need to read a good documentation for
-    /// it before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param vertexShaderStream   Source stream to read the vertex shader from
     /// \param fragmentShaderStream Source stream to read the fragment shader from
@@ -506,10 +470,8 @@ public:
     /// This function loads the vertex, geometry and fragment
     /// shaders. If one of them fails to load, the shader is left
     /// empty (the valid shader is unloaded).
-    /// The source codes must be valid shaders in GLSL language.
-    /// GLSL is a C-like language dedicated to OpenGL shaders;
-    /// you'll probably need to read a good documentation for
-    /// it before writing your own shaders.
+    /// Accepted formats depend on the selected graphics backend;
+    /// see the class documentation for source and binary requirements.
     ///
     /// \param vertexShaderStream   Source stream to read the vertex shader from
     /// \param geometryShaderStream Source stream to read the geometry shader from
@@ -947,10 +909,23 @@ private:
 /// or any combination of them. (see the variants of the
 /// load functions).
 ///
-/// Shaders are written in GLSL, which is a C-like
-/// language dedicated to OpenGL shaders. You'll probably
-/// need to learn its basics before writing your own shaders
-/// for SFML.
+/// The constructors and load functions accept the following formats:
+/// \li OpenGL/OpenGL ES: GLSL source text.
+/// \li Vulkan: binary SPIR-V compatible with the selected API version.
+/// \li DirectX (Direct3D 11): HLSL source text or precompiled DXBC bytecode.
+/// DXBC is recognized by its binary header, independently of file extension,
+/// and bypasses HLSL compilation. Retain reflection metadata for uniforms,
+/// resources and stage signatures; d3dcompiler_47.dll is required for reflection.
+/// Bytecode must target a shader model supported by the selected feature level.
+/// Different stages may mix HLSL source and DXBC. DXIL is not supported.
+///
+/// For binary data passed to loadFromMemory, construct the std::string_view
+/// with an explicit byte length so embedded zero bytes are preserved.
+/// SPIR-V and DXBC are intermediate bytecode; driver compilation may still
+/// occur. Vulkan driver pipeline caches can be imported and exported through
+/// sf::loadPipelineCacheFromMemory and sf::getPipelineCacheData. These caches
+/// supplement shader bytecode and are shared by all shaders on the device.
+/// Direct3D 11 driver caches are managed by the OS/driver.
 ///
 /// Like any C/C++ program, a GLSL shader has its own variables
 /// called _uniforms_ that you can set from your C++ application.

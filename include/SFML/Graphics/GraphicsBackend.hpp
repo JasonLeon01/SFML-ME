@@ -28,6 +28,12 @@
 
 #include <SFML/Window/ContextSettings.hpp>
 
+#include <optional>
+#include <vector>
+
+#include <cstddef>
+#include <cstdint>
+
 namespace sf
 {
 enum class GraphicsBackend
@@ -48,4 +54,22 @@ enum class GraphicsBackend
 
 /// Return the active backend, or Automatic before the first successful initialization.
 [[nodiscard]] SFML_GRAPHICS_API GraphicsBackend getGraphicsBackend();
+
+/// Merge previously exported driver pipeline cache data into the active device's cache.
+/// Currently supported by Vulkan only. Initializes the selected backend if necessary;
+/// select it with setGraphicsBackend first. Data is copied during the call and must be
+/// an unmodified blob previously returned by getPipelineCacheData (or vkGetPipelineCacheData).
+/// Returns false for null/empty data, incompatible cache headers, unsupported backends,
+/// or a driver error. The cache is shared by all shaders, including the built-in shaders.
+/// Load before drawing to accelerate subsequent pipeline creation; SPIR-V is still required.
+/// File storage, integrity checks, prewarming and cache invalidation belong to the application.
+[[nodiscard]] SFML_GRAPHICS_API bool loadPipelineCacheFromMemory(const void* data, std::size_t size);
+
+/// Export the active device's driver pipeline cache for reuse in a later run.
+/// Currently supported by Vulkan only. Initializes the selected backend if necessary.
+/// Returns nullopt for unsupported backends or a driver error. Export after drawing or
+/// prewarming the desired shader/render-state combinations. Cache hits and compilation
+/// avoidance are driver-dependent; hardware/driver changes can invalidate the data.
+/// Direct3D 11 driver caches are managed by the OS/driver and cannot be exported here.
+[[nodiscard]] SFML_GRAPHICS_API std::optional<std::vector<std::uint8_t>> getPipelineCacheData();
 } // namespace sf
