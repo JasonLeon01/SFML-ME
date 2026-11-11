@@ -24,9 +24,19 @@
 
 #pragma once
 
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Window/Joystick.hpp>
+
+#include <cstdint>
+
 
 namespace sf::priv
 {
+struct JoystickCaps;
+struct JoystickState;
+
 ////////////////////////////////////////////////////////////
 class JoystickImpl
 {
@@ -53,7 +63,14 @@ public:
     [[nodiscard]] Joystick::Identification getIdentification() const;
 
     ////////////////////////////////////////////////////////////
-    [[nodiscard]] JoystickState update();
+    [[nodiscard]] JoystickState update() const;
+
+private:
+    ////////////////////////////////////////////////////////////
+    // Member data
+    ////////////////////////////////////////////////////////////
+    unsigned int  m_index{Joystick::Count}; ///< Controller slot
+    std::uint64_t m_generation{};           ///< Connection associated with this instance
 };
 
 } // namespace sf::priv
