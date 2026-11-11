@@ -2,6 +2,17 @@
 
 #include <SFML/Main.hpp>
 
+#ifdef SFML_SYSTEM_IOS
+#include <array>
+#include <string>
+
+#include <crt_externs.h>
+#include <cstdlib>
+
+void              waitForActiveScene();
+[[noreturn]] void showTestResult(int result, const char* mode);
+#endif
+
 #ifdef SFML_DIRECTX_TESTS
 #include <SFML/Graphics/DirectX/DirectXTest.hpp>
 #endif
@@ -15,8 +26,10 @@
 #include <string_view>
 #endif
 
+namespace
+{
 ////////////////////////////////////////////////////////////
-int main(int argc, char** argv)
+int runTests(int argc, char** argv)
 {
 #ifdef SFML_DIRECTX_TESTS
     // Test runners may have no hardware adapter. Production builds never enable WARP implicitly.
@@ -30,10 +43,19 @@ int main(int argc, char** argv)
             mode == "--sfml-opengl" || mode == "--sfml-directx" || mode == "--sfml-directx-warp" ||
             mode == "--sfml-directx-min" || mode == "--sfml-directx-high" || mode == "--sfml-directx-debug" ||
             mode == "--sfml-directx-fallback" || mode == "--sfml-directx-unavailable" || mode == "--sfml-gles-high" ||
-            mode == "--sfml-gl-high")
+            mode == "--sfml-gl-high" || mode == "--sfml-metal")
         {
             bool selected = false;
-            if (mode.substr(0, 14) == "--sfml-directx")
+            if (mode == "--sfml-metal")
+            {
+                if (sf::setGraphicsBackend(sf::GraphicsBackend::OpenGL, sf::MetalSettings{}) ||
+                    sf::setGraphicsBackend(sf::GraphicsBackend::Metal, sf::OpenGLSettings{}) ||
+                    sf::setGraphicsBackend(sf::GraphicsBackend::OpenGL, sf::OpenGLSettings{1, 1}) ||
+                    sf::setGraphicsBackend(sf::GraphicsBackend::OpenGLES, sf::OpenGLESSettings{1, 1}))
+                    return 1;
+                selected = sf::setGraphicsBackend(sf::GraphicsBackend::Metal, sf::MetalSettings{});
+            }
+            else if (mode.substr(0, 14) == "--sfml-directx")
             {
 #ifdef SFML_DIRECTX_TESTS
                 const bool fallback = mode == "--sfml-directx-fallback";
@@ -107,4 +129,40 @@ int main(int argc, char** argv)
         return 1;
 #endif
     return result;
+}
+} // namespace
+
+////////////////////////////////////////////////////////////
+int main(int argc, char** argv)
+{
+#ifdef SFML_SYSTEM_IOS
+    // SFML passes no arguments to main on iOS devices
+    if (argc == 0)
+    {
+        argc = *_NSGetArgc();
+        argv = *_NSGetArgv();
+    }
+    waitForActiveScene();
+    const bool fromHomeScreen = argc == 1;
+#ifdef SFML_TEST_DEFAULT_MODE
+    std::string          defaultMode = SFML_TEST_DEFAULT_MODE;
+    std::array<char*, 3> defaultArgs{argv[0], defaultMode.data(), nullptr};
+    if (fromHomeScreen)
+    {
+        argc = 2;
+        argv = defaultArgs.data();
+    }
+    const char* const mode = SFML_TEST_DEFAULT_MODE;
+#else
+    const char* const mode = "";
+#endif
+    const int result = runTests(argc, argv);
+    // Keep the outcome on screen instead of quitting straight away
+    if (fromHomeScreen)
+        showTestResult(result, mode);
+    // SFML keeps the application alive after main returns, which would leave the test runner hanging
+    std::exit(result);
+#else
+    return runTests(argc, argv);
+#endif
 }

@@ -37,6 +37,9 @@
 #ifdef SFML_RENDER_VULKAN
 #include <SFML/Graphics/Vulkan/VulkanDevice.hpp>
 #endif
+#ifdef SFML_RENDER_METAL
+#include <SFML/Graphics/Metal/MetalDevice.hpp>
+#endif
 #include <SFML/Graphics/RenderTarget.hpp>
 #include <SFML/Graphics/Vertex.hpp>
 #include <SFML/Graphics/VertexBuffer.hpp>
@@ -146,6 +149,17 @@ bool VertexBuffer::create(std::size_t vertexCount)
         return true;
     }
 #endif
+#ifdef SFML_RENDER_METAL
+    if (device->metal)
+    {
+        auto buffer = device->metal->makeBuffer(vertexCount * sizeof(Vertex));
+        if (!buffer)
+            return false;
+        m_metalBuffer = std::move(buffer);
+        m_size        = vertexCount;
+        return true;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (device->vulkan)
     {
@@ -205,7 +219,7 @@ bool VertexBuffer::update(const Vertex* vertices)
 ////////////////////////////////////////////////////////////
 bool VertexBuffer::update(const Vertex* vertices, std::size_t vertexCount, unsigned int offset)
 {
-    if (!vertices || (!m_buffer && !m_vulkanBuffer && !m_directXBuffer) ||
+    if (!vertices || (!m_buffer && !m_vulkanBuffer && !m_directXBuffer && !m_metalBuffer) ||
         vertexCount > std::numeric_limits<std::ptrdiff_t>::max() / sizeof(Vertex) ||
         (offset && (offset > m_size || vertexCount > m_size - offset)))
         return false;
@@ -229,6 +243,16 @@ bool VertexBuffer::update(const Vertex* vertices, std::size_t vertexCount, unsig
                             1};
         device->context()->UpdateSubresource(m_directXBuffer->buffer.get(), 0, &box, vertices, 0, 0);
         return device->check(device->device()->GetDeviceRemovedReason(), "update vertex buffer");
+    }
+#endif
+#ifdef SFML_RENDER_METAL
+    if (m_metalBuffer)
+    {
+        const auto& device = priv::getGraphicsDevice()->metal;
+        const auto  lock   = device->lock();
+        if (!offset && vertexCount > m_size && !create(vertexCount))
+            return false;
+        return device->write(*m_metalBuffer, vertices, offset * sizeof(Vertex), vertexCount * sizeof(Vertex));
     }
 #endif
 #ifdef SFML_RENDER_VULKAN
@@ -287,7 +311,7 @@ bool VertexBuffer::update(const Vertex* vertices, std::size_t vertexCount, unsig
 bool VertexBuffer::update(const VertexBuffer& vertexBuffer)
 {
     if (&vertexBuffer == this)
-        return m_buffer || m_vulkanBuffer || m_directXBuffer;
+        return m_buffer || m_vulkanBuffer || m_directXBuffer || m_metalBuffer;
 
 #ifdef SFML_RENDER_DIRECTX
     if (m_directXBuffer && vertexBuffer.m_directXBuffer)
@@ -302,6 +326,20 @@ bool VertexBuffer::update(const VertexBuffer& vertexBuffer)
         device->context()->CopyResource(replacement->buffer.get(), vertexBuffer.m_directXBuffer->buffer.get());
         m_directXBuffer = std::move(replacement);
         m_size          = vertexBuffer.m_size;
+        return true;
+    }
+#endif
+#ifdef SFML_RENDER_METAL
+    if (m_metalBuffer && vertexBuffer.m_metalBuffer)
+    {
+        const auto& device      = priv::getGraphicsDevice()->metal;
+        const auto  lock        = device->lock();
+        const auto  bytes       = vertexBuffer.m_size * sizeof(Vertex);
+        auto        replacement = device->makeBuffer(bytes);
+        if (!replacement || !device->copy(*vertexBuffer.m_metalBuffer, *replacement, bytes))
+            return false;
+        m_metalBuffer = std::move(replacement);
+        m_size        = vertexBuffer.m_size;
         return true;
     }
 #endif
@@ -399,6 +437,7 @@ void VertexBuffer::swap(VertexBuffer& right) noexcept
     std::swap(m_glContext, right.m_glContext);
     std::swap(m_vulkanBuffer, right.m_vulkanBuffer);
     std::swap(m_directXBuffer, right.m_directXBuffer);
+    std::swap(m_metalBuffer, right.m_metalBuffer);
     std::swap(m_size, right.m_size);
     std::swap(m_buffer, right.m_buffer);
     std::swap(m_primitiveType, right.m_primitiveType);

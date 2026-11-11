@@ -26,6 +26,17 @@ TEST_CASE("[Window] sf::ContextSettings")
             STATIC_CHECK(directX.majorVersion == 11);
             STATIC_CHECK(directX.minorVersion == 1);
         }
+        SECTION("Metal selection")
+        {
+            constexpr sf::ContextSettings settings{0, 8, 4, false, sf::MetalSettings{}};
+            STATIC_CHECK(std::holds_alternative<sf::MetalSettings>(settings.backend));
+            STATIC_CHECK(std::is_empty_v<sf::MetalSettings>);
+        }
+        SECTION("OpenGL defaults never request version 1")
+        {
+            STATIC_CHECK(sf::OpenGLSettings{}.majorVersion >= 2);
+            STATIC_CHECK(sf::OpenGLESSettings{}.majorVersion >= 3);
+        }
         SECTION("Aggregate initialization -- Nothing")
         {
             constexpr sf::ContextSettings contextSettings;

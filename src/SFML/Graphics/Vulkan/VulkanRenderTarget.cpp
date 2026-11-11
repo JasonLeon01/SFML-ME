@@ -456,9 +456,14 @@ void VulkanRenderTarget::draw(RenderTarget&        target,
     const auto           transform = view.getTransform() * states.transform;
     VulkanDrawParameters parameters{};
     std::copy_n(transform.getMatrix(), parameters.transform.size(), parameters.transform.begin());
+    std::copy_n(states.transform.getMatrix(), parameters.modelView.size(), parameters.modelView.begin());
+    std::copy_n(view.getTransform().getMatrix(), parameters.projection.size(), parameters.projection.begin());
     // SFML's clip-space Y goes up. Vulkan viewports with positive height go down.
     for (std::size_t column = 0; column < 4; ++column)
+    {
         parameters.transform[4 * column + 1] *= -1.f;
+        parameters.projection[4 * column + 1] *= -1.f;
+    }
 
     auto sample                 = VulkanProgram::sample(states.texture);
     parameters.textureTransform = {1.f, 1.f, 0.f, 0.f};

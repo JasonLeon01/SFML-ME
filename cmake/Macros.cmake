@@ -459,6 +459,12 @@ function(sfml_add_test target SOURCES DEPENDS)
     # Required to actually run the tests
     if(SFML_OS_IOS)
         sfml_set_common_ios_properties(${target})
+        # iOS 27 terminates apps that do not declare the scene lifecycle
+        set_target_properties(${target} PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${PROJECT_SOURCE_DIR}/test/iOSInfo.plist.in)
+        target_sources(${target} PRIVATE ${PROJECT_SOURCE_DIR}/test/iOSSceneDelegate.mm)
+        set_source_files_properties(${PROJECT_SOURCE_DIR}/test/iOSSceneDelegate.mm
+                                    TARGET_DIRECTORY ${target}
+                                    PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     endif()
 
     # Enable support for UTF-8 characters in source code

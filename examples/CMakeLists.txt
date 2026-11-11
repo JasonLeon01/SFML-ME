@@ -35,8 +35,11 @@ if(SFML_BUILD_GRAPHICS)
 
     if(NOT SFML_OS_IOS)
         add_subdirectory(joystick)
-        if(SFML_BUILD_OPENGL_BACKEND AND NOT SFML_OPENGL_ES)
+        if((SFML_BUILD_OPENGL_BACKEND AND NOT SFML_OPENGL_ES) OR SFML_BUILD_METAL_BACKEND OR SFML_BUILD_DIRECTX_BACKEND OR
+           SFML_BUILD_VULKAN_BACKEND)
             add_subdirectory(shader)
+        endif()
+        if(SFML_BUILD_OPENGL_BACKEND AND NOT SFML_OPENGL_ES)
             add_subdirectory(island)
         endif()
     endif()

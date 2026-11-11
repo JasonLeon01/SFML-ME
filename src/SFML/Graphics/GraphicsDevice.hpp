@@ -33,6 +33,7 @@ namespace sf::priv
 {
 class VulkanDevice;
 class DirectXDevice;
+class MetalDevice;
 
 struct GraphicsDevice
 {
@@ -41,6 +42,7 @@ struct GraphicsDevice
     std::shared_ptr<void>            glContext;
     std::shared_ptr<VulkanDevice>    vulkan;
     std::shared_ptr<DirectXDevice>   directX;
+    std::shared_ptr<MetalDevice>     metal;
 };
 
 // If the first operation needs a window, wait until the window and its surface

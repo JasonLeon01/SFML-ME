@@ -31,6 +31,8 @@
 #include <string>
 #include <string_view>
 
+#include <cstddef>
+
 namespace sf
 {
 class Texture;
@@ -42,7 +44,12 @@ struct DirectXDrawParameters
 {
     std::array<float, 16> transform;
     std::array<float, 4>  textureTransform;
+    std::array<float, 16> modelView;
+    std::array<float, 16> projection;
 };
+
+// Shaders may declare only the leading sf_ModelViewProjectionMatrix and sf_TextureTransform members
+inline constexpr std::size_t directXDrawPrefixSize = offsetof(DirectXDrawParameters, modelView);
 
 class DirectXProgram
 {

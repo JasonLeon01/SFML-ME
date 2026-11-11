@@ -353,6 +353,18 @@ float4 main() : SV_TARGET { return float4(shades[0].r, shades[1].g, shades[0].b,
 )";
         REQUIRE(shader.loadFromMemory(source, sf::Shader::Type::Fragment));
     }
+    else if (sf::getGraphicsBackend() == sf::GraphicsBackend::Metal)
+    {
+        constexpr std::string_view source = R"(
+#include <metal_stdlib>
+using namespace metal;
+struct Colors { float4 shades[2]; };
+fragment float4 main0(constant Colors& colors [[buffer(1)]]) {
+    return float4(colors.shades[0].r, colors.shades[1].g, colors.shades[0].b, 1.0);
+}
+)";
+        REQUIRE(shader.loadFromMemory(source, sf::Shader::Type::Fragment));
+    }
     else
     {
         std::string source;

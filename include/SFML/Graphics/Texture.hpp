@@ -54,6 +54,9 @@ class DirectXRenderTarget;
 class DirectXProgram;
 class VulkanRenderTarget;
 class VulkanProgram;
+struct MetalImage;
+class MetalRenderTarget;
+class MetalProgram;
 } // namespace priv
 
 class InputStream;
@@ -732,12 +735,15 @@ private:
     friend class priv::DirectXRenderTarget;
     friend class priv::DirectXProgram;
     friend class priv::VulkanProgram;
+    friend class priv::MetalRenderTarget;
+    friend class priv::MetalProgram;
 
     [[nodiscard]] static std::array<float, 16> coordinateMatrix(const Texture* texture, CoordinateType coordinateType);
     [[nodiscard]] bool                         upload(const std::uint8_t* pixels, Vector2u size, Vector2u dest);
     std::shared_ptr<void>                      m_glContext;
     std::shared_ptr<priv::VulkanImage>         m_vulkanImage;
     std::shared_ptr<priv::DirectXImage>        m_directXImage;
+    std::shared_ptr<priv::MetalImage>          m_metalImage;
 
     ////////////////////////////////////////////////////////////
     /// \brief Get a valid image size according to hardware support

@@ -65,7 +65,9 @@ jobs:
         - { name: macOS x64,                      os: macos-15, flags: -GNinja -DCMAKE_OSX_ARCHITECTURES=x86_64 }
         - { name: macOS x64 Xcode,                os: macos-15, flags: -GXcode -DCMAKE_OSX_ARCHITECTURES=x86_64 }
         - { name: macOS arm64,                    os: macos-15, flags: -GNinja -DSFML_RUN_AUDIO_DEVICE_TESTS=OFF }
+        - { name: macOS arm64 Metal only,         os: macos-15, flags: -GNinja -DSFML_BUILD_OPENGL_BACKEND=OFF -DSFML_RUN_AUDIO_DEVICE_TESTS=OFF }
         - { name: iOS Xcode,                      os: macos-15, flags: -DCMAKE_SYSTEM_NAME=iOS -GXcode -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO }
+        - { name: iOS Xcode Metal only,           os: macos-15, flags: -DCMAKE_SYSTEM_NAME=iOS -GXcode -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO -DSFML_BUILD_OPENGL_BACKEND=OFF }
         config:
         - { name: Shared, flags: -DBUILD_SHARED_LIBS=ON }
         - { name: Static, flags: -DBUILD_SHARED_LIBS=OFF }
@@ -122,6 +124,8 @@ jobs:
           type: { name: Debug, flags: -DCMAKE_BUILD_TYPE=Debug -DSFML_FATAL_OPENGL_ERRORS=ON }
         exclude: # Shared libraries are not supported on iOS
         - platform: { name: iOS Xcode }
+          config: { name: Shared }
+        - platform: { name: iOS Xcode Metal only }
           config: { name: Shared }
 
 

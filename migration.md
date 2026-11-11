@@ -29,7 +29,8 @@ if (!window.isOpen())
 ~~~
 
 On Windows, automatic selection tries DirectX, then the compiled OpenGL
-variant, then Vulkan. Other platforms retain OpenGL/GLES before Vulkan.
+variant, then Vulkan. On macOS and iOS it tries Metal first. Other platforms
+retain OpenGL/GLES before Vulkan.
 The first successful initialization fixes the device for the process.
 An explicit API version is a minimum requirement for that request.
 If the driver supplies a lower version or an incompatible profile,
@@ -74,8 +75,12 @@ position (location 0, `vec2`), color (location 1, `vec4`), and texture
 coordinates (location 2, `vec2`). The default stages exchange color and
 normalized texture coordinates at locations 0 and 1. Set 0 provides
 the built-in draw uniform block at binding 0 (`mat4 transform` and
-`vec4 textureTransform` in std140 layout) and the current texture at
-binding 1. Use set 1 for user uniform buffers and combined 2D samplers.
+`vec4 textureTransform` in std140 layout, optionally followed by
+`mat4 modelView` and `mat4 projection`, the separate model-view and
+Vulkan clip-space projection matrices whose product is `transform`) and the
+current texture at binding 1. Use set 1 for user uniform buffers and combined
+2D samplers. Samplers that are not assigned through `setUniform` sample the
+current texture, like GLSL samplers left at texture unit 0.
 Keep SPIR-V variable names to bind values through `setUniform` and
 `setUniformArray`.
 
@@ -124,22 +129,110 @@ cbuffer SFMLDraw : register(b0)
 {
     column_major float4x4 sf_ModelViewProjectionMatrix;
     float4 sf_TextureTransform;
+    column_major float4x4 sf_ModelViewMatrix;  // optional
+    column_major float4x4 sf_ProjectionMatrix; // optional
 };
 ~~~
 
-The matrix maps SFML vertex positions to clip space. Normalize texture
+The matrix maps SFML vertex positions to clip space. The two optional trailing
+matrices, declared together, are its model-view (drawable transform) and
+projection (view) factors, as in GLSL. Normalize texture
 coordinates with `uv * sf_TextureTransform.xy + sf_TextureTransform.zw`.
 Bind a `Texture2D` and its `SamplerState` at matching `tN`/`sN` registers
 (`N < 16`); pass the texture variable's name to the existing `setUniform`
-overloads. `sf_Texture` defaults to the current drawing texture at `t0/s0`.
-Other texture names can use `Shader::CurrentTexture` explicitly. Constants
+overloads. Textures that are not assigned through `setUniform`, such as
+`sf_Texture`, sample the current drawing texture, like GLSL samplers left at
+texture unit 0. Constants
 are reflected by name across all stages, including array padding and row- or
 column-major matrices. `sf::Glsl` value types remain the CPU-side uniform types.
 
-The `stencil` example accepts `--backend directx`, `--backend opengl`, or
-`--backend vulkan`; omitting the option uses the automatic priority.
-The `shader` and `island` examples explicitly select OpenGL for their existing
-desktop GLSL resources.
+### Metal on macOS and iOS
+
+`SFML_BUILD_METAL_BACKEND` is enabled by default on macOS and iOS and
+propagates `SFML_RENDER_METAL` from the Graphics target. OpenGL stays
+available on Apple platforms through `SFML_BUILD_OPENGL_BACKEND`; either
+backend may be disabled, but at least one of them is required. Automatic
+selection tries Metal first, then OpenGL/GLES. OpenGL requests below the
+built-in minimums (desktop OpenGL 2.0, OpenGL ES 3.0) are rejected.
+
+Metal has no version setting: the available Metal features follow the
+deployment target. SFML now requires macOS 13.0 or iOS 16.0
+(`CMAKE_OSX_DEPLOYMENT_TARGET`, checked when configuring and when compiling
+the Metal backend). Select Metal explicitly with
+`sf::setGraphicsBackend(sf::GraphicsBackend::Metal)` or
+`settings.backend = sf::MetalSettings{}`. As with DirectX and Vulkan, GL
+handles return zero and GL state functions are unavailable; use
+`sf::RenderWindow` to present. `setVerticalSyncEnabled` maps to
+`CAMetalLayer.displaySyncEnabled` on macOS; iOS always synchronizes with the
+display.
+
+The existing `Shader` loaders accept MSL source text or a precompiled
+metallib. A metallib is detected by its `MTLB` header rather than the
+filename, and must be built for the running platform: macOS, iOS devices and
+the iOS simulator need separate libraries. The entry point is the function
+named `main0` of the matching stage (the name SPIRV-Cross generates), or the
+only function of that stage in the library. Geometry shaders are not
+supported. For a metallib in memory, pass a `std::string_view` with an explicit
+byte length.
+
+Vertex attributes 0, 1 and 2 are the `float2` position, `float4` color and
+`float2` texture coordinates, read with `[[stage_in]]` from vertex buffer 30.
+`buffer(0)` is reserved in both stages for the draw parameters, and user
+buffers start at `buffer(1)`:
+
+~~~cpp
+struct SFMLDraw
+{
+    float4x4 sf_ModelViewProjectionMatrix;
+    float4 sf_TextureTransform;
+    float4x4 sf_ModelViewMatrix;  // optional
+    float4x4 sf_ProjectionMatrix; // optional
+};
+~~~
+
+The two optional trailing matrices, declared together, are the model-view
+(drawable transform) and projection (view) factors of
+`sf_ModelViewProjectionMatrix`, as in GLSL. Normalize texture coordinates with
+`uv * sf_TextureTransform.xy + sf_TextureTransform.zw`. The built-in stages
+exchange `float4 color [[user(sf_color)]]` and
+`float2 texCoord [[user(sf_texcoord)]]`; use these names when pairing a custom
+stage with a built-in one. A custom vertex shader used to draw points must
+write a `[[point_size]]` output. Bind textures and their samplers at matching
+`texture(N)`/`sampler(N)` indices (`N < 16`) and pass the texture parameter's
+name to `setUniform`. Textures that are not assigned through `setUniform`,
+such as `sf_Texture`, sample the current drawing texture, like GLSL samplers
+left at texture unit 0.
+Uniforms are the members of the structs bound at `buffer(1)` and above (or the
+buffer parameter itself for a single value), set by member name with the usual
+`setUniform` and `setUniformArray` overloads, including arrays, `bool`
+vectors and `float3x3`/`float4x4` matrices.
+
+With Vulkan, DirectX and Metal, normalized texture coordinates of a
+`RenderTexture` grow downward like those of any other texture. OpenGL stores
+render textures upside down, so there its normalized coordinates grow upward.
+Sampling is unaffected, but shaders that offset coordinates asymmetrically
+along v (for example a kernel that is not symmetric vertically) can produce
+slightly different results between OpenGL and the other backends.
+
+With Metal, `sf::getPipelineCacheData()` serializes an `MTLBinaryArchive` with
+the render pipelines created since the device was initialized, and
+`sf::loadPipelineCacheFromMemory(data, size)` adds a previously exported
+archive that subsequent pipeline creation looks up first. Several archives can
+be loaded. Archives are specific to the GPU and OS version; invalid data is
+rejected without affecting the existing caches, and a stale archive simply
+misses. The archive data is staged in the temporary directory while loaded.
+
+The `stencil` example accepts `--backend directx`, `--backend metal`,
+`--backend opengl`, or `--backend vulkan`; omitting the option uses the
+automatic priority.
+The `shader` example accepts `--backend opengl`, `--backend metal`,
+`--backend directx`, or `--backend vulkan`; without the option it prefers
+Metal when it is built and OpenGL otherwise. The other backends load
+translations of the GLSL resources: MSL (`*.metal`), HLSL (`*.hlsl`) and
+SPIR-V (`vulkan/*.spv`, compiled from the GLSL 4.50 sources next to them with
+`glslang -V --target-env vulkan1.0`). Metal draws the billboards as point
+sprites because it has no geometry shaders. The `island` example explicitly
+selects OpenGL for its desktop GLSL resources.
 
 ## Dependencies
 

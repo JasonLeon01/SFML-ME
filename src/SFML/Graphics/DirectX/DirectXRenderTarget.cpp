@@ -417,8 +417,11 @@ void DirectXRenderTarget::drawBuffer(
     if (!program)
         return;
     DirectXDrawParameters parameters{};
-    const auto transform = clearing ? Transform::Identity : target.getView().getTransform() * states.transform;
-    std::copy_n(transform.getMatrix(), parameters.transform.size(), parameters.transform.begin());
+    const auto            modelView  = clearing ? Transform::Identity : states.transform;
+    const auto            projection = clearing ? Transform::Identity : target.getView().getTransform();
+    std::copy_n((projection * modelView).getMatrix(), parameters.transform.size(), parameters.transform.begin());
+    std::copy_n(modelView.getMatrix(), parameters.modelView.size(), parameters.modelView.begin());
+    std::copy_n(projection.getMatrix(), parameters.projection.size(), parameters.projection.begin());
     parameters.textureTransform = {1.f, 1.f, 0.f, 0.f};
     if (states.texture && states.coordinateType == CoordinateType::Pixels)
     {

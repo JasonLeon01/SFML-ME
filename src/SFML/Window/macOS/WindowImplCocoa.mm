@@ -344,6 +344,14 @@ WindowHandle WindowImplCocoa::getNativeHandle() const
 
 
 ////////////////////////////////////////////////////////////
+void* WindowImplCocoa::getMetalLayer() const
+{
+    const AutoreleasePool pool;
+    return [m_delegate metalLayer];
+}
+
+
+////////////////////////////////////////////////////////////
 Vector2i WindowImplCocoa::getPosition() const
 {
     const AutoreleasePool pool;

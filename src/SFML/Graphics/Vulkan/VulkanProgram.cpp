@@ -174,6 +174,8 @@ bool reflect(const VulkanContext&          context,
             Binding binding;
             binding.layout = {descriptor->binding, type, 1, static_cast<VkShaderStageFlags>(stage), nullptr};
             binding.name   = descriptor->name ? descriptor->name : "";
+            // Like GLSL samplers left at unit 0, unassigned samplers sample the current texture
+            binding.currentTexture = sampler;
             bindings.push_back(std::move(binding));
             it = std::prev(bindings.end());
         }

@@ -50,6 +50,8 @@ class VulkanRenderTarget;
 class VulkanProgram;
 class DirectXProgram;
 class DirectXRenderTarget;
+class MetalProgram;
+class MetalRenderTarget;
 enum class ShaderUniformType : unsigned char;
 } // namespace priv
 
@@ -821,12 +823,14 @@ private:
     friend class priv::OpenGLRenderTarget;
     friend class priv::VulkanRenderTarget;
     friend class priv::DirectXRenderTarget;
+    friend class priv::MetalRenderTarget;
 
     [[nodiscard]] bool loadDefaultOpenGL();
     void setUniformData(const std::string& name, priv::ShaderUniformType type, const void* values, std::size_t count);
     std::shared_ptr<void>                 m_glContext;
     std::shared_ptr<priv::VulkanProgram>  m_vulkanProgram;
     std::shared_ptr<priv::DirectXProgram> m_directXProgram;
+    std::shared_ptr<priv::MetalProgram>   m_metalProgram;
 
     ////////////////////////////////////////////////////////////
     /// \brief Compile the shader(s) and create the program
@@ -918,14 +922,19 @@ private:
 /// resources and stage signatures; d3dcompiler_47.dll is required for reflection.
 /// Bytecode must target a shader model supported by the selected feature level.
 /// Different stages may mix HLSL source and DXBC. DXIL is not supported.
+/// \li Metal (macOS and iOS): MSL source text or a precompiled metallib.
+/// A metallib is recognized by its binary header and must be built for the
+/// running platform (macOS, iOS device and iOS simulator differ). The entry
+/// point is the function named main0 of the matching stage, or the only
+/// function of that stage. Geometry shaders are not supported.
 ///
 /// For binary data passed to loadFromMemory, construct the std::string_view
 /// with an explicit byte length so embedded zero bytes are preserved.
-/// SPIR-V and DXBC are intermediate bytecode; driver compilation may still
-/// occur. Vulkan driver pipeline caches can be imported and exported through
-/// sf::loadPipelineCacheFromMemory and sf::getPipelineCacheData. These caches
-/// supplement shader bytecode and are shared by all shaders on the device.
-/// Direct3D 11 driver caches are managed by the OS/driver.
+/// SPIR-V, DXBC and metallib are intermediate bytecode; driver compilation may
+/// still occur. Vulkan and Metal driver pipeline caches can be imported and
+/// exported through sf::loadPipelineCacheFromMemory and sf::getPipelineCacheData.
+/// These caches supplement shader bytecode and are shared by all shaders on the
+/// device. Direct3D 11 driver caches are managed by the OS/driver.
 ///
 /// Like any C/C++ program, a GLSL shader has its own variables
 /// called _uniforms_ that you can set from your C++ application.

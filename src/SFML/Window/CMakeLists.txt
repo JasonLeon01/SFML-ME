@@ -218,8 +218,6 @@ elseif(SFML_OS_MACOS)
         ${SRCROOT}/macOS/SFApplication.m
         ${SRCROOT}/macOS/SFApplicationDelegate.h
         ${SRCROOT}/macOS/SFApplicationDelegate.m
-        ${SRCROOT}/macOS/SFContext.hpp
-        ${SRCROOT}/macOS/SFContext.mm
         ${SRCROOT}/macOS/SFKeyboardModifiersHelper.h
         ${SRCROOT}/macOS/SFKeyboardModifiersHelper.mm
         ${SRCROOT}/macOS/SFOpenGLView.h
@@ -243,6 +241,12 @@ elseif(SFML_OS_MACOS)
         ${SRCROOT}/macOS/AutoreleasePoolWrapper.hpp
         ${SRCROOT}/macOS/AutoreleasePoolWrapper.mm
     )
+    if(SFML_BUILD_OPENGL_BACKEND)
+        list(APPEND PLATFORM_SRC
+            ${SRCROOT}/macOS/SFContext.hpp
+            ${SRCROOT}/macOS/SFContext.mm
+        )
+    endif()
     source_group("mac" FILES ${PLATFORM_SRC})
 elseif(SFML_OS_IOS)
     enable_language(OBJCXX)
@@ -251,8 +255,6 @@ elseif(SFML_OS_IOS)
         ${SRCROOT}/iOS/CursorImpl.cpp
         ${SRCROOT}/iOS/ClipboardImpl.mm
         ${SRCROOT}/iOS/ClipboardImpl.hpp
-        ${SRCROOT}/iOS/EaglContext.mm
-        ${SRCROOT}/iOS/EaglContext.hpp
         ${SRCROOT}/iOS/InputImpl.mm
         ${SRCROOT}/iOS/JoystickImpl.mm
         ${SRCROOT}/iOS/JoystickImpl.hpp
@@ -271,6 +273,12 @@ elseif(SFML_OS_IOS)
         ${SRCROOT}/iOS/SFMain.hpp
         ${SRCROOT}/iOS/SFMain.mm
     )
+    if(SFML_BUILD_OPENGL_BACKEND)
+        list(APPEND PLATFORM_SRC
+            ${SRCROOT}/iOS/EaglContext.mm
+            ${SRCROOT}/iOS/EaglContext.hpp
+        )
+    endif()
     source_group("ios" FILES ${PLATFORM_SRC})
 elseif(SFML_OS_ANDROID)
     set(PLATFORM_SRC
@@ -382,7 +390,7 @@ elseif(SFML_OS_WINDOWS)
 elseif(SFML_OS_FREEBSD)
     target_link_libraries(sfml-window PRIVATE usbhid)
 elseif(SFML_OS_MACOS)
-    target_link_libraries(sfml-window PRIVATE "-framework Foundation" "-framework AppKit" "-framework IOKit" "-framework Carbon")
+    target_link_libraries(sfml-window PRIVATE "-framework Foundation" "-framework AppKit" "-framework IOKit" "-framework Carbon" "-framework QuartzCore")
 elseif(SFML_OS_IOS)
     target_link_libraries(sfml-window PUBLIC "-framework Foundation" "-framework UIKit" "-framework CoreGraphics" "-framework QuartzCore" "-framework CoreMotion")
 elseif(SFML_OS_ANDROID)

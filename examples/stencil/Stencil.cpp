@@ -24,14 +24,15 @@ int main(int argc, char** argv)
     if (argc > 1)
     {
         const std::string_view backendName = (argc == 3 && std::string_view{argv[1]} == "--backend") ? argv[2] : "";
-        if (backendName != "opengl" && backendName != "vulkan" && backendName != "directx")
+        if (backendName != "opengl" && backendName != "vulkan" && backendName != "directx" && backendName != "metal")
         {
-            sf::err() << "Usage: stencil [--backend opengl|vulkan|directx]\n";
+            sf::err() << "Usage: stencil [--backend opengl|vulkan|directx|metal]\n";
             return EXIT_FAILURE;
         }
 
         const auto backend = backendName == "opengl"    ? sf::GraphicsBackend::OpenGL
                              : backendName == "directx" ? sf::GraphicsBackend::DirectX
+                             : backendName == "metal"   ? sf::GraphicsBackend::Metal
                                                         : sf::GraphicsBackend::Vulkan;
         if (!sf::setGraphicsBackend(backend))
             return EXIT_FAILURE;
@@ -55,6 +56,8 @@ int main(int argc, char** argv)
         window.setTitle("SFML Stencil (OpenGL ES)");
     else if (backend == sf::GraphicsBackend::Vulkan)
         window.setTitle("SFML Stencil (Vulkan)");
+    else if (backend == sf::GraphicsBackend::Metal)
+        window.setTitle("SFML Stencil (Metal)");
 
     window.setVerticalSyncEnabled(true);
 

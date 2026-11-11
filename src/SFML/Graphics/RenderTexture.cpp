@@ -39,6 +39,9 @@
 #ifdef SFML_RENDER_VULKAN
 #include <SFML/Graphics/Vulkan/VulkanRenderTarget.hpp>
 #endif
+#ifdef SFML_RENDER_METAL
+#include <SFML/Graphics/Metal/MetalRenderTarget.hpp>
+#endif
 
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Exception.hpp>
@@ -102,6 +105,20 @@ bool RenderTexture::resize(Vector2u size, const ContextSettings& settings)
                                             return true;
                                         }
 #endif
+#ifdef SFML_RENDER_METAL
+                                        if (device.metal)
+                                        {
+                                            auto backend = priv::MetalRenderTarget::create(device.metal,
+                                                                                           texture.m_metalImage,
+                                                                                           effective);
+                                            if (!backend)
+                                                return false;
+                                            m_backend = std::move(backend);
+                                            m_texture = std::move(texture);
+                                            RenderTarget::initialize();
+                                            return true;
+                                        }
+#endif
 #ifdef SFML_RENDER_VULKAN
                                         if (device.vulkan)
                                         {
@@ -155,6 +172,10 @@ unsigned int RenderTexture::getMaximumAntiAliasingLevel()
 #ifdef SFML_RENDER_DIRECTX
     if (device->directX)
         return priv::DirectXRenderTarget::getMaximumAntiAliasingLevel(*device->directX);
+#endif
+#ifdef SFML_RENDER_METAL
+    if (device->metal)
+        return priv::MetalRenderTarget::getMaximumAntiAliasingLevel(*device->metal);
 #endif
 #ifdef SFML_RENDER_VULKAN
     if (device->vulkan)
@@ -211,6 +232,10 @@ bool RenderTexture::setActive(bool active)
     if (m_texture.m_directXImage)
         return RenderTarget::setActive(active);
 #endif
+#ifdef SFML_RENDER_METAL
+    if (m_texture.m_metalImage)
+        return RenderTarget::setActive(active);
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_texture.m_vulkanImage)
         return RenderTarget::setActive(active);
@@ -229,6 +254,15 @@ void RenderTexture::display()
     if (m_texture.m_directXImage)
     {
         static_cast<priv::DirectXRenderTarget&>(*m_backend).finish();
+        m_texture.invalidateMipmap();
+        return;
+    }
+#endif
+#ifdef SFML_RENDER_METAL
+    if (m_texture.m_metalImage)
+    {
+        static_cast<priv::MetalRenderTarget&>(*m_backend).finish();
+        (void)priv::getGraphicsDevice()->metal->submit(false);
         m_texture.invalidateMipmap();
         return;
     }

@@ -30,6 +30,9 @@
 #ifdef SFML_RENDER_DIRECTX
 #include <SFML/Graphics/DirectX/DirectXProgram.hpp>
 #endif
+#ifdef SFML_RENDER_METAL
+#include <SFML/Graphics/Metal/MetalProgram.hpp>
+#endif
 #include <SFML/Graphics/ShaderUniformType.hpp>
 
 #ifdef SFML_RENDER_GL
@@ -350,6 +353,7 @@ Shader::Shader(Shader&& source) noexcept :
     m_glContext(std::move(source.m_glContext)),
     m_vulkanProgram(std::move(source.m_vulkanProgram)),
     m_directXProgram(std::move(source.m_directXProgram)),
+    m_metalProgram(std::move(source.m_metalProgram)),
     m_shaderProgram(std::exchange(source.m_shaderProgram, 0u)),
     m_currentTexture(std::exchange(source.m_currentTexture, -1)),
     m_textures(std::move(source.m_textures)),
@@ -366,6 +370,7 @@ Shader& Shader::operator=(Shader&& right) noexcept
     std::swap(m_glContext, temporary.m_glContext);
     std::swap(m_vulkanProgram, temporary.m_vulkanProgram);
     std::swap(m_directXProgram, temporary.m_directXProgram);
+    std::swap(m_metalProgram, temporary.m_metalProgram);
     std::swap(m_shaderProgram, temporary.m_shaderProgram);
     std::swap(m_currentTexture, temporary.m_currentTexture);
     std::swap(m_textures, temporary.m_textures);
@@ -654,6 +659,13 @@ void Shader::setUniform(const std::string& name, const Texture& texture)
         return;
     }
 #endif
+#ifdef SFML_RENDER_METAL
+    if (m_metalProgram)
+    {
+        m_metalProgram->setSampler(name, &texture, false);
+        return;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanProgram)
     {
@@ -705,6 +717,13 @@ void Shader::setUniform(const std::string& name, CurrentTextureType)
     if (m_directXProgram)
     {
         m_directXProgram->setSampler(name, nullptr, true);
+        return;
+    }
+#endif
+#ifdef SFML_RENDER_METAL
+    if (m_metalProgram)
+    {
+        m_metalProgram->setSampler(name, nullptr, true);
         return;
     }
 #endif
@@ -780,6 +799,13 @@ void Shader::setUniformData(const std::string& name, ShaderUniformType type, con
     if (m_directXProgram)
     {
         m_directXProgram->setUniform(name, type, values, count);
+        return;
+    }
+#endif
+#ifdef SFML_RENDER_METAL
+    if (m_metalProgram)
+    {
+        m_metalProgram->setUniform(name, type, values, count);
         return;
     }
 #endif
@@ -891,6 +917,10 @@ bool Shader::isGeometryAvailable()
     if (device->directX)
         return priv::DirectXProgram::compilerAvailable();
 #endif
+#ifdef SFML_RENDER_METAL
+    if (device->metal)
+        return false;
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (device->vulkan)
         return device->vulkan->context()->features.geometryShader != VK_FALSE;
@@ -936,6 +966,16 @@ bool Shader::compile(std::string_view vertex, std::string_view geometry, std::st
         if (!shader)
             return false;
         m_directXProgram = std::move(shader);
+        return true;
+    }
+#endif
+#ifdef SFML_RENDER_METAL
+    if (device->metal)
+    {
+        auto shader = priv::MetalProgram::create(*device->metal, vertex, fragment);
+        if (!shader)
+            return false;
+        m_metalProgram = std::move(shader);
         return true;
     }
 #endif

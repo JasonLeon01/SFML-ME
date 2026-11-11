@@ -34,6 +34,9 @@
 #ifdef SFML_RENDER_VULKAN
 #include <SFML/Graphics/Vulkan/VulkanDevice.hpp>
 #endif
+#ifdef SFML_RENDER_METAL
+#include <SFML/Graphics/Metal/MetalDevice.hpp>
+#endif
 
 #include <SFML/System/Err.hpp>
 
@@ -57,7 +60,9 @@ constexpr std::array drivers{
     GraphicsBackend::DirectX,
 #endif
 #elif defined(SFML_SYSTEM_MACOS) || defined(SFML_SYSTEM_IOS)
-// GraphicsBackend::Metal,
+#ifdef SFML_RENDER_METAL
+    GraphicsBackend::Metal,
+#endif
 #endif
 #ifdef SFML_RENDER_OPENGL
     GraphicsBackend::OpenGL,
@@ -117,6 +122,8 @@ GraphicsBackend backendOf(const Settings& settings)
         return GraphicsBackend::Vulkan;
     if (std::holds_alternative<DirectXSettings>(settings))
         return GraphicsBackend::DirectX;
+    if (std::holds_alternative<MetalSettings>(settings))
+        return GraphicsBackend::Metal;
     return GraphicsBackend::Automatic;
 }
 
@@ -125,7 +132,8 @@ std::pair<unsigned int, unsigned int> versionOf(const Settings& settings)
     return std::visit(
         [](const auto& value) -> std::pair<unsigned int, unsigned int>
         {
-            if constexpr (std::is_same_v<std::decay_t<decltype(value)>, std::monostate>)
+            using Type = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<Type, std::monostate> || std::is_same_v<Type, MetalSettings>)
                 return {};
             else
                 return {value.majorVersion, value.minorVersion};
@@ -145,6 +153,8 @@ Settings defaults(GraphicsBackend backend)
             return VulkanSettings{};
         case GraphicsBackend::DirectX:
             return DirectXSettings{};
+        case GraphicsBackend::Metal:
+            return MetalSettings{};
         default:
             return {};
     }
@@ -252,6 +262,11 @@ bool loadPipelineCacheFromMemory(const void* data, std::size_t size)
     if (device && device->vulkan)
         return device->vulkan->loadPipelineCache(data, size);
 #endif
+#ifdef SFML_RENDER_METAL
+    const auto* metalDevice = priv::getGraphicsDevice();
+    if (metalDevice && metalDevice->metal)
+        return metalDevice->metal->loadPipelineCache(data, size);
+#endif
     return false;
 }
 
@@ -261,6 +276,11 @@ std::optional<std::vector<std::uint8_t>> getPipelineCacheData()
     const auto* device = priv::getGraphicsDevice();
     if (device && device->vulkan)
         return device->vulkan->getPipelineCacheData();
+#endif
+#ifdef SFML_RENDER_METAL
+    const auto* metalDevice = priv::getGraphicsDevice();
+    if (metalDevice && metalDevice->metal)
+        return metalDevice->metal->getPipelineCacheData();
 #endif
     return std::nullopt;
 }
@@ -315,7 +335,7 @@ bool withGraphicsDevice(const ContextSettings&                                  
 
         auto initialization    = ContextSettings{};
         initialization.backend = requirements;
-        GraphicsDevice device{driver, requirements, {}, {}, {}};
+        GraphicsDevice device{driver, requirements, {}, {}, {}, {}};
 
         if (driver == GraphicsBackend::DirectX)
         {
@@ -327,6 +347,17 @@ bool withGraphicsDevice(const ContextSettings&                                  
                 continue;
             }
             device.settings = device.directX->settings();
+#endif
+        }
+        else if (driver == GraphicsBackend::Metal)
+        {
+#ifdef SFML_RENDER_METAL
+            device.metal = MetalDevice::create();
+            if (!device.metal)
+            {
+                reportFailure(driver, requirements);
+                continue;
+            }
 #endif
         }
         else if (driver == GraphicsBackend::Vulkan)

@@ -39,6 +39,9 @@
 #include <SFML/Graphics/Vulkan/VulkanRenderTarget.hpp>
 #include <SFML/Graphics/Vulkan/VulkanWindowSurface.hpp>
 #endif
+#ifdef SFML_RENDER_METAL
+#include <SFML/Graphics/Metal/MetalWindowSurface.hpp>
+#endif
 #include <SFML/Graphics/Image.hpp>
 #include <SFML/Graphics/RenderWindow.hpp>
 
@@ -118,6 +121,13 @@ std::unique_ptr<priv::WindowSurface> RenderWindow::createSurface(const ContextSe
         return priv::VulkanWindowSurface::create(device->vulkan, owner.getNativeHandle(), owner.getSize(), settings);
     }
 #endif
+#ifdef SFML_RENDER_METAL
+    if (std::holds_alternative<MetalSettings>(settings.backend))
+    {
+        const auto* device = priv::getGraphicsDevice();
+        return priv::MetalWindowSurface::create(device->metal, owner.getMetalLayer(), owner.getSize(), settings);
+    }
+#endif
     return Window::createSurface(settings, owner, bitsPerPixel);
 }
 
@@ -182,6 +192,10 @@ void RenderWindow::onCreate()
     if (auto* surface = dynamic_cast<priv::VulkanWindowSurface*>(getSurface()))
         m_backend = surface->renderTarget();
 #endif
+#ifdef SFML_RENDER_METAL
+    if (auto* surface = dynamic_cast<priv::MetalWindowSurface*>(getSurface()))
+        m_backend = surface->renderTarget();
+#endif
 #ifdef SFML_RENDER_GL
     if (!m_backend && priv::RenderTextureImplFBO::isAvailable())
     {
@@ -206,6 +220,10 @@ void RenderWindow::onResize()
 #endif
 #ifdef SFML_RENDER_VULKAN
     if (auto* surface = dynamic_cast<priv::VulkanWindowSurface*>(getSurface()))
+        surface->resize(getSize());
+#endif
+#ifdef SFML_RENDER_METAL
+    if (auto* surface = dynamic_cast<priv::MetalWindowSurface*>(getSurface()))
         surface->resize(getSize());
 #endif
     // Update the current view (recompute the viewport, which is stored in relative coordinates)

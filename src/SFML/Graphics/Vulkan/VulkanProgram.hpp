@@ -45,6 +45,8 @@ struct VulkanDrawParameters
 {
     std::array<float, 16> transform;
     std::array<float, 4>  textureTransform;
+    std::array<float, 16> modelView;
+    std::array<float, 16> projection;
 };
 
 struct VulkanSample

@@ -111,6 +111,27 @@ if(SFML_BUILD_DIRECTX_BACKEND)
     endif()
 endif()
 
+if(SFML_BUILD_METAL_BACKEND)
+    enable_language(OBJCXX)
+    set(METAL_SRC
+        ${SRCROOT}/Metal/BuiltInShaders.hpp
+        ${SRCROOT}/Metal/MetalDevice.hpp
+        ${SRCROOT}/Metal/MetalDevice.mm
+        ${SRCROOT}/Metal/MetalObjects.hpp
+        ${SRCROOT}/Metal/MetalProgram.hpp
+        ${SRCROOT}/Metal/MetalProgram.mm
+        ${SRCROOT}/Metal/MetalRenderTarget.hpp
+        ${SRCROOT}/Metal/MetalRenderTarget.mm
+        ${SRCROOT}/Metal/MetalWindowSurface.hpp
+        ${SRCROOT}/Metal/MetalWindowSurface.mm
+    )
+    target_sources(sfml-graphics PRIVATE ${METAL_SRC})
+    source_group("metal" FILES ${METAL_SRC})
+    set_source_files_properties(${METAL_SRC} PROPERTIES COMPILE_OPTIONS "-fobjc-arc" SKIP_UNITY_BUILD_INCLUSION ON)
+    target_compile_definitions(sfml-graphics PUBLIC SFML_RENDER_METAL)
+    target_link_libraries(sfml-graphics PRIVATE "-framework Foundation" "-framework Metal" "-framework QuartzCore")
+endif()
+
 if(SFML_BUILD_OPENGL_BACKEND)
     target_compile_definitions(sfml-graphics PRIVATE SFML_RENDER_GL)
     target_include_directories(sfml-graphics SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/glad/include")

@@ -152,6 +152,19 @@ public:
     ////////////////////////////////////////////////////////////
     [[nodiscard]] virtual WindowHandle getNativeHandle() const = 0;
 
+#if defined(SFML_SYSTEM_MACOS) || defined(SFML_SYSTEM_IOS)
+    ////////////////////////////////////////////////////////////
+    /// \brief Get the CAMetalLayer covering the rendering area
+    ///
+    /// The layer is created on first use; OpenGL contexts must not
+    /// be attached to the same window afterwards.
+    ///
+    /// \return Pointer to the CAMetalLayer, disguised as `void*`
+    ///
+    ////////////////////////////////////////////////////////////
+    [[nodiscard]] virtual void* getMetalLayer() const = 0;
+#endif
+
     ////////////////////////////////////////////////////////////
     /// \brief Get the position of the window
     ///

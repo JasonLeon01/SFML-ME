@@ -64,12 +64,19 @@ struct DirectXSettings
     unsigned int minorVersion{};
 };
 
+/// Selects the Metal backend on macOS and iOS.
+/// The available Metal version is determined by the deployment target
+/// (macOS 13.0 / iOS 16.0 at minimum), so no version is requested here.
+struct MetalSettings
+{
+};
+
 /// Framebuffer options and minimum API version for a rendering target.
 /// An empty backend setting inherits the current graphics device's configuration.
 /// Window::getSettings() reports the actual settings selected by the driver.
 struct ContextSettings
 {
-    using BackendSettings = std::variant<std::monostate, OpenGLSettings, OpenGLESSettings, VulkanSettings, DirectXSettings>;
+    using BackendSettings = std::variant<std::monostate, OpenGLSettings, OpenGLESSettings, VulkanSettings, DirectXSettings, MetalSettings>;
 
     unsigned int    depthBits{};
     unsigned int    stencilBits{};

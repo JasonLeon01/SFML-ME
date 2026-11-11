@@ -39,6 +39,9 @@
 #ifdef SFML_RENDER_VULKAN
 #include <SFML/Graphics/Vulkan/VulkanWindowSurface.hpp>
 #endif
+#ifdef SFML_RENDER_METAL
+#include <SFML/Graphics/Metal/MetalWindowSurface.hpp>
+#endif
 
 #include <SFML/Graphics/Image.hpp>
 #include <SFML/Graphics/Texture.hpp>
@@ -166,7 +169,7 @@ Texture::Texture(const Texture& copy) :
     m_isRepeated(copy.m_isRepeated),
     m_cacheId(TextureImpl::getUniqueId())
 {
-    if (!copy.m_texture && !copy.m_vulkanImage && !copy.m_directXImage)
+    if (!copy.m_texture && !copy.m_vulkanImage && !copy.m_directXImage && !copy.m_metalImage)
     {
         return;
     }
@@ -207,6 +210,7 @@ Texture::Texture(Texture&& right) noexcept :
     m_glContext(std::move(right.m_glContext)),
     m_vulkanImage(std::move(right.m_vulkanImage)),
     m_directXImage(std::move(right.m_directXImage)),
+    m_metalImage(std::move(right.m_metalImage)),
     m_size(std::exchange(right.m_size, {})),
     m_actualSize(std::exchange(right.m_actualSize, {})),
     m_texture(std::exchange(right.m_texture, 0)),
@@ -241,6 +245,7 @@ Texture& Texture::operator=(Texture&& right) noexcept
     m_glContext    = std::move(right.m_glContext);
     m_vulkanImage  = std::move(right.m_vulkanImage);
     m_directXImage = std::move(right.m_directXImage);
+    m_metalImage   = std::move(right.m_metalImage);
 
     // Move old to new.
     m_size          = std::exchange(right.m_size, {});
@@ -278,6 +283,20 @@ bool Texture::resize(Vector2u size, bool sRgb)
         if (!image)
             return false;
         m_directXImage = std::move(image);
+        m_size = m_actualSize = size;
+        m_sRgb                = sRgb;
+        m_pixelsFlipped = m_fboAttachment = m_hasMipmap = false;
+        m_cacheId                                       = TextureImpl::getUniqueId();
+        return true;
+    }
+#endif
+#ifdef SFML_RENDER_METAL
+    if (device->metal)
+    {
+        auto image = device->metal->makeTexture(size, sRgb);
+        if (!image)
+            return false;
+        m_metalImage = std::move(image);
         m_size = m_actualSize = size;
         m_sRgb                = sRgb;
         m_pixelsFlipped = m_fboAttachment = m_hasMipmap = false;
@@ -499,6 +518,10 @@ Image Texture::copyToImage() const
     if (m_directXImage)
         return priv::getGraphicsDevice()->directX->readImage(*m_directXImage);
 #endif
+#ifdef SFML_RENDER_METAL
+    if (m_metalImage)
+        return priv::getGraphicsDevice()->metal->readImage(*m_metalImage);
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanImage)
     {
@@ -619,7 +642,7 @@ void Texture::update(const std::uint8_t* pixels)
 ////////////////////////////////////////////////////////////
 void Texture::update(const std::uint8_t* pixels, Vector2u size, Vector2u dest)
 {
-    if (!pixels || (!m_texture && !m_vulkanImage && !m_directXImage))
+    if (!pixels || (!m_texture && !m_vulkanImage && !m_directXImage && !m_metalImage))
         return;
 
     assert(dest.x + size.x <= m_size.x && "Destination x coordinate is outside of texture");
@@ -637,6 +660,16 @@ bool Texture::upload(const std::uint8_t* pixels, Vector2u size, Vector2u dest)
     if (m_directXImage)
     {
         if (!priv::getGraphicsDevice()->directX->upload(*m_directXImage, pixels, size, dest))
+            return false;
+        m_hasMipmap = false;
+        m_cacheId   = TextureImpl::getUniqueId();
+        return true;
+    }
+#endif
+#ifdef SFML_RENDER_METAL
+    if (m_metalImage)
+    {
+        if (!priv::getGraphicsDevice()->metal->upload(*m_metalImage, pixels, size, dest))
             return false;
         m_hasMipmap = false;
         m_cacheId   = TextureImpl::getUniqueId();
@@ -702,8 +735,8 @@ void Texture::update(const Texture& texture)
 ////////////////////////////////////////////////////////////
 void Texture::update(const Texture& texture, Vector2u dest)
 {
-    if ((!m_texture && !m_vulkanImage && !m_directXImage) ||
-        (!texture.m_texture && !texture.m_vulkanImage && !texture.m_directXImage))
+    if ((!m_texture && !m_vulkanImage && !m_directXImage && !m_metalImage) ||
+        (!texture.m_texture && !texture.m_vulkanImage && !texture.m_directXImage && !texture.m_metalImage))
         return;
 
     assert(dest.x + texture.m_size.x <= m_size.x && "Destination x coordinate is outside of texture");
@@ -713,6 +746,17 @@ void Texture::update(const Texture& texture, Vector2u dest)
     if (m_directXImage && texture.m_directXImage)
     {
         if (priv::getGraphicsDevice()->directX->copy(*texture.m_directXImage, *m_directXImage, dest))
+        {
+            m_hasMipmap = false;
+            m_cacheId   = TextureImpl::getUniqueId();
+        }
+        return;
+    }
+#endif
+#ifdef SFML_RENDER_METAL
+    if (m_metalImage && texture.m_metalImage)
+    {
+        if (priv::getGraphicsDevice()->metal->copy(*texture.m_metalImage, *m_metalImage, dest))
         {
             m_hasMipmap = false;
             m_cacheId   = TextureImpl::getUniqueId();
@@ -873,7 +917,7 @@ void Texture::update(const Window& window)
 ////////////////////////////////////////////////////////////
 void Texture::update(const Window& window, Vector2u dest)
 {
-    if (!window.isOpen() || (!m_texture && !m_vulkanImage && !m_directXImage))
+    if (!window.isOpen() || (!m_texture && !m_vulkanImage && !m_directXImage && !m_metalImage))
         return;
 
     assert(dest.x + window.getSize().x <= m_size.x && "Destination x coordinate is outside of texture");
@@ -884,6 +928,18 @@ void Texture::update(const Window& window, Vector2u dest)
     {
         const auto* surface = dynamic_cast<const priv::DirectXWindowSurface*>(window.getSurface());
         if (surface && surface->copyTo(m_directXImage, dest))
+        {
+            m_hasMipmap = false;
+            m_cacheId   = TextureImpl::getUniqueId();
+        }
+        return;
+    }
+#endif
+#ifdef SFML_RENDER_METAL
+    if (m_metalImage)
+    {
+        const auto* surface = dynamic_cast<const priv::MetalWindowSurface*>(window.getSurface());
+        if (surface && surface->copyTo(m_metalImage, dest))
         {
             m_hasMipmap = false;
             m_cacheId   = TextureImpl::getUniqueId();
@@ -1055,6 +1111,13 @@ bool Texture::generateMipmap()
         return m_hasMipmap;
     }
 #endif
+#ifdef SFML_RENDER_METAL
+    if (m_metalImage)
+    {
+        m_hasMipmap = priv::getGraphicsDevice()->metal->generateMipmap(*m_metalImage);
+        return m_hasMipmap;
+    }
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (m_vulkanImage)
     {
@@ -1185,6 +1248,10 @@ unsigned int Texture::getMaximumSize()
     if (device->directX)
         return device->directX->maximumTextureSize();
 #endif
+#ifdef SFML_RENDER_METAL
+    if (device->metal)
+        return device->metal->maximumTextureSize();
+#endif
 #ifdef SFML_RENDER_VULKAN
     if (device->vulkan)
         return device->vulkan->context()->properties.limits.maxImageDimension2D;
@@ -1228,6 +1295,7 @@ void Texture::swap(Texture& right) noexcept
     std::swap(m_glContext, right.m_glContext);
     std::swap(m_vulkanImage, right.m_vulkanImage);
     std::swap(m_directXImage, right.m_directXImage);
+    std::swap(m_metalImage, right.m_metalImage);
     std::swap(m_size, right.m_size);
     std::swap(m_actualSize, right.m_actualSize);
     std::swap(m_texture, right.m_texture);

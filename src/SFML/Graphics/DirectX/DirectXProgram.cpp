@@ -179,22 +179,34 @@ bool reflect(DirectXDevice& device, std::string_view bytecode, Stage& stage)
                 return false;
             if (resource.BindPoint == 0)
             {
-                if (std::strcmp(resource.Name, "SFMLDraw") != 0 || buffer.Size != sizeof(DirectXDrawParameters))
+                if (std::strcmp(resource.Name, "SFMLDraw") != 0 ||
+                    (buffer.Size != sizeof(DirectXDrawParameters) && buffer.Size != directXDrawPrefixSize))
                 {
                     err() << "HLSL register b0 is reserved for the SFMLDraw block; place user constants at b1 or higher"
                           << std::endl;
                     return false;
                 }
-                const std::array<const char*, 2> names{"sf_ModelViewProjectionMatrix", "sf_TextureTransform"};
-                for (std::size_t member = 0; member < names.size(); ++member)
+                struct Member
                 {
-                    auto*                      variable = reflected->GetVariableByName(names[member]);
+                    const char* name;
+                    UINT        offset;
+                };
+                const std::array<Member, 4> members{
+                    {{"sf_ModelViewProjectionMatrix", offsetof(DirectXDrawParameters, transform)},
+                     {"sf_TextureTransform", offsetof(DirectXDrawParameters, textureTransform)},
+                     {"sf_ModelViewMatrix", offsetof(DirectXDrawParameters, modelView)},
+                     {"sf_ProjectionMatrix", offsetof(DirectXDrawParameters, projection)}}};
+                const std::size_t declared = buffer.Size == directXDrawPrefixSize ? 2 : members.size();
+                for (std::size_t member = 0; member < declared; ++member)
+                {
+                    const bool                 isVector = member == 1;
+                    auto*                      variable = reflected->GetVariableByName(members[member].name);
                     D3D11_SHADER_VARIABLE_DESC info{};
                     D3D11_SHADER_TYPE_DESC     type{};
                     if (FAILED(variable->GetDesc(&info)) || FAILED(variable->GetType()->GetDesc(&type)) ||
-                        info.StartOffset != (member == 0 ? 0u : 64u) || type.Type != D3D_SVT_FLOAT ||
-                        type.Class != (member == 0 ? D3D_SVC_MATRIX_COLUMNS : D3D_SVC_VECTOR) ||
-                        type.Rows != (member == 0 ? 4u : 1u) || type.Columns != 4 || type.Elements)
+                        info.StartOffset != members[member].offset || type.Type != D3D_SVT_FLOAT ||
+                        type.Class != (isVector ? D3D_SVC_VECTOR : D3D_SVC_MATRIX_COLUMNS) ||
+                        type.Rows != (isVector ? 1u : 4u) || type.Columns != 4 || type.Elements)
                     {
                         err() << "Invalid HLSL SFMLDraw layout" << std::endl;
                         return false;
@@ -230,8 +242,8 @@ bool reflect(DirectXDevice& device, std::string_view bytecode, Stage& stage)
                 err() << "HLSL textures must use a matching tN/sN pair with N below 16" << std::endl;
                 return false;
             }
-            stage.samplers.push_back(
-                {resource.Name, resource.BindPoint, nullptr, std::strcmp(resource.Name, "sf_Texture") == 0});
+            // Like GLSL samplers left at unit 0, unassigned textures sample the current texture
+            stage.samplers.push_back({resource.Name, resource.BindPoint, nullptr, true});
         }
         else if (resource.Type != D3D_SIT_SAMPLER)
         {

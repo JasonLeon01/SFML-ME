@@ -46,6 +46,8 @@ struct VulkanBuffer;
 struct DirectXBuffer;
 class DirectXRenderTarget;
 class VulkanRenderTarget;
+struct MetalBuffer;
+class MetalRenderTarget;
 } // namespace priv
 
 class RenderTarget;
@@ -345,9 +347,11 @@ private:
     ////////////////////////////////////////////////////////////
     friend class priv::VulkanRenderTarget;
     friend class priv::DirectXRenderTarget;
+    friend class priv::MetalRenderTarget;
     std::shared_ptr<void>                m_glContext;
     std::shared_ptr<priv::VulkanBuffer>  m_vulkanBuffer;
     std::shared_ptr<priv::DirectXBuffer> m_directXBuffer;
+    std::shared_ptr<priv::MetalBuffer>   m_metalBuffer;
 
     unsigned int  m_buffer{};                             //!< Internal buffer identifier
     std::size_t   m_size{};                               //!< Size in Vertices of the currently allocated buffer
