@@ -2,6 +2,28 @@ if(SFML_OS_EMSCRIPTEN)
     if(SFML_BUILD_GRAPHICS AND SFML_BUILD_AUDIO)
         add_subdirectory(tennis)
     endif()
+
+    # Network examples are command-line programs. Build them for Node so the
+    # same source can be exercised without a browser terminal.
+    if(SFML_BUILD_NETWORK)
+        function(sfml_web_node_example target)
+            set_target_properties(${target} PROPERTIES SUFFIX ".js")
+            target_link_options(${target} PRIVATE -sEXIT_RUNTIME=1 -sENVIRONMENT=node -sNODE_HOST_ENV=1)
+        endfunction()
+
+        add_subdirectory(ftp)
+        add_subdirectory(http)
+        add_subdirectory(sftp)
+        add_subdirectory(sockets)
+        foreach(example IN ITEMS ftp http sftp sockets)
+            sfml_web_node_example(${example})
+        endforeach()
+
+        if(SFML_BUILD_AUDIO)
+            add_subdirectory(voip)
+            sfml_web_node_example(voip)
+        endif()
+    endif()
     return()
 endif()
 

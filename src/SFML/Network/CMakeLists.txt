@@ -3,7 +3,6 @@ set(SRCROOT ${PROJECT_SOURCE_DIR}/src/SFML/Network)
 
 # all source files
 set(SRC
-    ${SRCROOT}/Dns.cpp
     ${INCROOT}/Dns.hpp
     ${INCROOT}/Export.hpp
     ${SRCROOT}/Ftp.cpp
@@ -18,27 +17,45 @@ set(SRC
     ${INCROOT}/Sftp.hpp
     ${SRCROOT}/Socket.cpp
     ${INCROOT}/Socket.hpp
+    ${SRCROOT}/Backend.hpp
     ${SRCROOT}/SocketImpl.hpp
     ${INCROOT}/SocketHandle.hpp
-    ${SRCROOT}/SocketSelector.cpp
     ${INCROOT}/SocketSelector.hpp
-    ${SRCROOT}/TcpListener.cpp
-    ${INCROOT}/TcpListener.hpp
-    ${SRCROOT}/TcpSocket.cpp
     ${INCROOT}/TcpSocket.hpp
-    ${SRCROOT}/UdpSocket.cpp
     ${INCROOT}/UdpSocket.hpp
 )
 
-# add platform specific sources
-if(SFML_OS_WINDOWS)
+# Web replaces TCP, UDP, DNS, and the selector. TcpListener cannot exist in a browser.
+if(SFML_OS_EMSCRIPTEN)
     list(APPEND SRC
-        ${SRCROOT}/Win32/SocketImpl.cpp
+        ${SRCROOT}/Emscripten/Backend.cpp
+        ${SRCROOT}/Emscripten/Dns.cpp
+        ${SRCROOT}/Emscripten/SocketSelector.cpp
+        ${SRCROOT}/Emscripten/TcpSocket.cpp
+        ${SRCROOT}/Emscripten/UdpSocket.cpp
+        ${SRCROOT}/Emscripten/WebTransport.cpp
+        ${SRCROOT}/Emscripten/WebTransport.hpp
     )
 else()
     list(APPEND SRC
-        ${SRCROOT}/Unix/SocketImpl.cpp
+        ${SRCROOT}/Native/Backend.cpp
+        ${SRCROOT}/Native/Dns.cpp
+        ${SRCROOT}/Native/SocketSelector.cpp
+        ${SRCROOT}/Native/TcpListener.cpp
+        ${INCROOT}/TcpListener.hpp
+        ${SRCROOT}/Native/TcpSocket.cpp
+        ${SRCROOT}/Native/UdpSocket.cpp
     )
+
+    if(SFML_OS_WINDOWS)
+        list(APPEND SRC
+            ${SRCROOT}/Native/Win32/SocketImpl.cpp
+        )
+    else()
+        list(APPEND SRC
+            ${SRCROOT}/Native/Unix/SocketImpl.cpp
+        )
+    endif()
 endif()
 
 source_group("" FILES ${SRC})
@@ -128,6 +145,13 @@ else()
 
     # Disable all warnings
     target_compile_options(libssh2_static PRIVATE -w)
+
+    # Emscripten's default entropy source cannot be relied on. The poll is linked into
+    # mbedcrypto so the reference and the definition come from the same archive.
+    if(SFML_OS_EMSCRIPTEN)
+        target_compile_definitions(mbedcrypto PRIVATE MBEDTLS_ENTROPY_HARDWARE_ALT)
+        target_sources(mbedcrypto PRIVATE ${SRCROOT}/Emscripten/MbedtlsHardwarePoll.c)
+    endif()
 endif()
 
 target_link_libraries(sfml-network PRIVATE libssh2::libssh2 mbedtls mbedcrypto mbedx509)
@@ -145,4 +169,28 @@ if(SFML_OS_LINUX OR SFML_OS_ANDROID OR SFML_OS_FREEBSD OR SFML_OS_OPENBSD OR SFM
     if(NOT (SFML_CA_PATH STREQUAL ""))
         target_compile_definitions(sfml-network PRIVATE SFML_CA_PATH="${SFML_CA_PATH}")
     endif()
+endif()
+
+if(SFML_OS_EMSCRIPTEN)
+    try_compile(SFML_WEB_TCP_LISTENER_VISIBLE
+                SOURCE_FROM_CONTENT TcpListenerProbe.cpp
+                "#include <SFML/Network/TcpListener.hpp>\nint main()\n{\n    return sizeof(sf::TcpListener) > 0 ? 0 : 1;\n}\n"
+                CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${PROJECT_SOURCE_DIR}/include"
+                CXX_STANDARD 17
+                OUTPUT_VARIABLE SFML_WEB_TCP_LISTENER_OUTPUT)
+    if(SFML_WEB_TCP_LISTENER_VISIBLE)
+        message(FATAL_ERROR "sf::TcpListener must not exist in the web build:\n${SFML_WEB_TCP_LISTENER_OUTPUT}")
+    endif()
+    if(NOT SFML_WEB_TCP_LISTENER_OUTPUT MATCHES "no member named 'TcpListener'|undeclared identifier 'TcpListener'|TcpListener' was not declared|does not name a type")
+        message(FATAL_ERROR "TcpListener removal probe failed unexpectedly:\n${SFML_WEB_TCP_LISTENER_OUTPUT}")
+    endif()
+
+    add_executable(sfml-network-node-test "${PROJECT_SOURCE_DIR}/test/Network/emscripten/main.cpp")
+    target_link_libraries(sfml-network-node-test PRIVATE SFML::Network)
+    set_target_properties(sfml-network-node-test PROPERTIES SUFFIX ".js")
+    target_link_options(sfml-network-node-test PRIVATE
+                        -sEXIT_RUNTIME=1
+                        -sENVIRONMENT=node
+                        -sNODE_HOST_ENV=1
+                        "SHELL:--pre-js ${PROJECT_SOURCE_DIR}/test/Network/emscripten/webrtc-preload.js")
 endif()

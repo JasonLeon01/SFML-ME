@@ -1,9 +1,9 @@
 # Building SFML for the browser
 
 The Web platform uses Emscripten 7.0.0, WebGL 2, and static libraries. It supports
-one SFML window on one canvas per page, the Graphics module, and the Audio module
-with the browser's default playback and recording devices. The Network module is
-not supported. No additional SFML API is required.
+one SFML window on one canvas per page, the Graphics module, the Audio module
+with the browser's default playback and recording devices, and the Network module
+through the browser transports described below. No additional SFML API is required.
 
 ## Build and run
 
@@ -98,6 +98,86 @@ origin rules still apply. Host resource downloads are independent of SFML Networ
   Stop/destruction releases microphone tracks. Only default input/output devices
   are exposed; unknown device selections fail. Null playback remains available
   through a silent Web Audio output, with the same browser activation rules.
+
+## Network
+
+Public headers stay the same. Platform code lives in two sibling directories under `src/SFML/Network`: `Native/` and `Emscripten/`. The files beside those directories (`Socket.cpp`, `Http.cpp`, `IpAddress.cpp`, `Packet.cpp`, `Ftp.cpp`, `Sftp.cpp`) keep only the behavior that both backends share. `src/SFML/Network/Backend.hpp` is the list of functions a backend fills in: creating and closing a socket, sending one HTTP request, and reading the local address. Each backend also supplies the full bodies of `Dns`, `TcpSocket`, `UdpSocket`, and `SocketSelector`. A backend that cannot accept connections leaves out `TcpListener.cpp` and hides `sf::TcpListener` in the public headers. `Native/Unix` and `Native/Win32` stay inside the native backend; they are operating-system details, not a third transport.
+
+The web build uses one implementation in
+the browser and under Node, so a local Node test exercises the page's path.
+Blocking calls wait through Asyncify. Non-blocking calls still return
+`sf::Socket::Status::NotReady`. `SocketSelector::wait` waits the same way.
+`Time::Zero` keeps its existing meaning: a blocking connect or selector wait
+does not time out. `SocketHandle` remains an `int`, but it identifies an
+internal socket rather than an operating-system descriptor.
+
+`fetch` and WebSocket calls are subject to CORS, mixed content, and the
+browser's certificate policy. An HTTPS page cannot open `ws://`. `fetch` cannot
+turn certificate checks off or choose an address family.
+
+| SFML call | Web replacement |
+| --- | --- |
+| `sf::Http` | `fetch`. Method, fields, body, timeout, and "do not follow redirects" are preserved. The response is turned back into an HTTP message and parsed by the existing parser. `fetch` has already decoded the body, so transfer and content encodings are left out of that message. Ordinary HTTPS uses the browser trust store. |
+| `sf::Dns` without a server list | DNS-over-HTTPS (`application/dns-message`) to `https://cloudflare-dns.com/dns-query`. `localhost` resolves to the loopback addresses locally. `SFML_DOH_URL` selects another endpoint for tests. |
+| `sf::TcpSocket` connect, send, receive, and `sf::Packet` | WebSocket binary frames at `ws://address:port/` with subprotocol `sfml.tcp`. Frames are queued and read as a byte stream. |
+| `TcpSocket::setupTlsClient(hostname)` with the default verifier | If no application data has been exchanged, the socket reopens `wss://hostname:port/` and returns `HandshakeComplete` after the browser handshake. |
+| `sf::UdpSocket` send and receive | Unreliable, unordered WebRTC data channel named `sfml`. Signaling is an outbound WebSocket to `ws://address:port/` with subprotocol `sfml.udp`. The messages are JSON: `{"type":"offer","sdp":...}`, `{"type":"answer","sdp":...}`, and `{"type":"candidate","candidate":...,"sdpMid":...,"sdpMLineIndex":...}`. ICE uses `stun:stun.l.google.com:19302`. After the channel opens, the address and port still identify that peer. |
+| `sf::Ftp` and `sf::Sftp` | They still call `sf::TcpSocket`, so their bytes use the `sfml.tcp` stream. SFTP encryption remains libssh2 and Mbed TLS. The peer must accept that WebSocket convention; it is not raw FTP or SSH on the port. |
+
+`UdpSocket::bind` records the requested port and returns `Done`. It does not
+open a host port. `AnyPort` therefore stays `0`. A later `receive` only returns
+datagrams from data channels that this socket has already opened.
+
+`sf::TcpListener` is not declared or compiled for web. A browser cannot listen
+for or accept connections, and the type is absent rather than stubbed. Native
+builds still provide it. Referencing `sf::TcpListener` in a web translation
+unit is a compile error.
+
+These calls stay on their classes, log one explanation through `sf::err()`, and
+return the existing failure value:
+
+- `TcpSocket::setupTlsServer`, both overloads: `TlsStatus::Error`.
+- `TcpSocket::setupTlsClient` when the caller supplies a certificate, and when
+  `verifyPeer` is false: `TlsStatus::Error`.
+- `Http::sendRequest` when `verifyServer` is false: `ConnectionFailed`.
+  `Http::setHost` or `sendRequest` with an address type: `setHost` returns
+  false, and `sendRequest` returns `ConnectionFailed`.
+- `Dns::resolve`, `queryNs`, `queryMx`, `querySrv`, and `queryTxt` when the
+  caller passes DNS server addresses: an empty result.
+- `IpAddress::getLocalAddress`: `std::nullopt`.
+- `UdpSocket::send` to a broadcast or multicast address: `Socket::Status::Error`.
+
+Build the web preset from the repository root, then run the programs with Node. The `.js` file and its `.wasm` stay side by side in `build/web/bin`.
+
+The Catch2 network suite is `test-sfml-network.js`. Cases that need `sf::TcpListener` are left out of the web build. Internet cases stay off unless the corresponding CMake options are enabled.
+
+```sh
+cd /Users/jasonleon/Development/SFML-ME
+node build/web/bin/test-sfml-network.js
+```
+
+The network examples are the same sources as the native programs, linked for Node:
+
+```sh
+node build/web/bin/http.js
+node build/web/bin/ftp.js
+node build/web/bin/sftp.js
+node build/web/bin/sockets.js
+node build/web/bin/voip.js
+```
+
+`sockets.js` and `voip.js` can run as clients. Choosing the server role prints that `sf::TcpListener` is absent and returns. `ftp.js`, `sftp.js`, and a sockets or VoIP client open `ws://address:port/` with subprotocol `sfml.tcp`; the peer has to speak that convention.
+
+The smaller transport check still has its own runner:
+
+```sh
+node test/Network/emscripten/run.mjs build/web/bin/sfml-network-node-test.js
+```
+
+The script hosts HTTP, DNS-over-HTTPS, and the two WebSocket subprotocols. Its
+WebRTC peer is a test double that completes signaling and exchanges one
+datagram. Browser applications use the platform `RTCPeerConnection`. The web
+test program does not name `sf::TcpListener`.
 
 ## Formatting and analysis
 

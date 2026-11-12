@@ -85,6 +85,11 @@ if(SFML_RUN_IPV6_INTERNET_TESTS)
     target_compile_definitions(sfml-test-main PRIVATE SFML_RUN_IPV6_INTERNET_TESTS)
 endif()
 
+if(SFML_OS_EMSCRIPTEN AND NOT SFML_BUILD_TEST_SUITE)
+    add_subdirectory(Network)
+    return()
+endif()
+
 add_subdirectory(Audio)
 add_subdirectory(Graphics)
 add_subdirectory(Network)
