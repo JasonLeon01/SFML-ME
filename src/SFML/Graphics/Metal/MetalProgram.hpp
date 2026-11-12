@@ -23,8 +23,8 @@
 ////////////////////////////////////////////////////////////
 
 #pragma once
-
 #include <SFML/Graphics/Metal/MetalDevice.hpp>
+#include <SFML/Graphics/RHI/Resource.hpp>
 #include <SFML/Graphics/ShaderUniformType.hpp>
 
 #include <array>
@@ -33,25 +33,14 @@
 
 #include <cstddef>
 
-namespace sf
-{
-class Texture;
-}
-
 namespace sf::priv
 {
-struct MetalDrawParameters
-{
-    std::array<float, 16> transform;
-    std::array<float, 4>  textureTransform;
-    std::array<float, 16> modelView;
-    std::array<float, 16> projection;
-};
+using MetalDrawParameters = DrawParameters;
 
 // Shaders may declare only the leading sf_ModelViewProjectionMatrix and sf_TextureTransform members
 inline constexpr std::size_t metalDrawPrefixSize = offsetof(MetalDrawParameters, modelView);
 
-class MetalProgram
+class MetalProgram : public ProgramResource
 {
 public:
     struct Impl;
@@ -59,12 +48,20 @@ public:
     [[nodiscard]] static std::shared_ptr<MetalProgram> create(MetalDevice&     device,
                                                               std::string_view vertex   = {},
                                                               std::string_view fragment = {});
-    ~MetalProgram();
+    [[nodiscard]] static std::shared_ptr<MetalProgram> create(
+        MetalDevice&     device,
+        std::string_view vertex,
+        std::string_view geometry,
+        std::string_view fragment)
+    {
+        return geometry.empty() ? create(device, vertex, fragment) : nullptr;
+    }
+    ~MetalProgram() override;
     MetalProgram(const MetalProgram&)            = delete;
     MetalProgram& operator=(const MetalProgram&) = delete;
 
-    void setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count);
-    void setSampler(const std::string& name, const Texture* texture, bool current);
+    void setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count) override;
+    void setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current) override;
     [[nodiscard]] Impl& impl() const;
 
 private:

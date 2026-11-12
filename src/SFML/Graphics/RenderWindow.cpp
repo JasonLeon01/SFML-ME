@@ -26,23 +26,9 @@
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Graphics/GraphicsDevice.hpp>
-#ifdef SFML_RENDER_DIRECTX
-#include <SFML/Graphics/DirectX/DirectXWindowSurface.hpp>
-#endif
-
-#ifdef SFML_RENDER_GL
-#include <SFML/Graphics/GLCheck.hpp>
-#include <SFML/Graphics/GLExtensions.hpp>
-#include <SFML/Graphics/RenderTextureImplFBO.hpp>
-#endif
-#ifdef SFML_RENDER_VULKAN
-#include <SFML/Graphics/Vulkan/VulkanRenderTarget.hpp>
-#include <SFML/Graphics/Vulkan/VulkanWindowSurface.hpp>
-#endif
-#ifdef SFML_RENDER_METAL
-#include <SFML/Graphics/Metal/MetalWindowSurface.hpp>
-#endif
 #include <SFML/Graphics/Image.hpp>
+#include <SFML/Graphics/RHI/Access.hpp>
+#include <SFML/Graphics/RenderTargetBackend.hpp>
 #include <SFML/Graphics/RenderWindow.hpp>
 
 #include <SFML/Window/VideoMode.hpp>
@@ -107,28 +93,11 @@ std::unique_ptr<priv::WindowSurface> RenderWindow::createSurface(const ContextSe
                                                                  const priv::WindowImpl& owner,
                                                                  unsigned int            bitsPerPixel)
 {
-#ifdef SFML_RENDER_DIRECTX
-    if (std::holds_alternative<DirectXSettings>(settings.backend))
-    {
-        const auto* device = priv::getGraphicsDevice();
-        return priv::DirectXWindowSurface::create(device->directX, owner.getNativeHandle(), owner.getSize(), settings);
-    }
-#endif
-#ifdef SFML_RENDER_VULKAN
-    if (std::holds_alternative<VulkanSettings>(settings.backend))
-    {
-        const auto* device = priv::getGraphicsDevice();
-        return priv::VulkanWindowSurface::create(device->vulkan, owner.getNativeHandle(), owner.getSize(), settings);
-    }
-#endif
-#ifdef SFML_RENDER_METAL
-    if (std::holds_alternative<MetalSettings>(settings.backend))
-    {
-        const auto* device = priv::getGraphicsDevice();
-        return priv::MetalWindowSurface::create(device->metal, owner.getMetalLayer(), owner.getSize(), settings);
-    }
-#endif
-    return Window::createSurface(settings, owner, bitsPerPixel);
+    const auto* device = priv::getGraphicsDevice();
+    if (!device)
+        return {};
+    auto surface = static_cast<priv::DeviceResource&>(*device->device).createSurface(owner, bitsPerPixel, settings);
+    return surface ? std::make_unique<priv::GraphicsWindowSurface>(std::move(surface)) : nullptr;
 }
 
 
@@ -156,57 +125,15 @@ bool RenderWindow::isSrgb() const
 ////////////////////////////////////////////////////////////
 bool RenderWindow::setActive(bool active)
 {
-    bool result = Window::setActive(active);
-
-    // Update RenderTarget tracking
-    if (result)
-        result = RenderTarget::setActive(active);
-
-#ifdef SFML_RENDER_GL
-    if (!std::holds_alternative<OpenGLSettings>(getSettings().backend) &&
-        !std::holds_alternative<OpenGLESSettings>(getSettings().backend))
-        return result;
-
-    // If FBOs are available, make sure none are bound when we
-    // try to draw to the default framebuffer of the RenderWindow
-    if (active && result && priv::RenderTextureImplFBO::isAvailable())
-    {
-        glCheck(GLEXT_glBindFramebuffer(GLEXT_GL_FRAMEBUFFER, m_defaultFrameBuffer));
-
-        return true;
-    }
-#endif
-
-    return result;
+    return Window::setActive(active) && RenderTarget::setActive(active);
 }
 
 
 ////////////////////////////////////////////////////////////
 void RenderWindow::onCreate()
 {
-#ifdef SFML_RENDER_DIRECTX
-    if (auto* surface = dynamic_cast<priv::DirectXWindowSurface*>(getSurface()))
-        m_backend = surface->renderTarget();
-#endif
-#ifdef SFML_RENDER_VULKAN
-    if (auto* surface = dynamic_cast<priv::VulkanWindowSurface*>(getSurface()))
-        m_backend = surface->renderTarget();
-#endif
-#ifdef SFML_RENDER_METAL
-    if (auto* surface = dynamic_cast<priv::MetalWindowSurface*>(getSurface()))
-        m_backend = surface->renderTarget();
-#endif
-#ifdef SFML_RENDER_GL
-    if (!m_backend && priv::RenderTextureImplFBO::isAvailable())
-    {
-        // Retrieve the framebuffer ID we have to bind when targeting the window for rendering
-        // We assume that this window's context is still active at this point
-        glCheck(glGetIntegerv(GLEXT_GL_FRAMEBUFFER_BINDING, reinterpret_cast<GLint*>(&m_defaultFrameBuffer)));
-    }
-
-#endif
-
-    // Just initialize the render target part
+    if (auto* surface = dynamic_cast<priv::GraphicsWindowSurface*>(getSurface()))
+        m_backend = std::static_pointer_cast<priv::RenderTargetBackend>(surface->surface->getRenderTarget());
     RenderTarget::initialize();
 }
 
@@ -214,19 +141,8 @@ void RenderWindow::onCreate()
 ////////////////////////////////////////////////////////////
 void RenderWindow::onResize()
 {
-#ifdef SFML_RENDER_DIRECTX
-    if (auto* surface = dynamic_cast<priv::DirectXWindowSurface*>(getSurface()))
-        surface->resize(getSize());
-#endif
-#ifdef SFML_RENDER_VULKAN
-    if (auto* surface = dynamic_cast<priv::VulkanWindowSurface*>(getSurface()))
-        surface->resize(getSize());
-#endif
-#ifdef SFML_RENDER_METAL
-    if (auto* surface = dynamic_cast<priv::MetalWindowSurface*>(getSurface()))
-        surface->resize(getSize());
-#endif
-    // Update the current view (recompute the viewport, which is stored in relative coordinates)
+    if (auto* surface = dynamic_cast<priv::GraphicsWindowSurface*>(getSurface()))
+        surface->surface->resize(getSize());
     setView(getView());
 }
 

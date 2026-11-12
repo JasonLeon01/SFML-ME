@@ -37,19 +37,25 @@ public:
                                                                     const ContextSettings&        settings);
     ~VulkanRenderTarget() override;
 
-    void clear(RenderTarget& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
-    void draw(RenderTarget& target, const Vertex* vertices, std::size_t count, PrimitiveType type, const RenderStates& states) override;
-    void draw(RenderTarget&       target,
-              const VertexBuffer& buffer,
-              std::size_t         first,
-              std::size_t         count,
-              const RenderStates& states) override;
+    [[nodiscard]] Vector2u getSize() const override;
+    void clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
+    void draw(const rhi::TargetState&  target,
+              const Vertex*            vertices,
+              std::size_t              count,
+              PrimitiveType            type,
+              const rhi::DrawSettings& states) override;
+    void draw(const rhi::TargetState&  target,
+              const rhi::Buffer&       buffer,
+              std::size_t              first,
+              std::size_t              count,
+              PrimitiveType            type,
+              const rhi::DrawSettings& states) override;
     bool setActive(bool active) override;
     void viewChanged() override;
 
     [[nodiscard]] bool                                resize(Vector2u size);
-    void                                              finish();
-    [[nodiscard]] const ContextSettings&              settings() const;
+    void                                              finish() override;
+    [[nodiscard]] const ContextSettings&              settings() const override;
     [[nodiscard]] const std::shared_ptr<VulkanImage>& image() const;
     [[nodiscard]] static unsigned int                 getMaximumAntiAliasingLevel(const VulkanDevice& device);
 
@@ -58,12 +64,12 @@ private:
     explicit VulkanRenderTarget(std::shared_ptr<VulkanDevice> device, const ContextSettings& settings);
     [[nodiscard]] bool            attach(std::shared_ptr<VulkanImage> image);
     [[nodiscard]] VkCommandBuffer beginPass();
-    void                          draw(RenderTarget&        target,
-                                       VulkanDevice::Upload buffer,
-                                       std::size_t          first,
-                                       std::size_t          count,
-                                       PrimitiveType        type,
-                                       const RenderStates&  states);
+    void                          draw(const rhi::TargetState&  target,
+                                       VulkanDevice::Upload     buffer,
+                                       std::size_t              first,
+                                       std::size_t              count,
+                                       PrimitiveType            type,
+                                       const rhi::DrawSettings& states);
 
     std::shared_ptr<VulkanDevice> m_device;
     ContextSettings               m_requested;

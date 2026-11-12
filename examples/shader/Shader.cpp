@@ -5,6 +5,7 @@
 #include <SFML/Graphics.hpp>
 
 #include <array>
+#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <random>
@@ -20,7 +21,7 @@ namespace
 std::random_device rd;
 std::mt19937       rng(rd());
 
-// The other backends use translations of the GLSL resources, named after them: MSL (.metal), HLSL (.hlsl) and
+// The other backends use translations of the GLSL resources: MSL (.metal), DXBC (.cso) or HLSL (.hlsl), and
 // SPIR-V compiled from resources/vulkan with glslang -V --target-env vulkan1.0
 sf::GraphicsBackend backend = sf::GraphicsBackend::OpenGL;
 
@@ -31,6 +32,8 @@ std::string shaderFile(const std::string& name)
         case sf::GraphicsBackend::Metal:
             return "resources/" + name + ".metal";
         case sf::GraphicsBackend::DirectX:
+            if (auto bytecode = "resources/" + name + ".cso"; std::filesystem::is_regular_file(bytecode))
+                return bytecode;
             return "resources/" + name + ".hlsl";
         case sf::GraphicsBackend::Vulkan:
             return "resources/vulkan/" + name + ".spv";

@@ -24,26 +24,23 @@
 
 #pragma once
 
-#include <SFML/Graphics/GraphicsBackend.hpp>
+#include <SFML/Graphics/RHI/Device.hpp>
 
 #include <functional>
 #include <memory>
 
 namespace sf::priv
 {
-class VulkanDevice;
-class DirectXDevice;
-class MetalDevice;
-
 struct GraphicsDevice
 {
     GraphicsBackend                  backend;
     ContextSettings::BackendSettings settings;
-    std::shared_ptr<void>            glContext;
-    std::shared_ptr<VulkanDevice>    vulkan;
-    std::shared_ptr<DirectXDevice>   directX;
-    std::shared_ptr<MetalDevice>     metal;
+    std::shared_ptr<rhi::Device>     device;
 };
+[[nodiscard]] std::shared_ptr<rhi::Device> createOpenGLRhi(const ContextSettings& requested);
+[[nodiscard]] std::shared_ptr<rhi::Device> createVulkanRhi(const VulkanSettings& settings);
+[[nodiscard]] std::shared_ptr<rhi::Device> createDirectXRhi(const DirectXSettings& settings);
+[[nodiscard]] std::shared_ptr<rhi::Device> createMetalRhi();
 
 // If the first operation needs a window, wait until the window and its surface
 // have been created before committing to the candidate.

@@ -1,4 +1,6 @@
 // The includer defines both macros.
+// These tokens form Vulkan function-pointer types and loader symbol names; preserve the API spelling.
+// NOLINTBEGIN(readability-identifier-naming)
 SFML_VK_INSTANCE(DestroyInstance)
 SFML_VK_INSTANCE(EnumeratePhysicalDevices)
 SFML_VK_INSTANCE(GetPhysicalDeviceProperties)
@@ -93,3 +95,4 @@ SFML_VK_DEVICE(DestroySwapchainKHR)
 SFML_VK_DEVICE(GetSwapchainImagesKHR)
 SFML_VK_DEVICE(AcquireNextImageKHR)
 SFML_VK_DEVICE(QueuePresentKHR)
+// NOLINTEND(readability-identifier-naming)

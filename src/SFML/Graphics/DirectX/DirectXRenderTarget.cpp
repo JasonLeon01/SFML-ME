@@ -23,11 +23,9 @@
 ////////////////////////////////////////////////////////////
 
 #include <SFML/Graphics/DirectX/DirectXProgram.hpp>
+#include <SFML/Graphics/DirectX/DirectXRHI.hpp>
 #include <SFML/Graphics/DirectX/DirectXRenderTarget.hpp>
-#include <SFML/Graphics/Shader.hpp>
-#include <SFML/Graphics/Texture.hpp>
 #include <SFML/Graphics/Vertex.hpp>
-#include <SFML/Graphics/VertexBuffer.hpp>
 
 #include <SFML/System/Err.hpp>
 
@@ -302,6 +300,7 @@ unsigned int DirectXRenderTarget::getMaximumAntiAliasingLevel(const DirectXDevic
 
 void DirectXRenderTarget::finish()
 {
+    colorWritten();
     const auto guard = m_impl->device->lock();
     if (m_impl->dirty && m_impl->multisample && !m_impl->device->isLost())
     {
@@ -312,46 +311,33 @@ void DirectXRenderTarget::finish()
     m_impl->dirty = false;
 }
 
-void DirectXRenderTarget::clear(RenderTarget& target, std::optional<Color> color, std::optional<StencilValue> stencil)
+void DirectXRenderTarget::clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil)
 {
     if (!color && (!stencil || !m_impl->settings.stencilBits))
         return;
-    const auto                  value = color.value_or(Color::White);
-    const std::array<Vertex, 6> vertices{
-        {{{-1.f, -1.f}, value},
-         {{1.f, -1.f}, value},
-         {{-1.f, 1.f}, value},
-         {{-1.f, 1.f}, value},
-         {{1.f, -1.f}, value},
-         {{1.f, 1.f}, value}}};
-    RenderStates states;
-    states.blendMode               = BlendNone;
-    states.stencilMode.stencilOnly = !color;
-    if (stencil)
-    {
-        states.stencilMode.stencilUpdateOperation = StencilUpdateOperation::Replace;
-        states.stencilMode.stencilReference       = StencilValue(stencil->value & 0xFFu);
-    }
+    const auto clear = prepareClear(color, stencil);
     // D3D11.0 clear calls ignore the scissor. A draw also preserves SFML's partial-clear semantics.
-    drawVertices(target, vertices.data(), vertices.size(), PrimitiveType::Triangles, states, true);
+    drawVertices(target, clear.vertices.data(), clear.vertices.size(), PrimitiveType::Triangles, clear.settings, true);
 }
 
-void DirectXRenderTarget::draw(RenderTarget&       target,
-                               const Vertex*       vertices,
-                               std::size_t         count,
-                               PrimitiveType       type,
-                               const RenderStates& states)
+void DirectXRenderTarget::draw(const rhi::TargetState&  target,
+                               const Vertex*            vertices,
+                               std::size_t              count,
+                               PrimitiveType            type,
+                               const rhi::DrawSettings& states)
 {
+    if (!vertices || !count)
+        return;
     drawVertices(target, vertices, count, type, states, false);
 }
 
 void DirectXRenderTarget::drawVertices(
-    RenderTarget&       target,
-    const Vertex*       vertices,
-    std::size_t         count,
-    PrimitiveType       type,
-    const RenderStates& states,
-    bool                clearing)
+    const rhi::TargetState&  target,
+    const Vertex*            vertices,
+    std::size_t              count,
+    PrimitiveType            type,
+    const rhi::DrawSettings& states,
+    bool                     clearing)
 {
     if (count > std::numeric_limits<UINT>::max() / sizeof(Vertex))
         return;
@@ -382,24 +368,27 @@ void DirectXRenderTarget::drawVertices(
     drawBuffer(target, m_impl->stream.get(), 0, count, type, states, clearing);
 }
 
-void DirectXRenderTarget::draw(RenderTarget&       target,
-                               const VertexBuffer& buffer,
-                               std::size_t         first,
-                               std::size_t         count,
-                               const RenderStates& states)
+void DirectXRenderTarget::draw(const rhi::TargetState&  target,
+                               const rhi::Buffer&       buffer,
+                               std::size_t              first,
+                               std::size_t              count,
+                               PrimitiveType            type,
+                               const rhi::DrawSettings& states)
 {
-    if (buffer.m_directXBuffer)
-        drawBuffer(target, buffer.m_directXBuffer->buffer.get(), first, count, buffer.getPrimitiveType(), states);
+    if (first > buffer.getSize() / sizeof(Vertex) || count > buffer.getSize() / sizeof(Vertex) - first)
+        return;
+    if (nativeDirectXBuffer(buffer))
+        drawBuffer(target, nativeDirectXBuffer(buffer)->buffer.get(), first, count, type, states);
 }
 
 void DirectXRenderTarget::drawBuffer(
-    RenderTarget&       target,
-    ID3D11Buffer*       buffer,
-    std::size_t         first,
-    std::size_t         count,
-    PrimitiveType       type,
-    const RenderStates& states,
-    bool                clearing)
+    const rhi::TargetState&  target,
+    ID3D11Buffer*            buffer,
+    std::size_t              first,
+    std::size_t              count,
+    PrimitiveType            type,
+    const rhi::DrawSettings& states,
+    bool                     clearing)
 {
     using namespace DirectXTargetImpl;
     auto&      impl   = *m_impl;
@@ -409,31 +398,16 @@ void DirectXRenderTarget::drawBuffer(
         count > std::numeric_limits<UINT>::max() - first)
         return;
     const auto size     = Vector2i(impl.image->size);
-    const auto viewport = clearing ? IntRect({0, 0}, size) : target.getViewport(target.getView());
-    const auto scissor  = target.getScissor(target.getView()).findIntersection(IntRect({0, 0}, size));
+    const auto viewport = clearing ? IntRect({0, 0}, size) : target.viewport;
+    const auto scissor  = target.scissor.findIntersection(IntRect({0, 0}, size));
     if (!scissor || viewport.size.x <= 0 || viewport.size.y <= 0)
         return;
-    auto program = states.shader ? states.shader->m_directXProgram : device.defaultProgram();
+    auto program = states.shader ? std::dynamic_pointer_cast<DirectXProgram>(states.shader) : device.defaultProgram();
     if (!program)
         return;
-    DirectXDrawParameters parameters{};
-    const auto            modelView  = clearing ? Transform::Identity : states.transform;
-    const auto            projection = clearing ? Transform::Identity : target.getView().getTransform();
-    std::copy_n((projection * modelView).getMatrix(), parameters.transform.size(), parameters.transform.begin());
-    std::copy_n(modelView.getMatrix(), parameters.modelView.size(), parameters.modelView.begin());
-    std::copy_n(projection.getMatrix(), parameters.projection.size(), parameters.projection.begin());
-    parameters.textureTransform = {1.f, 1.f, 0.f, 0.f};
-    if (states.texture && states.coordinateType == CoordinateType::Pixels)
-    {
-        const auto textureSize = states.texture->getSize();
-        if (textureSize.x && textureSize.y)
-        {
-            parameters.textureTransform[0] /= static_cast<float>(textureSize.x);
-            parameters.textureTransform[1] /= static_cast<float>(textureSize.y);
-        }
-    }
+    auto parameters = prepareDraw(target, states, clearing);
     device.unbindTextures();
-    if (!program->bind(device, parameters, states.texture, *impl.image))
+    if (!program->bind(device, parameters, states.texture.get(), *impl.image))
         return;
     const auto&      blend = states.blendMode;
     const std::array blendKey{static_cast<unsigned int>(blend.colorSrcFactor),
@@ -533,5 +507,9 @@ void DirectXRenderTarget::drawBuffer(
         context->Draw(static_cast<UINT>(count), static_cast<UINT>(first));
     }
     impl.dirty = true;
+}
+Vector2u DirectXRenderTarget::getSize() const
+{
+    return image()->size;
 }
 } // namespace sf::priv

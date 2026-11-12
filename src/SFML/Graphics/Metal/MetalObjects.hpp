@@ -38,11 +38,6 @@
 #include <string>
 #include <vector>
 
-namespace sf
-{
-class Texture;
-}
-
 namespace sf::priv
 {
 struct MetalImage
@@ -129,10 +124,10 @@ struct MetalUniformBuffer
 
 struct MetalSampler
 {
-    std::string    name;
-    NSUInteger     index{};
-    const Texture* texture{};
-    bool           current{};
+    std::string                   name;
+    NSUInteger                    index{};
+    std::shared_ptr<rhi::Texture> texture;
+    bool                          current{};
 };
 
 struct MetalStage
@@ -156,7 +151,7 @@ struct MetalProgram::Impl
     [[nodiscard]] bool                       bind(MetalDevice::Impl&          device,
                                                   id<MTLRenderCommandEncoder> encoder,
                                                   const MetalDrawParameters&  parameters,
-                                                  const Texture*              texture,
+                                                  const rhi::Texture*         texture,
                                                   id<MTLTexture>              attachment);
 };
 

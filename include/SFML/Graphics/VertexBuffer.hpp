@@ -40,15 +40,14 @@
 
 namespace sf
 {
+namespace rhi
+{
+class Buffer;
+}
 namespace priv
 {
-struct VulkanBuffer;
-struct DirectXBuffer;
-class DirectXRenderTarget;
-class VulkanRenderTarget;
-struct MetalBuffer;
-class MetalRenderTarget;
-} // namespace priv
+class RhiAccess;
+}
 
 class RenderTarget;
 struct Vertex;
@@ -333,30 +332,12 @@ public:
     [[nodiscard]] static bool isAvailable();
 
 private:
-    ////////////////////////////////////////////////////////////
-    /// \brief Draw the vertex buffer to a render target
-    ///
-    /// \param target Render target to draw to
-    /// \param states Current render states
-    ///
-    ////////////////////////////////////////////////////////////
-    void draw(RenderTarget& target, RenderStates states) const override;
-
-    ////////////////////////////////////////////////////////////
-    // Member data
-    ////////////////////////////////////////////////////////////
-    friend class priv::VulkanRenderTarget;
-    friend class priv::DirectXRenderTarget;
-    friend class priv::MetalRenderTarget;
-    std::shared_ptr<void>                m_glContext;
-    std::shared_ptr<priv::VulkanBuffer>  m_vulkanBuffer;
-    std::shared_ptr<priv::DirectXBuffer> m_directXBuffer;
-    std::shared_ptr<priv::MetalBuffer>   m_metalBuffer;
-
-    unsigned int  m_buffer{};                             //!< Internal buffer identifier
-    std::size_t   m_size{};                               //!< Size in Vertices of the currently allocated buffer
-    PrimitiveType m_primitiveType{PrimitiveType::Points}; //!< Type of primitives to draw
-    Usage         m_usage{Usage::Stream};                 //!< How this vertex buffer is to be used
+    friend class priv::RhiAccess;
+    void                         draw(RenderTarget& target, RenderStates states) const override;
+    std::shared_ptr<rhi::Buffer> m_resource;
+    std::size_t                  m_size{};
+    PrimitiveType                m_primitiveType{PrimitiveType::Points};
+    Usage                        m_usage{Usage::Stream};
 };
 
 ////////////////////////////////////////////////////////////

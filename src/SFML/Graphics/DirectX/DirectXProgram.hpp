@@ -23,8 +23,8 @@
 ////////////////////////////////////////////////////////////
 
 #pragma once
-
 #include <SFML/Graphics/DirectX/DirectXDevice.hpp>
+#include <SFML/Graphics/RHI/Resource.hpp>
 #include <SFML/Graphics/ShaderUniformType.hpp>
 
 #include <array>
@@ -33,25 +33,14 @@
 
 #include <cstddef>
 
-namespace sf
-{
-class Texture;
-}
-
 namespace sf::priv
 {
-struct DirectXDrawParameters
-{
-    std::array<float, 16> transform;
-    std::array<float, 4>  textureTransform;
-    std::array<float, 16> modelView;
-    std::array<float, 16> projection;
-};
+using DirectXDrawParameters = DrawParameters;
 
 // Shaders may declare only the leading sf_ModelViewProjectionMatrix and sf_TextureTransform members
 inline constexpr std::size_t directXDrawPrefixSize = offsetof(DirectXDrawParameters, modelView);
 
-class DirectXProgram
+class DirectXProgram : public ProgramResource
 {
 public:
     [[nodiscard]] static std::shared_ptr<DirectXProgram> create(
@@ -60,15 +49,15 @@ public:
         std::string_view geometry = {},
         std::string_view fragment = {});
     [[nodiscard]] static bool compilerAvailable();
-    ~DirectXProgram();
+    ~DirectXProgram() override;
     DirectXProgram(const DirectXProgram&)            = delete;
     DirectXProgram& operator=(const DirectXProgram&) = delete;
 
-    void setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count);
-    void setSampler(const std::string& name, const Texture* texture, bool current);
+    void setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count) override;
+    void setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current) override;
     [[nodiscard]] bool bind(DirectXDevice&               device,
                             const DirectXDrawParameters& parameters,
-                            const Texture*               texture,
+                            const rhi::Texture*          texture,
                             const DirectXImage&          attachment);
 
 private:

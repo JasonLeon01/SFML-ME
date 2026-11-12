@@ -43,6 +43,10 @@
 
 namespace sf
 {
+namespace priv
+{
+class RhiAccess;
+}
 class Cursor;
 class String;
 class VideoMode;
@@ -567,6 +571,7 @@ public:
     virtual void onResize();
 
 private:
+    friend class priv::RhiAccess;
     friend class Window;
 
     ////////////////////////////////////////////////////////////

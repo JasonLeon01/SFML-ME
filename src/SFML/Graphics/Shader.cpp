@@ -26,24 +26,9 @@
 ////////////////////////////////////////////////////////////
 // Headers
 ////////////////////////////////////////////////////////////
-#include <SFML/Graphics/GraphicsDevice.hpp>
-#ifdef SFML_RENDER_DIRECTX
-#include <SFML/Graphics/DirectX/DirectXProgram.hpp>
-#endif
-#ifdef SFML_RENDER_METAL
-#include <SFML/Graphics/Metal/MetalProgram.hpp>
-#endif
-#include <SFML/Graphics/ShaderUniformType.hpp>
-
-#ifdef SFML_RENDER_GL
-#include <SFML/Graphics/GLCheck.hpp>
-#include <SFML/Graphics/GLExtensions.hpp>
-#include <SFML/Graphics/OpenGL/OpenGLResource.hpp>
-#endif
-#ifdef SFML_RENDER_VULKAN
-#include <SFML/Graphics/Vulkan/VulkanProgram.hpp>
-#endif
+#include <SFML/Graphics/RHI/Access.hpp>
 #include <SFML/Graphics/Shader.hpp>
+#include <SFML/Graphics/ShaderUniformType.hpp>
 #include <SFML/Graphics/Texture.hpp>
 
 #include <SFML/System/Err.hpp>
@@ -68,22 +53,6 @@ namespace
 {
 namespace ShaderImpl
 {
-#ifdef SFML_RENDER_GL
-// Retrieve the maximum number of texture units available
-std::size_t getMaxTextureUnits()
-{
-    static const GLint maxUnits = []
-    {
-        GLint value = 0;
-        glCheck(glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &value));
-
-        return value;
-    }();
-
-    return static_cast<std::size_t>(maxUnits);
-}
-
-#endif
 
 // Read the contents of a file into an array of char
 bool getFileContents(const std::filesystem::path& filename, std::vector<char>& buffer)
@@ -171,55 +140,6 @@ std::vector<float> flatten(const sf::Glsl::Vec4* vectorArray, std::size_t length
 
     return contiguous;
 }
-#ifdef SFML_RENDER_GL
-bool isProgrammable(const sf::priv::GraphicsDevice& device)
-{
-    const auto* gl = std::get_if<sf::OpenGLSettings>(&device.settings);
-    return !gl || gl->profile == sf::OpenGLProfile::Core;
-}
-
-constexpr std::string_view defaultVertex = R"(
-in vec4 sf_Vertex;
-in vec4 sf_Color;
-in vec4 sf_MultiTexCoord0;
-uniform mat4 sf_ModelViewProjectionMatrix;
-uniform mat4 sf_TextureMatrix;
-out vec4 sf_FrontColor;
-out vec4 sf_TexCoord0;
-
-void main()
-{
-    gl_Position = sf_ModelViewProjectionMatrix * sf_Vertex;
-    gl_PointSize = 1.0;
-    sf_FrontColor = sf_Color;
-    sf_TexCoord0 = sf_TextureMatrix * sf_MultiTexCoord0;
-}
-)";
-
-constexpr std::string_view defaultFragment = R"(
-uniform sampler2D sf_Texture;
-uniform bool sf_TextureEnabled;
-in vec4 sf_FrontColor;
-in vec4 sf_TexCoord0;
-out vec4 sf_FragColor;
-
-void main()
-{
-    sf_FragColor = sf_TextureEnabled ? texture(sf_Texture, sf_TexCoord0.xy) * sf_FrontColor : sf_FrontColor;
-}
-)";
-
-std::string builtIn(std::string_view body)
-{
-#ifdef SFML_OPENGL_ES
-    std::string source = "#version 300 es\nprecision highp float;\n";
-#else
-    std::string source = "#version 150\n";
-#endif
-    source += body;
-    return source;
-}
-#endif
 } // namespace ShaderImpl
 } // namespace
 
@@ -228,39 +148,6 @@ namespace sf
 {
 ////////////////////////////////////////////////////////////
 using namespace ShaderImpl;
-
-#ifdef SFML_RENDER_GL
-using priv::OpenGLResource;
-using TransientContextLock = OpenGLResource::TransientContextLock;
-
-struct Shader::UniformBinder
-{
-    UniformBinder(Shader& shader, const std::string& name) : program(shader.m_shaderProgram)
-    {
-        if (program)
-        {
-            glCheck(glGetIntegerv(GL_CURRENT_PROGRAM, &savedProgram));
-            if (program != static_cast<GLuint>(savedProgram))
-                glCheck(glUseProgram(program));
-            location = shader.getUniformLocation(name);
-        }
-    }
-
-    ~UniformBinder()
-    {
-        if (program && program != static_cast<GLuint>(savedProgram))
-            glCheck(glUseProgram(static_cast<GLuint>(savedProgram)));
-    }
-
-    UniformBinder(const UniformBinder&)            = delete;
-    UniformBinder& operator=(const UniformBinder&) = delete;
-
-    TransientContextLock lock;
-    GLint                savedProgram{};
-    GLuint               program;
-    GLint                location{-1};
-};
-#endif
 
 
 ////////////////////////////////////////////////////////////
@@ -338,43 +225,17 @@ Shader::Shader(InputStream& vertexShaderStream, InputStream& geometryShaderStrea
 
 
 ////////////////////////////////////////////////////////////
-Shader::~Shader()
-{
-#ifdef SFML_RENDER_GL
-    if (m_shaderProgram)
-    {
-        const TransientContextLock lock;
-        glCheck(glDeleteProgram(m_shaderProgram));
-    }
-#endif
-}
+Shader::~Shader() = default;
 
-Shader::Shader(Shader&& source) noexcept :
-    m_glContext(std::move(source.m_glContext)),
-    m_vulkanProgram(std::move(source.m_vulkanProgram)),
-    m_directXProgram(std::move(source.m_directXProgram)),
-    m_metalProgram(std::move(source.m_metalProgram)),
-    m_shaderProgram(std::exchange(source.m_shaderProgram, 0u)),
-    m_currentTexture(std::exchange(source.m_currentTexture, -1)),
-    m_textures(std::move(source.m_textures)),
-    m_uniforms(std::move(source.m_uniforms))
-{
-}
+Shader::Shader(Shader&& source) noexcept = default;
 
 Shader& Shader::operator=(Shader&& right) noexcept
 {
-    if (&right == this)
-        return *this;
-
-    Shader temporary(std::move(right));
-    std::swap(m_glContext, temporary.m_glContext);
-    std::swap(m_vulkanProgram, temporary.m_vulkanProgram);
-    std::swap(m_directXProgram, temporary.m_directXProgram);
-    std::swap(m_metalProgram, temporary.m_metalProgram);
-    std::swap(m_shaderProgram, temporary.m_shaderProgram);
-    std::swap(m_currentTexture, temporary.m_currentTexture);
-    std::swap(m_textures, temporary.m_textures);
-    std::swap(m_uniforms, temporary.m_uniforms);
+    if (this != &right)
+    {
+        m_resource = std::move(right.m_resource);
+        m_samplers = std::move(right.m_samplers);
+    }
     return *this;
 }
 
@@ -652,99 +513,20 @@ void Shader::setUniform(const std::string& name, const Glsl::Mat4& value)
 
 void Shader::setUniform(const std::string& name, const Texture& texture)
 {
-#ifdef SFML_RENDER_DIRECTX
-    if (m_directXProgram)
-    {
-        m_directXProgram->setSampler(name, &texture, false);
+    if (!m_resource)
         return;
-    }
-#endif
-#ifdef SFML_RENDER_METAL
-    if (m_metalProgram)
-    {
-        m_metalProgram->setSampler(name, &texture, false);
-        return;
-    }
-#endif
-#ifdef SFML_RENDER_VULKAN
-    if (m_vulkanProgram)
-    {
-        m_vulkanProgram->setSampler(name, &texture, false);
-        return;
-    }
-#endif
-#ifdef SFML_RENDER_GL
-    if (!m_shaderProgram)
-        return;
-
-    const TransientContextLock lock;
-
-    // Find the location of the variable in the shader
-    const int location = getUniformLocation(name);
-    if (location != -1)
-    {
-        // Store the location -> texture mapping
-        const auto it = m_textures.find(location);
-        if (it == m_textures.end())
-        {
-            // New entry, make sure there are enough texture units
-            if (m_textures.size() + 1 >= getMaxTextureUnits())
-            {
-                err() << "Impossible to use texture " << std::quoted(name)
-                      << " for shader: all available texture units are used" << std::endl;
-                return;
-            }
-
-            m_textures[location] = &texture;
-        }
-        else
-        {
-            // Location already used, just replace the texture
-            it->second = &texture;
-        }
-    }
-#else
-    (void)name;
-    (void)texture;
-#endif
+    m_samplers[name] = &texture;
+    m_resource->setSampler(name, priv::RhiAccess::texture(texture), false);
 }
 
 
 ////////////////////////////////////////////////////////////
 void Shader::setUniform(const std::string& name, CurrentTextureType)
 {
-#ifdef SFML_RENDER_DIRECTX
-    if (m_directXProgram)
-    {
-        m_directXProgram->setSampler(name, nullptr, true);
+    if (!m_resource)
         return;
-    }
-#endif
-#ifdef SFML_RENDER_METAL
-    if (m_metalProgram)
-    {
-        m_metalProgram->setSampler(name, nullptr, true);
-        return;
-    }
-#endif
-#ifdef SFML_RENDER_VULKAN
-    if (m_vulkanProgram)
-    {
-        m_vulkanProgram->setSampler(name, nullptr, true);
-        return;
-    }
-#endif
-#ifdef SFML_RENDER_GL
-    if (!m_shaderProgram)
-        return;
-
-    const TransientContextLock lock;
-
-    // Find the location of the variable in the shader
-    m_currentTexture = getUniformLocation(name);
-#else
-    (void)name;
-#endif
+    m_samplers.erase(name);
+    m_resource->setSampler(name, {}, true);
 }
 
 
@@ -792,329 +574,59 @@ void Shader::setUniformArray(const std::string& name, const Glsl::Mat4* values, 
 
 void Shader::setUniformData(const std::string& name, ShaderUniformType type, const void* values, std::size_t count)
 {
-    if (!values || !count)
-        return;
-
-#ifdef SFML_RENDER_DIRECTX
-    if (m_directXProgram)
-    {
-        m_directXProgram->setUniform(name, type, values, count);
-        return;
-    }
-#endif
-#ifdef SFML_RENDER_METAL
-    if (m_metalProgram)
-    {
-        m_metalProgram->setUniform(name, type, values, count);
-        return;
-    }
-#endif
-#ifdef SFML_RENDER_VULKAN
-    if (m_vulkanProgram)
-    {
-        m_vulkanProgram->setUniform(name, type, values, count);
-        return;
-    }
-#endif
-#ifdef SFML_RENDER_GL
-    if (!m_shaderProgram || count > static_cast<std::size_t>(std::numeric_limits<GLsizei>::max()))
-        return;
-
-    const UniformBinder binder(*this, name);
-    const auto          location = binder.location;
-    if (location < 0)
-        return;
-
-    const auto  size = static_cast<GLsizei>(count);
-    const auto* f    = static_cast<const GLfloat*>(values);
-    const auto* i    = static_cast<const GLint*>(values);
-    switch (type)
-    {
-        case ShaderUniformType::Float:
-            glCheck(glUniform1fv(location, size, f));
-            break;
-        case ShaderUniformType::Vec2:
-            glCheck(glUniform2fv(location, size, f));
-            break;
-        case ShaderUniformType::Vec3:
-            glCheck(glUniform3fv(location, size, f));
-            break;
-        case ShaderUniformType::Vec4:
-            glCheck(glUniform4fv(location, size, f));
-            break;
-        case ShaderUniformType::Int:
-            glCheck(glUniform1iv(location, size, i));
-            break;
-        case ShaderUniformType::IVec2:
-            glCheck(glUniform2iv(location, size, i));
-            break;
-        case ShaderUniformType::IVec3:
-            glCheck(glUniform3iv(location, size, i));
-            break;
-        case ShaderUniformType::IVec4:
-            glCheck(glUniform4iv(location, size, i));
-            break;
-        case ShaderUniformType::Mat3:
-            glCheck(glUniformMatrix3fv(location, size, GL_FALSE, f));
-            break;
-        case ShaderUniformType::Mat4:
-            glCheck(glUniformMatrix4fv(location, size, GL_FALSE, f));
-            break;
-    }
-#endif
+    if (m_resource && values && count)
+        m_resource->setUniform(name, type, values, count);
 }
 
 unsigned int Shader::getNativeHandle() const
 {
-    return m_shaderProgram;
+    return m_resource ? static_cast<const priv::ProgramResource&>(*m_resource).nativeHandle() : 0;
 }
 
 
 ////////////////////////////////////////////////////////////
 void Shader::bind(const Shader* shader)
 {
-#ifdef SFML_RENDER_GL
-    if (const auto* device = priv::getGraphicsDevice(); device && device->glContext)
+    if (const auto device = rhi::getDevice())
     {
-        const TransientContextLock lock;
-        priv::ensureExtensionsInit();
-        if (shader && shader->m_shaderProgram)
-        {
-            glCheck(glUseProgram(shader->m_shaderProgram));
-            shader->bindTextures();
-            if (shader->m_currentTexture != -1)
-                glCheck(glUniform1i(shader->m_currentTexture, 0));
-        }
-        else
-        {
-            glCheck(glUseProgram(0));
-        }
-        return;
+        if (shader)
+            shader->refreshSamplers();
+        static_cast<priv::DeviceResource&>(*device).bindShader(shader ? shader->m_resource.get() : nullptr);
     }
-#else
-    (void)shader;
-#endif
-    err() << "Shader::bind requires OpenGL" << std::endl;
 }
 
 bool Shader::isAvailable()
 {
-    const auto* device = priv::getGraphicsDevice();
-#ifdef SFML_RENDER_DIRECTX
-    if (device && device->directX)
-        return priv::DirectXProgram::compilerAvailable();
-#endif
-    return device != nullptr;
+    const auto device = rhi::getDevice();
+    return device && device->capabilities().shaders;
 }
 
 bool Shader::isGeometryAvailable()
 {
-    const auto* device = priv::getGraphicsDevice();
-    if (!device)
-        return false;
-
-#ifdef SFML_RENDER_DIRECTX
-    if (device->directX)
-        return priv::DirectXProgram::compilerAvailable();
-#endif
-#ifdef SFML_RENDER_METAL
-    if (device->metal)
-        return false;
-#endif
-#ifdef SFML_RENDER_VULKAN
-    if (device->vulkan)
-        return device->vulkan->context()->features.geometryShader != VK_FALSE;
-#endif
-#ifdef SFML_RENDER_GL
-    const TransientContextLock lock;
-    priv::ensureExtensionsInit();
-#ifdef SFML_OPENGL_ES
-    return SF_GLAD_GL_ES_VERSION_3_2 || SF_GLAD_GL_EXT_geometry_shader;
-#else
-    return GLEXT_GL_VERSION_3_2 || GLEXT_geometry_shader4;
-#endif
-#else
-    return false;
-#endif
+    const auto device = rhi::getDevice();
+    return device && device->capabilities().geometryShaders;
 }
 
-bool Shader::loadDefaultOpenGL()
-{
-#ifdef SFML_RENDER_GL
-    return compile(builtIn(defaultVertex), {}, builtIn(defaultFragment));
-#else
-    return false;
-#endif
-}
 
 bool Shader::compile(std::string_view vertex, std::string_view geometry, std::string_view fragment)
 {
-    const auto* device = priv::getGraphicsDevice();
+    const auto device = rhi::getDevice();
     if (!device || (vertex.empty() && geometry.empty() && fragment.empty()))
         return false;
-
-    if (!geometry.empty() && !isGeometryAvailable())
-    {
-        err() << "Geometry shaders are unavailable on the selected graphics device" << std::endl;
+    if (!geometry.empty() && !device->capabilities().geometryShaders)
         return false;
-    }
-
-#ifdef SFML_RENDER_DIRECTX
-    if (device->directX)
-    {
-        auto shader = priv::DirectXProgram::create(*device->directX, vertex, geometry, fragment);
-        if (!shader)
-            return false;
-        m_directXProgram = std::move(shader);
-        return true;
-    }
-#endif
-#ifdef SFML_RENDER_METAL
-    if (device->metal)
-    {
-        auto shader = priv::MetalProgram::create(*device->metal, vertex, fragment);
-        if (!shader)
-            return false;
-        m_metalProgram = std::move(shader);
-        return true;
-    }
-#endif
-#ifdef SFML_RENDER_VULKAN
-    if (device->vulkan)
-    {
-        auto shader = priv::VulkanProgram::create(*device->vulkan, vertex, geometry, fragment);
-        if (!shader)
-            return false;
-        m_vulkanProgram = std::move(shader);
-        return true;
-    }
-#endif
-#ifdef SFML_RENDER_GL
-    const TransientContextLock lock;
-    priv::ensureExtensionsInit();
-
-    const bool programmable     = isProgrammable(*device);
-    const auto fallbackVertex   = programmable && vertex.empty() ? builtIn(defaultVertex) : std::string{};
-    const auto fallbackFragment = programmable && fragment.empty() ? builtIn(defaultFragment) : std::string{};
-    if (!fallbackVertex.empty())
-        vertex = fallbackVertex;
-    if (!fallbackFragment.empty())
-        fragment = fallbackFragment;
-
-    const auto program = glCheck(glCreateProgram());
-    if (!program)
+    auto resource = device->createShader(vertex, geometry, fragment);
+    if (!resource)
         return false;
-
-    const auto attach = [program](GLenum stage, std::string_view source)
-    {
-        if (source.empty())
-            return true;
-        if (source.size() > static_cast<std::size_t>(std::numeric_limits<GLint>::max()))
-            return false;
-
-        const auto shader = glCheck(glCreateShader(stage));
-        if (!shader)
-            return false;
-        const auto* data = source.data();
-        const auto  size = static_cast<GLint>(source.size());
-        glCheck(glShaderSource(shader, 1, &data, &size));
-        glCheck(glCompileShader(shader));
-
-        GLint compiled{};
-        glCheck(glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled));
-        if (compiled)
-        {
-            glCheck(glAttachShader(program, shader));
-        }
-        else
-        {
-            GLint length{};
-            glCheck(glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length));
-            std::vector<char> log(static_cast<std::size_t>(std::max(length, 1)));
-            glCheck(glGetShaderInfoLog(shader, length, nullptr, log.data()));
-            err() << "Failed to compile OpenGL shader\n" << log.data() << std::endl;
-        }
-        glCheck(glDeleteShader(shader));
-        return compiled != GL_FALSE;
-    };
-
-    if (!attach(GL_VERTEX_SHADER, vertex) || !attach(GL_GEOMETRY_SHADER, geometry) || !attach(GL_FRAGMENT_SHADER, fragment))
-    {
-        glCheck(glDeleteProgram(program));
-        return false;
-    }
-
-    if (programmable)
-    {
-        glCheck(glBindAttribLocation(program, 0, "sf_Vertex"));
-        glCheck(glBindAttribLocation(program, 1, "sf_Color"));
-        glCheck(glBindAttribLocation(program, 2, "sf_MultiTexCoord0"));
-    }
-    glCheck(glLinkProgram(program));
-    GLint linked{};
-    glCheck(glGetProgramiv(program, GL_LINK_STATUS, &linked));
-    if (!linked)
-    {
-        GLint length{};
-        glCheck(glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length));
-        std::vector<char> log(static_cast<std::size_t>(std::max(length, 1)));
-        glCheck(glGetProgramInfoLog(program, length, nullptr, log.data()));
-        err() << "Failed to link OpenGL shader\n" << log.data() << std::endl;
-        glCheck(glDeleteProgram(program));
-        return false;
-    }
-
-    if (m_shaderProgram)
-        glCheck(glDeleteProgram(m_shaderProgram));
-    m_glContext      = device->glContext;
-    m_shaderProgram  = program;
-    m_currentTexture = -1;
-    m_textures.clear();
-    m_uniforms.clear();
-    glCheck(glFlush());
+    m_resource = std::move(resource);
+    m_samplers.clear();
     return true;
-#else
-    return false;
-#endif
 }
 
-#ifdef SFML_RENDER_GL
-void Shader::bindTextures() const
+void Shader::refreshSamplers() const
 {
-    auto it = m_textures.begin();
-    for (std::size_t i = 0; i < m_textures.size(); ++i)
-    {
-        const auto index = static_cast<GLsizei>(i + 1);
-        glCheck(glUniform1i(it->first, index));
-        glCheck(GLEXT_glActiveTexture(GLEXT_GL_TEXTURE0 + static_cast<GLenum>(index)));
-        Texture::bind(it->second);
-        ++it;
-    }
-
-    // Make sure that the texture unit which is left active is the number 0
-    glCheck(GLEXT_glActiveTexture(GLEXT_GL_TEXTURE0));
+    if (m_resource)
+        for (const auto& [name, texture] : m_samplers)
+            m_resource->setSampler(name, priv::RhiAccess::texture(*texture), false);
 }
-
-
-////////////////////////////////////////////////////////////
-int Shader::getUniformLocation(const std::string& name)
-{
-    // Check the cache
-    if (const auto it = m_uniforms.find(name); it != m_uniforms.end())
-    {
-        // Already in cache, return it
-        return it->second;
-    }
-
-    // Not in cache, request the location from OpenGL
-    const int location = glGetUniformLocation(m_shaderProgram, name.c_str());
-    m_uniforms.try_emplace(name, location);
-
-    if (location == -1)
-        err() << "Uniform " << std::quoted(name) << " not found in shader" << std::endl;
-
-    return location;
-}
-
-#endif
 } // namespace sf

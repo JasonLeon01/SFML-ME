@@ -23,34 +23,33 @@
 ////////////////////////////////////////////////////////////
 
 #pragma once
-
-#include <SFML/Graphics/RenderTarget.hpp>
-
-#include <optional>
-
+#include <SFML/Graphics/RHI/Resource.hpp>
 namespace sf::priv
 {
-class RenderTargetBackend
+class RenderTargetBackend : public rhi::RenderTarget, public rhi::CommandContext
 {
 public:
-    virtual ~RenderTargetBackend() = default;
+    void setColorTexture(std::shared_ptr<rhi::Texture> texture)
+    {
+        m_colorTexture = std::move(texture);
+    }
+    void colorWritten()
+    {
+        if (m_colorTexture)
+            m_colorTexture->invalidateMipmap();
+    }
+    rhi::CommandContext& commands() override
+    {
+        return *this;
+    }
+    virtual void viewChanged()
+    {
+    }
+    virtual void pushGLStates(const rhi::TargetState& target);
+    virtual void popGLStates(const rhi::TargetState& state);
+    virtual void resetGLStates(const rhi::TargetState& state);
 
-    virtual void clear(RenderTarget& target, std::optional<Color> color, std::optional<StencilValue> stencil) = 0;
-    virtual void draw(RenderTarget&       target,
-                      const Vertex*       vertices,
-                      std::size_t         count,
-                      PrimitiveType       type,
-                      const RenderStates& states)                                                             = 0;
-    virtual void draw(RenderTarget&       target,
-                      const VertexBuffer& buffer,
-                      std::size_t         first,
-                      std::size_t         count,
-                      const RenderStates& states)                                                             = 0;
-    virtual bool setActive(bool active)                                                                       = 0;
-    virtual void viewChanged()                                                                                = 0;
-
-    virtual void pushGLStates(RenderTarget& target);
-    virtual void popGLStates(RenderTarget& target);
-    virtual void resetGLStates(RenderTarget& target);
+private:
+    std::shared_ptr<rhi::Texture> m_colorTexture;
 };
 } // namespace sf::priv

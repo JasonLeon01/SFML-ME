@@ -24,7 +24,7 @@
 
 #include <SFML/Graphics/DirectX/BuiltInShaders.hpp>
 #include <SFML/Graphics/DirectX/DirectXProgram.hpp>
-#include <SFML/Graphics/Texture.hpp>
+#include <SFML/Graphics/DirectX/DirectXRHI.hpp>
 #include <SFML/Graphics/Vertex.hpp>
 
 #include <SFML/System/Err.hpp>
@@ -96,10 +96,10 @@ struct Constants
 };
 struct Sampler
 {
-    std::string    name;
-    UINT           slot{};
-    const Texture* texture{};
-    bool           current{};
+    std::string                   name;
+    UINT                          slot{};
+    std::shared_ptr<rhi::Texture> texture;
+    bool                          current{};
 };
 struct Stage
 {
@@ -462,6 +462,8 @@ std::shared_ptr<DirectXProgram> DirectXProgram::create(DirectXDevice&   device,
 
 void DirectXProgram::setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count)
 {
+    if (!values || !count)
+        return;
     using namespace DirectXProgramImpl;
     const std::lock_guard guard(m_impl->mutex);
     const auto            input = shape(type);
@@ -507,7 +509,7 @@ void DirectXProgram::setUniform(const std::string& name, ShaderUniformType type,
         err() << "HLSL uniform not found: " << name << std::endl;
 }
 
-void DirectXProgram::setSampler(const std::string& name, const Texture* texture, bool current)
+void DirectXProgram::setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current)
 {
     const std::lock_guard guard(m_impl->mutex);
     bool                  found = false;
@@ -525,7 +527,7 @@ void DirectXProgram::setSampler(const std::string& name, const Texture* texture,
 
 bool DirectXProgram::bind(DirectXDevice&               device,
                           const DirectXDrawParameters& parameters,
-                          const Texture*               texture,
+                          const rhi::Texture*          texture,
                           const DirectXImage&          attachment)
 {
     using namespace DirectXProgramImpl;
@@ -555,17 +557,17 @@ bool DirectXProgram::bind(DirectXDevice&               device,
         std::array<ID3D11SamplerState*, D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT>       samplers{};
         for (const auto& sampler : stage.samplers)
         {
-            const auto* selected = sampler.current ? texture : sampler.texture;
-            const auto& image    = selected && selected->m_directXImage ? selected->m_directXImage : white;
+            const auto* selected = sampler.current ? texture : sampler.texture.get();
+            const auto& image    = selected && nativeDirectXImage(selected) ? nativeDirectXImage(selected) : white;
             if (image->texture.get() == attachment.texture.get())
             {
                 err() << "Cannot sample the active DirectX render target" << std::endl;
                 return false;
             }
             images[sampler.slot]   = image->view.get();
-            samplers[sampler.slot] = device.sampler(selected && selected->m_isSmooth,
-                                                    selected && selected->m_isRepeated,
-                                                    selected && selected->m_hasMipmap);
+            samplers[sampler.slot] = device.sampler(selected && selected->isSmooth(),
+                                                    selected && selected->isRepeated(),
+                                                    selected && selected->hasMipmap());
             if (!samplers[sampler.slot])
                 return false;
         }

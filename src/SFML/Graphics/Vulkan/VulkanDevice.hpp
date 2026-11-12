@@ -131,6 +131,10 @@ public:
     [[nodiscard]] bool            flush(VkSemaphore wait = VK_NULL_HANDLE, VkSemaphore signal = VK_NULL_HANDLE);
     void                          retain(std::shared_ptr<void> object);
 
+    [[nodiscard]] std::shared_ptr<VulkanBuffer> makeBuffer(std::size_t bytes) const
+    {
+        return makeBuffer(bytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    }
     [[nodiscard]] std::shared_ptr<VulkanBuffer> makeBuffer(VkDeviceSize bytes, VkBufferUsageFlags usage) const;
     [[nodiscard]] std::shared_ptr<VulkanImage>  makeImage(
          Vector2u              size,

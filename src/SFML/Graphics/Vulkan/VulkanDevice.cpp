@@ -874,7 +874,7 @@ VulkanDevice::Upload VulkanDevice::stage(const void* data, std::size_t size)
 {
     const auto& limits    = context()->properties.limits;
     const auto  alignment = std::max<VkDeviceSize>(
-        {16, limits.minUniformBufferOffsetAlignment, limits.optimalBufferCopyOffsetAlignment});
+        {VkDeviceSize{16}, limits.minUniformBufferOffsetAlignment, limits.optimalBufferCopyOffsetAlignment});
     for (auto& block : m_impl->uploads)
     {
         const auto offset = (block.used + alignment - 1) & ~(alignment - 1);

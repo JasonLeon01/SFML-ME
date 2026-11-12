@@ -24,20 +24,6 @@
 
 #include <SFML/Graphics/GraphicsDevice.hpp>
 
-#ifdef SFML_RENDER_DIRECTX
-#include <SFML/Graphics/DirectX/DirectXDevice.hpp>
-#endif
-
-#ifdef SFML_RENDER_GL
-#include <SFML/Window/GlContext.hpp>
-#endif
-#ifdef SFML_RENDER_VULKAN
-#include <SFML/Graphics/Vulkan/VulkanDevice.hpp>
-#endif
-#ifdef SFML_RENDER_METAL
-#include <SFML/Graphics/Metal/MetalDevice.hpp>
-#endif
-
 #include <SFML/System/Err.hpp>
 
 #include <algorithm>
@@ -257,32 +243,14 @@ bool loadPipelineCacheFromMemory(const void* data, std::size_t size)
 {
     if (!data || !size)
         return false;
-#ifdef SFML_RENDER_VULKAN
-    const auto* device = priv::getGraphicsDevice();
-    if (device && device->vulkan)
-        return device->vulkan->loadPipelineCache(data, size);
-#endif
-#ifdef SFML_RENDER_METAL
-    const auto* metalDevice = priv::getGraphicsDevice();
-    if (metalDevice && metalDevice->metal)
-        return metalDevice->metal->loadPipelineCache(data, size);
-#endif
-    return false;
+    const auto device = rhi::getDevice();
+    return device && device->loadPipelineCache(data, size);
 }
 
 std::optional<std::vector<std::uint8_t>> getPipelineCacheData()
 {
-#ifdef SFML_RENDER_VULKAN
-    const auto* device = priv::getGraphicsDevice();
-    if (device && device->vulkan)
-        return device->vulkan->getPipelineCacheData();
-#endif
-#ifdef SFML_RENDER_METAL
-    const auto* metalDevice = priv::getGraphicsDevice();
-    if (metalDevice && metalDevice->metal)
-        return metalDevice->metal->getPipelineCacheData();
-#endif
-    return std::nullopt;
+    const auto device = rhi::getDevice();
+    return device ? device->getPipelineCacheData() : std::nullopt;
 }
 
 namespace priv
@@ -335,54 +303,39 @@ bool withGraphicsDevice(const ContextSettings&                                  
 
         auto initialization    = ContextSettings{};
         initialization.backend = requirements;
-        GraphicsDevice device{driver, requirements, {}, {}, {}, {}};
-
-        if (driver == GraphicsBackend::DirectX)
+        std::shared_ptr<rhi::Device> implementation;
+        switch (driver)
         {
 #ifdef SFML_RENDER_DIRECTX
-            device.directX = DirectXDevice::create(std::get<DirectXSettings>(requirements));
-            if (!device.directX)
-            {
-                reportFailure(driver, requirements);
-                continue;
-            }
-            device.settings = device.directX->settings();
+            case GraphicsBackend::DirectX:
+                implementation = createDirectXRhi(std::get<DirectXSettings>(requirements));
+                break;
 #endif
-        }
-        else if (driver == GraphicsBackend::Metal)
-        {
 #ifdef SFML_RENDER_METAL
-            device.metal = MetalDevice::create();
-            if (!device.metal)
-            {
-                reportFailure(driver, requirements);
-                continue;
-            }
+            case GraphicsBackend::Metal:
+                implementation = createMetalRhi();
+                break;
 #endif
-        }
-        else if (driver == GraphicsBackend::Vulkan)
-        {
 #ifdef SFML_RENDER_VULKAN
-            device.vulkan = VulkanDevice::create(std::get<VulkanSettings>(requirements));
-            if (!device.vulkan)
-            {
-                reportFailure(driver, requirements);
-                continue;
-            }
+            case GraphicsBackend::Vulkan:
+                implementation = createVulkanRhi(std::get<VulkanSettings>(requirements));
+                break;
 #endif
-        }
-        else
-        {
 #ifdef SFML_RENDER_GL
-            device.glContext = GlContext::prepareSharedContext(initialization);
-            if (!device.glContext)
-            {
-                reportFailure(driver, requirements);
-                continue;
-            }
-            device.settings = initialization.backend;
+            case GraphicsBackend::OpenGL:
+            case GraphicsBackend::OpenGLES:
+                implementation = createOpenGLRhi(initialization);
+                break;
 #endif
+            default:
+                break;
         }
+        if (!implementation)
+        {
+            reportFailure(driver, requirements);
+            continue;
+        }
+        GraphicsDevice device{driver, implementation->settings(), std::move(implementation)};
 
         effective.backend = device.settings;
         state.device      = std::move(device);

@@ -22,26 +22,8 @@
 //
 ////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////
-// Headers
-////////////////////////////////////////////////////////////
-#include <SFML/Graphics/GraphicsDevice.hpp>
-#ifdef SFML_RENDER_DIRECTX
-#include <SFML/Graphics/DirectX/DirectXDevice.hpp>
-#endif
-#ifdef SFML_RENDER_GL
-#include <SFML/Graphics/GLCheck.hpp>
-#include <SFML/Graphics/GLExtensions.hpp>
-#include <SFML/Graphics/OpenGL/OpenGLResource.hpp>
-#endif
-#ifdef SFML_RENDER_VULKAN
-#include <SFML/Graphics/Vulkan/VulkanDevice.hpp>
-#endif
-#ifdef SFML_RENDER_METAL
-#include <SFML/Graphics/Metal/MetalDevice.hpp>
-#endif
+#include <SFML/Graphics/RHI/Access.hpp>
 #include <SFML/Graphics/RenderTarget.hpp>
-#include <SFML/Graphics/Vertex.hpp>
 #include <SFML/Graphics/VertexBuffer.hpp>
 
 #include <SFML/System/Err.hpp>
@@ -49,40 +31,8 @@
 #include <limits>
 #include <ostream>
 #include <utility>
-
-#include <cstddef>
-#include <cstring>
-
-
-#ifdef SFML_RENDER_GL
-namespace
-{
-// A nested named namespace is used here to allow unity builds of SFML.
-namespace VertexBufferImpl
-{
-GLenum usageToGlEnum(sf::VertexBuffer::Usage usage)
-{
-    switch (usage)
-    {
-        case sf::VertexBuffer::Usage::Static:
-            return GLEXT_GL_STATIC_DRAW;
-        case sf::VertexBuffer::Usage::Dynamic:
-            return GLEXT_GL_DYNAMIC_DRAW;
-        default:
-            return GLEXT_GL_STREAM_DRAW;
-    }
-}
-} // namespace VertexBufferImpl
-} // namespace
-#endif
-
-
 namespace sf
 {
-#ifdef SFML_RENDER_GL
-using VertexContextLock = priv::OpenGLResource::TransientContextLock;
-#endif
-////////////////////////////////////////////////////////////
 VertexBuffer::VertexBuffer(PrimitiveType type) : m_primitiveType(type)
 {
 }
@@ -118,87 +68,23 @@ VertexBuffer::VertexBuffer(const VertexBuffer& copy) : m_primitiveType(copy.m_pr
 
 
 ////////////////////////////////////////////////////////////
-VertexBuffer::~VertexBuffer()
-{
-#ifdef SFML_RENDER_GL
-    if (m_buffer)
-    {
-        const VertexContextLock contextLock;
-
-        glCheck(GLEXT_glDeleteBuffers(1, &m_buffer));
-    }
-#endif
-}
+VertexBuffer::~VertexBuffer() = default;
 
 
 ////////////////////////////////////////////////////////////
 bool VertexBuffer::create(std::size_t vertexCount)
 {
-    const auto* device = priv::getGraphicsDevice();
-    if (!device || vertexCount > std::numeric_limits<std::ptrdiff_t>::max() / sizeof(Vertex))
+    if (vertexCount > std::numeric_limits<std::ptrdiff_t>::max() / sizeof(Vertex))
         return false;
-
-#ifdef SFML_RENDER_DIRECTX
-    if (device->directX)
-    {
-        auto buffer = device->directX->makeBuffer(vertexCount * sizeof(Vertex));
-        if (!buffer)
-            return false;
-        m_directXBuffer = std::move(buffer);
-        m_size          = vertexCount;
-        return true;
-    }
-#endif
-#ifdef SFML_RENDER_METAL
-    if (device->metal)
-    {
-        auto buffer = device->metal->makeBuffer(vertexCount * sizeof(Vertex));
-        if (!buffer)
-            return false;
-        m_metalBuffer = std::move(buffer);
-        m_size        = vertexCount;
-        return true;
-    }
-#endif
-#ifdef SFML_RENDER_VULKAN
-    if (device->vulkan)
-    {
-        const auto lock   = device->vulkan->lock();
-        auto       buffer = device->vulkan->makeBuffer(vertexCount * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-        if (!buffer)
-            return false;
-        m_vulkanBuffer = std::move(buffer);
-        m_size         = vertexCount;
-        return true;
-    }
-#endif
-#ifdef SFML_RENDER_GL
-    const VertexContextLock contextLock;
-    priv::ensureExtensionsInit();
-
-    if (!m_buffer)
-        glCheck(GLEXT_glGenBuffers(1, &m_buffer));
-
-    if (!m_buffer)
-    {
-        err() << "Could not create vertex buffer, generation failed" << std::endl;
+    const auto device = rhi::getDevice();
+    if (!device)
         return false;
-    }
-
-    glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, m_buffer));
-    glCheck(GLEXT_glBufferData(GLEXT_GL_ARRAY_BUFFER,
-                               static_cast<GLsizeiptrARB>(sizeof(Vertex) * vertexCount),
-                               nullptr,
-                               VertexBufferImpl::usageToGlEnum(m_usage)));
-    glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, 0));
-
-    m_glContext = device->glContext;
-    m_size      = vertexCount;
-
+    auto resource = device->createBuffer(vertexCount * sizeof(Vertex), static_cast<rhi::BufferUsage>(m_usage));
+    if (!resource)
+        return false;
+    m_resource = std::move(resource);
+    m_size     = vertexCount;
     return true;
-#else
-    return false;
-#endif
 }
 
 
@@ -219,204 +105,37 @@ bool VertexBuffer::update(const Vertex* vertices)
 ////////////////////////////////////////////////////////////
 bool VertexBuffer::update(const Vertex* vertices, std::size_t vertexCount, unsigned int offset)
 {
-    if (!vertices || (!m_buffer && !m_vulkanBuffer && !m_directXBuffer && !m_metalBuffer) ||
-        vertexCount > std::numeric_limits<std::ptrdiff_t>::max() / sizeof(Vertex) ||
+    if (!vertices || !m_resource || vertexCount > std::numeric_limits<std::ptrdiff_t>::max() / sizeof(Vertex) ||
         (offset && (offset > m_size || vertexCount > m_size - offset)))
         return false;
-
-#ifdef SFML_RENDER_DIRECTX
-    if (m_directXBuffer)
+    if (!offset && vertexCount >= m_size)
     {
-        const auto& device = priv::getGraphicsDevice()->directX;
-        const auto  lock   = device->lock();
-        if (device->isLost() || vertexCount > std::numeric_limits<UINT>::max() / sizeof(Vertex))
+        const auto device = rhi::getDevice();
+        auto replacement  = device->createBuffer(vertexCount * sizeof(Vertex), static_cast<rhi::BufferUsage>(m_usage));
+        if (!replacement || !replacement->upload(vertices, vertexCount * sizeof(Vertex)))
             return false;
-        if (!offset && vertexCount >= m_size && !create(vertexCount))
-            return false;
-        if (!vertexCount)
-            return true;
-        const D3D11_BOX box{static_cast<UINT>(offset * sizeof(Vertex)),
-                            0,
-                            0,
-                            static_cast<UINT>((offset + vertexCount) * sizeof(Vertex)),
-                            1,
-                            1};
-        device->context()->UpdateSubresource(m_directXBuffer->buffer.get(), 0, &box, vertices, 0, 0);
-        return device->check(device->device()->GetDeviceRemovedReason(), "update vertex buffer");
-    }
-#endif
-#ifdef SFML_RENDER_METAL
-    if (m_metalBuffer)
-    {
-        const auto& device = priv::getGraphicsDevice()->metal;
-        const auto  lock   = device->lock();
-        if (!offset && vertexCount > m_size && !create(vertexCount))
-            return false;
-        return device->write(*m_metalBuffer, vertices, offset * sizeof(Vertex), vertexCount * sizeof(Vertex));
-    }
-#endif
-#ifdef SFML_RENDER_VULKAN
-    if (m_vulkanBuffer)
-    {
-        const auto& device = priv::getGraphicsDevice()->vulkan;
-        const auto  lock   = device->lock();
-        if (!offset && vertexCount >= m_size)
-        {
-            auto replacement = device->makeBuffer(vertexCount * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-            if (!replacement)
-                return false;
-            m_vulkanBuffer = std::move(replacement);
-            m_size         = vertexCount;
-        }
-        else if (m_vulkanBuffer.use_count() > 1 && !device->flush())
-        {
-            // Earlier draws refer to the old contents of this buffer.
-            return false;
-        }
-        m_vulkanBuffer->write(static_cast<VkDeviceSize>(offset) * sizeof(Vertex), vertices, vertexCount * sizeof(Vertex));
+        m_resource = std::move(replacement);
+        m_size     = vertexCount;
         return true;
     }
-#endif
-#ifdef SFML_RENDER_GL
-    const VertexContextLock contextLock;
-
-    glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, m_buffer));
-
-    // Check if we need to resize or orphan the buffer
-    if (vertexCount >= m_size)
-    {
-        glCheck(GLEXT_glBufferData(GLEXT_GL_ARRAY_BUFFER,
-                                   static_cast<GLsizeiptrARB>(sizeof(Vertex) * vertexCount),
-                                   nullptr,
-                                   VertexBufferImpl::usageToGlEnum(m_usage)));
-
-        m_size = vertexCount;
-    }
-
-    glCheck(GLEXT_glBufferSubData(GLEXT_GL_ARRAY_BUFFER,
-                                  static_cast<GLintptrARB>(sizeof(Vertex) * offset),
-                                  static_cast<GLsizeiptrARB>(sizeof(Vertex) * vertexCount),
-                                  vertices));
-
-    glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, 0));
-
-    return true;
-#else
-    return false;
-#endif
+    return m_resource->upload(vertices, vertexCount * sizeof(Vertex), offset * sizeof(Vertex));
 }
 
 
 ////////////////////////////////////////////////////////////
 bool VertexBuffer::update(const VertexBuffer& vertexBuffer)
 {
-    if (&vertexBuffer == this)
-        return m_buffer || m_vulkanBuffer || m_directXBuffer || m_metalBuffer;
-
-#ifdef SFML_RENDER_DIRECTX
-    if (m_directXBuffer && vertexBuffer.m_directXBuffer)
-    {
-        const auto& device = priv::getGraphicsDevice()->directX;
-        const auto  lock   = device->lock();
-        if (device->isLost())
-            return false;
-        auto replacement = device->makeBuffer(vertexBuffer.m_size * sizeof(Vertex));
-        if (!replacement)
-            return false;
-        device->context()->CopyResource(replacement->buffer.get(), vertexBuffer.m_directXBuffer->buffer.get());
-        m_directXBuffer = std::move(replacement);
-        m_size          = vertexBuffer.m_size;
-        return true;
-    }
-#endif
-#ifdef SFML_RENDER_METAL
-    if (m_metalBuffer && vertexBuffer.m_metalBuffer)
-    {
-        const auto& device      = priv::getGraphicsDevice()->metal;
-        const auto  lock        = device->lock();
-        const auto  bytes       = vertexBuffer.m_size * sizeof(Vertex);
-        auto        replacement = device->makeBuffer(bytes);
-        if (!replacement || !device->copy(*vertexBuffer.m_metalBuffer, *replacement, bytes))
-            return false;
-        m_metalBuffer = std::move(replacement);
-        m_size        = vertexBuffer.m_size;
-        return true;
-    }
-#endif
-#ifdef SFML_RENDER_VULKAN
-    if (m_vulkanBuffer && vertexBuffer.m_vulkanBuffer)
-    {
-        const auto& device = priv::getGraphicsDevice()->vulkan;
-        const auto  lock   = device->lock();
-        auto replacement = device->makeBuffer(vertexBuffer.m_size * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-        if (!replacement)
-            return false;
-        replacement->write(0, vertexBuffer.m_vulkanBuffer->mapped, vertexBuffer.m_size * sizeof(Vertex));
-        m_vulkanBuffer = std::move(replacement);
-        m_size         = vertexBuffer.m_size;
-        return true;
-    }
-#endif
-#ifdef SFML_RENDER_GL
-    if (!m_buffer || !vertexBuffer.m_buffer)
+    if (!m_resource || !vertexBuffer.m_resource)
         return false;
-
-    const VertexContextLock contextLock;
-
-    // Make sure that extensions are initialized
-    priv::ensureExtensionsInit();
-
-    if (GLEXT_copy_buffer)
-    {
-        if (m_size != vertexBuffer.m_size && !create(vertexBuffer.m_size))
-            return false;
-        glCheck(GLEXT_glBindBuffer(GLEXT_GL_COPY_READ_BUFFER, vertexBuffer.m_buffer));
-        glCheck(GLEXT_glBindBuffer(GLEXT_GL_COPY_WRITE_BUFFER, m_buffer));
-
-        glCheck(GLEXT_glCopyBufferSubData(GLEXT_GL_COPY_READ_BUFFER,
-                                          GLEXT_GL_COPY_WRITE_BUFFER,
-                                          0,
-                                          0,
-                                          static_cast<GLsizeiptr>(sizeof(Vertex) * vertexBuffer.m_size)));
-
-        glCheck(GLEXT_glBindBuffer(GLEXT_GL_COPY_WRITE_BUFFER, 0));
-        glCheck(GLEXT_glBindBuffer(GLEXT_GL_COPY_READ_BUFFER, 0));
-
+    if (&vertexBuffer == this)
         return true;
-    }
-
-#ifndef SFML_OPENGL_ES
-    glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, m_buffer));
-    glCheck(GLEXT_glBufferData(GLEXT_GL_ARRAY_BUFFER,
-                               static_cast<GLsizeiptrARB>(sizeof(Vertex) * vertexBuffer.m_size),
-                               nullptr,
-                               VertexBufferImpl::usageToGlEnum(m_usage)));
-
-    void* const destination = glCheck(GLEXT_glMapBuffer(GLEXT_GL_ARRAY_BUFFER, GLEXT_GL_WRITE_ONLY));
-
-    glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, vertexBuffer.m_buffer));
-
-    const void* const source = glCheck(GLEXT_glMapBuffer(GLEXT_GL_ARRAY_BUFFER, GLEXT_GL_READ_ONLY));
-
-    if (destination && source)
-        std::memcpy(destination, source, sizeof(Vertex) * vertexBuffer.m_size);
-
-    const bool sourceResult = source && glCheck(GLEXT_glUnmapBuffer(GLEXT_GL_ARRAY_BUFFER)) == GL_TRUE;
-
-    glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, m_buffer));
-
-    const bool destinationResult = destination && glCheck(GLEXT_glUnmapBuffer(GLEXT_GL_ARRAY_BUFFER)) == GL_TRUE;
-
-    glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, 0));
-
-    m_size = vertexBuffer.m_size;
-    return sourceResult && destinationResult;
-#else
-    return false;
-#endif
-#else
-    return false;
-#endif
+    const auto device = rhi::getDevice();
+    auto replacement = device->createBuffer(vertexBuffer.m_size * sizeof(Vertex), static_cast<rhi::BufferUsage>(m_usage));
+    if (!replacement || !replacement->copy(*vertexBuffer.m_resource))
+        return false;
+    m_resource = std::move(replacement);
+    m_size     = vertexBuffer.m_size;
+    return true;
 }
 
 
@@ -434,12 +153,8 @@ VertexBuffer& VertexBuffer::operator=(const VertexBuffer& right)
 ////////////////////////////////////////////////////////////
 void VertexBuffer::swap(VertexBuffer& right) noexcept
 {
-    std::swap(m_glContext, right.m_glContext);
-    std::swap(m_vulkanBuffer, right.m_vulkanBuffer);
-    std::swap(m_directXBuffer, right.m_directXBuffer);
-    std::swap(m_metalBuffer, right.m_metalBuffer);
+    std::swap(m_resource, right.m_resource);
     std::swap(m_size, right.m_size);
-    std::swap(m_buffer, right.m_buffer);
     std::swap(m_primitiveType, right.m_primitiveType);
     std::swap(m_usage, right.m_usage);
 }
@@ -448,25 +163,15 @@ void VertexBuffer::swap(VertexBuffer& right) noexcept
 ////////////////////////////////////////////////////////////
 unsigned int VertexBuffer::getNativeHandle() const
 {
-    return m_buffer;
+    return m_resource ? static_cast<const priv::BufferResource&>(*m_resource).nativeHandle() : 0;
 }
 
 
 ////////////////////////////////////////////////////////////
 void VertexBuffer::bind(const VertexBuffer* vertexBuffer)
 {
-#ifdef SFML_RENDER_GL
-    if (const auto* device = priv::getGraphicsDevice(); device && device->glContext)
-    {
-        const VertexContextLock lock;
-        priv::ensureExtensionsInit();
-        glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, vertexBuffer ? vertexBuffer->m_buffer : 0));
-        return;
-    }
-#else
-    (void)vertexBuffer;
-#endif
-    err() << "VertexBuffer::bind requires OpenGL" << std::endl;
+    if (const auto device = rhi::getDevice())
+        static_cast<priv::DeviceResource&>(*device).bindBuffer(vertexBuffer ? vertexBuffer->m_resource.get() : nullptr);
 }
 
 
@@ -501,7 +206,7 @@ VertexBuffer::Usage VertexBuffer::getUsage() const
 ////////////////////////////////////////////////////////////
 bool VertexBuffer::isAvailable()
 {
-    return priv::getGraphicsDevice() != nullptr;
+    return rhi::getDevice() != nullptr;
 }
 
 

@@ -207,11 +207,6 @@ private:
     [[nodiscard]] std::unique_ptr<priv::WindowSurface> createSurface(const ContextSettings&  settings,
                                                                      const priv::WindowImpl& owner,
                                                                      unsigned int            bitsPerPixel) override;
-
-    ////////////////////////////////////////////////////////////
-    // Member data
-    ////////////////////////////////////////////////////////////
-    [[maybe_unused]] unsigned int m_defaultFrameBuffer{}; //!< Framebuffer to bind when targeting this window
 };
 
 } // namespace sf

@@ -22,10 +22,10 @@
 //
 ////////////////////////////////////////////////////////////
 
-#include <SFML/Graphics/Texture.hpp>
 #include <SFML/Graphics/Vertex.hpp>
 #include <SFML/Graphics/Vulkan/BuiltInShaders.hpp>
 #include <SFML/Graphics/Vulkan/VulkanProgram.hpp>
+#include <SFML/Graphics/Vulkan/VulkanRHI.hpp>
 
 #include <SFML/System/Err.hpp>
 
@@ -58,12 +58,12 @@ struct Member
 
 struct Binding
 {
-    VkDescriptorSetLayoutBinding layout{};
-    std::string                  name;
-    std::vector<Member>          members;
-    std::vector<std::byte>       data;
-    const Texture*               texture{};
-    bool                         currentTexture{};
+    VkDescriptorSetLayoutBinding  layout{};
+    std::string                   name;
+    std::vector<Member>           members;
+    std::vector<std::byte>        data;
+    std::shared_ptr<rhi::Texture> texture;
+    bool                          currentTexture{};
 };
 
 bool stencilFormat(VkFormat format)
@@ -369,6 +369,8 @@ std::shared_ptr<VulkanProgram> VulkanProgram::create(VulkanDevice&    device,
 
 void VulkanProgram::setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count)
 {
+    if (!values || !count)
+        return;
     const auto  index      = static_cast<unsigned int>(type);
     const bool  matrix     = type == ShaderUniformType::Mat3 || type == ShaderUniformType::Mat4;
     const auto  columns    = matrix ? (type == ShaderUniformType::Mat3 ? 3u : 4u) : 1u;
@@ -415,7 +417,7 @@ void VulkanProgram::setUniform(const std::string& name, ShaderUniformType type, 
         err() << "Vulkan uniform not found or has incompatible type: " << name << std::endl;
 }
 
-void VulkanProgram::setSampler(const std::string& name, const Texture* texture, bool current)
+void VulkanProgram::setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current)
 {
     const std::lock_guard lock(m_impl->uniformsMutex);
     bool                  found = false;
@@ -570,10 +572,11 @@ VkPipeline VulkanProgram::getPipeline(const VulkanPipelineState& state, VkRender
     return result;
 }
 
-VulkanSample VulkanProgram::sample(const Texture* texture)
+VulkanSample VulkanProgram::sample(const rhi::Texture* texture)
 {
-    return texture ? VulkanSample{texture->m_vulkanImage, texture->m_isSmooth, texture->m_isRepeated, texture->m_hasMipmap}
-                   : VulkanSample{};
+    return texture
+               ? VulkanSample{nativeVulkanImage(texture), texture->isSmooth(), texture->isRepeated(), texture->hasMipmap()}
+               : VulkanSample{};
 }
 
 VulkanProgram::Descriptors VulkanProgram::prepareDescriptors(
@@ -661,7 +664,9 @@ VulkanProgram::Descriptors VulkanProgram::prepareDescriptors(
             if (!writeBuffer(result.sets[1], binding.layout.binding, binding.data.data(), binding.data.size()))
                 return {};
         }
-        else if (!writeImage(result.sets[1], binding.layout.binding, binding.currentTexture ? texture : sample(binding.texture)))
+        else if (!writeImage(result.sets[1],
+                             binding.layout.binding,
+                             binding.currentTexture ? texture : sample(binding.texture.get())))
         {
             return {};
         }

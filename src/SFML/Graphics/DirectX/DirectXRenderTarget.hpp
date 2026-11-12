@@ -37,37 +37,43 @@ public:
                                                                      const ContextSettings&         settings);
     ~DirectXRenderTarget() override;
 
-    void clear(RenderTarget& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
-    void draw(RenderTarget& target, const Vertex* vertices, std::size_t count, PrimitiveType type, const RenderStates& states) override;
-    void                                               draw(RenderTarget&       target,
-                                                            const VertexBuffer& buffer,
-                                                            std::size_t         first,
-                                                            std::size_t         count,
-                                                            const RenderStates& states) override;
+    [[nodiscard]] Vector2u getSize() const override;
+    void clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
+    void                                               draw(const rhi::TargetState&  target,
+                                                            const Vertex*            vertices,
+                                                            std::size_t              count,
+                                                            PrimitiveType            type,
+                                                            const rhi::DrawSettings& states) override;
+    void                                               draw(const rhi::TargetState&  target,
+                                                            const rhi::Buffer&       buffer,
+                                                            std::size_t              first,
+                                                            std::size_t              count,
+                                                            PrimitiveType            type,
+                                                            const rhi::DrawSettings& states) override;
     bool                                               setActive(bool active) override;
     void                                               viewChanged() override;
     [[nodiscard]] bool                                 resize(Vector2u size);
-    void                                               finish();
-    [[nodiscard]] const ContextSettings&               settings() const;
+    void                                               finish() override;
+    [[nodiscard]] const ContextSettings&               settings() const override;
     [[nodiscard]] const std::shared_ptr<DirectXImage>& image() const;
     [[nodiscard]] static unsigned int                  getMaximumAntiAliasingLevel(const DirectXDevice& device);
 
 private:
     DirectXRenderTarget(std::shared_ptr<DirectXDevice> device, const ContextSettings& settings);
     [[nodiscard]] bool attach(std::shared_ptr<DirectXImage> image);
-    void               drawVertices(RenderTarget&       target,
-                                    const Vertex*       vertices,
-                                    std::size_t         count,
-                                    PrimitiveType       type,
-                                    const RenderStates& states,
-                                    bool                clearing);
-    void               drawBuffer(RenderTarget&       target,
-                                  ID3D11Buffer*       buffer,
-                                  std::size_t         first,
-                                  std::size_t         count,
-                                  PrimitiveType       type,
-                                  const RenderStates& states,
-                                  bool                clearing = false);
+    void               drawVertices(const rhi::TargetState&  target,
+                                    const Vertex*            vertices,
+                                    std::size_t              count,
+                                    PrimitiveType            type,
+                                    const rhi::DrawSettings& states,
+                                    bool                     clearing);
+    void               drawBuffer(const rhi::TargetState&  target,
+                                  ID3D11Buffer*            buffer,
+                                  std::size_t              first,
+                                  std::size_t              count,
+                                  PrimitiveType            type,
+                                  const rhi::DrawSettings& states,
+                                  bool                     clearing = false);
     struct Impl;
     std::unique_ptr<Impl> m_impl;
 };

@@ -24,7 +24,7 @@
 
 #include <SFML/Graphics/Metal/BuiltInShaders.hpp>
 #include <SFML/Graphics/Metal/MetalObjects.hpp>
-#include <SFML/Graphics/Texture.hpp>
+#include <SFML/Graphics/Metal/MetalRHI.hpp>
 #include <SFML/Graphics/Vertex.hpp>
 
 #include <SFML/System/Err.hpp>
@@ -319,7 +319,7 @@ id<MTLRenderPipelineState> MetalProgram::Impl::pipeline(MetalDevice::Impl& devic
 bool MetalProgram::Impl::bind(MetalDevice::Impl&          device,
                               id<MTLRenderCommandEncoder> encoder,
                               const MetalDrawParameters&  parameters,
-                              const Texture*              texture,
+                              const rhi::Texture*         texture,
                               id<MTLTexture>              attachment)
 {
     using namespace MetalProgramImpl;
@@ -350,13 +350,15 @@ bool MetalProgram::Impl::bind(MetalDevice::Impl&          device,
         }
         for (const NSUInteger slot : stage.samplers)
         {
-            const auto  found    = std::find_if(stage.textures.begin(),
+            const auto                found    = std::find_if(stage.textures.begin(),
                                             stage.textures.end(),
                                             [slot](const MetalSampler& sampler) { return sampler.index == slot; });
-            const auto* selected = found == stage.textures.end() ? nullptr : found->current ? texture : found->texture;
-            const id<MTLSamplerState> state = device.sampler(selected && selected->m_isSmooth,
-                                                             selected && selected->m_isRepeated,
-                                                             selected && selected->m_hasMipmap);
+            const auto*               selected = found == stage.textures.end() ? nullptr
+                                                 : found->current              ? texture
+                                                                               : found->texture.get();
+            const id<MTLSamplerState> state    = device.sampler(selected && selected->isSmooth(),
+                                                             selected && selected->isRepeated(),
+                                                             selected && selected->hasMipmap());
             if (vertexStage)
                 [encoder setVertexSamplerState:state atIndex:slot];
             else
@@ -364,9 +366,9 @@ bool MetalProgram::Impl::bind(MetalDevice::Impl&          device,
         }
         for (const auto& sampler : stage.textures)
         {
-            const auto*          selected = sampler.current ? texture : sampler.texture;
-            const id<MTLTexture> image    = selected && selected->m_metalImage ? selected->m_metalImage->texture
-                                                                               : device.white->texture;
+            const auto*          selected = sampler.current ? texture : sampler.texture.get();
+            const id<MTLTexture> image    = selected && nativeMetalImage(selected) ? nativeMetalImage(selected)->texture
+                                                                                   : device.white->texture;
             if (image == attachment)
             {
                 err() << "Cannot sample the active Metal render target" << std::endl;
@@ -452,6 +454,8 @@ std::shared_ptr<MetalProgram> MetalProgram::create(MetalDevice& device, std::str
 
 void MetalProgram::setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count)
 {
+    if (!values || !count)
+        return;
     using namespace MetalProgramImpl;
     const std::lock_guard guard(m_impl->mutex);
     const auto [columns, rows] = shape(type);
@@ -502,7 +506,7 @@ void MetalProgram::setUniform(const std::string& name, ShaderUniformType type, c
         err() << "Metal uniform not found: " << name << std::endl;
 }
 
-void MetalProgram::setSampler(const std::string& name, const Texture* texture, bool current)
+void MetalProgram::setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current)
 {
     const std::lock_guard guard(m_impl->mutex);
     bool                  found = false;

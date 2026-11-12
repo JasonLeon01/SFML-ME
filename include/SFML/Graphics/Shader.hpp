@@ -43,17 +43,15 @@
 namespace sf
 {
 
+namespace rhi
+{
+class ShaderProgram;
+enum class UniformType : unsigned char;
+} // namespace rhi
 namespace priv
 {
-class OpenGLRenderTarget;
-class VulkanRenderTarget;
-class VulkanProgram;
-class DirectXProgram;
-class DirectXRenderTarget;
-class MetalProgram;
-class MetalRenderTarget;
-enum class ShaderUniformType : unsigned char;
-} // namespace priv
+class RhiAccess;
+}
 
 class InputStream;
 class Texture;
@@ -820,76 +818,12 @@ public:
     [[nodiscard]] static bool isGeometryAvailable();
 
 private:
-    friend class priv::OpenGLRenderTarget;
-    friend class priv::VulkanRenderTarget;
-    friend class priv::DirectXRenderTarget;
-    friend class priv::MetalRenderTarget;
-
-    [[nodiscard]] bool loadDefaultOpenGL();
-    void setUniformData(const std::string& name, priv::ShaderUniformType type, const void* values, std::size_t count);
-    std::shared_ptr<void>                 m_glContext;
-    std::shared_ptr<priv::VulkanProgram>  m_vulkanProgram;
-    std::shared_ptr<priv::DirectXProgram> m_directXProgram;
-    std::shared_ptr<priv::MetalProgram>   m_metalProgram;
-
-    ////////////////////////////////////////////////////////////
-    /// \brief Compile the shader(s) and create the program
-    ///
-    /// If one of the arguments is a null pointer, the corresponding shader
-    /// is not created.
-    ///
-    /// \param vertexShaderCode   Source code of the vertex shader
-    /// \param geometryShaderCode Source code of the geometry shader
-    /// \param fragmentShaderCode Source code of the fragment shader
-    ///
-    /// \return `true` on success, `false` if any error happened
-    ///
-    ////////////////////////////////////////////////////////////
-    [[nodiscard]] bool compile(std::string_view vertexShaderCode,
-                               std::string_view geometryShaderCode,
-                               std::string_view fragmentShaderCode);
-
-    ////////////////////////////////////////////////////////////
-    /// \brief Bind all the textures used by the shader
-    ///
-    /// This function each texture to a different unit, and
-    /// updates the corresponding variables in the shader accordingly.
-    ///
-    ////////////////////////////////////////////////////////////
-    void bindTextures() const;
-
-    ////////////////////////////////////////////////////////////
-    /// \brief Get the location ID of a shader uniform
-    ///
-    /// \param name Name of the uniform variable to search
-    ///
-    /// \return Location ID of the uniform, or -1 if not found
-    ///
-    ////////////////////////////////////////////////////////////
-    int getUniformLocation(const std::string& name);
-
-    ////////////////////////////////////////////////////////////
-    /// \brief RAII object to save and restore the program
-    ///        binding while uniforms are being set
-    ///
-    /// Implementation is private in the .cpp file.
-    ///
-    ////////////////////////////////////////////////////////////
-    struct UniformBinder;
-
-    ////////////////////////////////////////////////////////////
-    // Types
-    ////////////////////////////////////////////////////////////
-    using TextureTable = std::unordered_map<int, const Texture*>;
-    using UniformTable = std::unordered_map<std::string, int>;
-
-    ////////////////////////////////////////////////////////////
-    // Member data
-    ////////////////////////////////////////////////////////////
-    unsigned int m_shaderProgram{};    //!< OpenGL identifier for the program
-    int          m_currentTexture{-1}; //!< Location of the current texture in the shader
-    TextureTable m_textures;           //!< Texture variables in the shader, mapped to their location
-    UniformTable m_uniforms;           //!< Parameters location cache
+    friend class priv::RhiAccess;
+    void setUniformData(const std::string& name, rhi::UniformType type, const void* values, std::size_t count);
+    [[nodiscard]] bool compile(std::string_view vertex, std::string_view geometry, std::string_view fragment);
+    void               refreshSamplers() const;
+    std::shared_ptr<rhi::ShaderProgram>             m_resource;
+    std::unordered_map<std::string, const Texture*> m_samplers;
 };
 
 } // namespace sf

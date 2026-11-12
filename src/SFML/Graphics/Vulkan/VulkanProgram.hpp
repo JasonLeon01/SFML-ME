@@ -23,9 +23,9 @@
 ////////////////////////////////////////////////////////////
 
 #pragma once
-
 #include <SFML/Graphics/BlendMode.hpp>
 #include <SFML/Graphics/PrimitiveType.hpp>
+#include <SFML/Graphics/RHI/Resource.hpp>
 #include <SFML/Graphics/ShaderUniformType.hpp>
 #include <SFML/Graphics/StencilMode.hpp>
 #include <SFML/Graphics/Vulkan/VulkanDevice.hpp>
@@ -34,20 +34,9 @@
 #include <string>
 #include <string_view>
 
-namespace sf
-{
-class Texture;
-}
-
 namespace sf::priv
 {
-struct VulkanDrawParameters
-{
-    std::array<float, 16> transform;
-    std::array<float, 4>  textureTransform;
-    std::array<float, 16> modelView;
-    std::array<float, 16> projection;
-};
+using VulkanDrawParameters = DrawParameters;
 
 struct VulkanSample
 {
@@ -70,7 +59,7 @@ struct VulkanPipelineState
     bool                   present{};
 };
 
-class VulkanProgram
+class VulkanProgram : public ProgramResource
 {
 public:
     struct Descriptors
@@ -84,13 +73,13 @@ public:
         std::string_view vertex   = {},
         std::string_view geometry = {},
         std::string_view fragment = {});
-    ~VulkanProgram();
+    ~VulkanProgram() override;
 
     VulkanProgram(const VulkanProgram&)            = delete;
     VulkanProgram& operator=(const VulkanProgram&) = delete;
 
-    void setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count);
-    void setSampler(const std::string& name, const Texture* texture, bool current);
+    void setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count) override;
+    void setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current) override;
 
     [[nodiscard]] VkPipeline  getPipeline(const VulkanPipelineState& state, VkRenderPass pass);
     [[nodiscard]] Descriptors prepareDescriptors(VulkanDevice&               device,
@@ -98,7 +87,7 @@ public:
                                                  const VulkanSample&         texture,
                                                  const VulkanImage*          attachment);
     void                      bind(VkCommandBuffer commands, VkPipeline pipeline, const Descriptors& descriptors) const;
-    [[nodiscard]] static VulkanSample sample(const Texture* texture);
+    [[nodiscard]] static VulkanSample sample(const rhi::Texture* texture);
 
 private:
     explicit VulkanProgram(std::shared_ptr<VulkanContext> context);

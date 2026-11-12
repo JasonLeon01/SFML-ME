@@ -22,9 +22,8 @@
 //
 ////////////////////////////////////////////////////////////
 
-#include <SFML/Graphics/Shader.hpp>
-#include <SFML/Graphics/VertexBuffer.hpp>
 #include <SFML/Graphics/Vulkan/VulkanProgram.hpp>
+#include <SFML/Graphics/Vulkan/VulkanRHI.hpp>
 #include <SFML/Graphics/Vulkan/VulkanRenderTarget.hpp>
 
 #include <SFML/System/Err.hpp>
@@ -112,9 +111,9 @@ VkSampleCountFlags supportedSamples(const VulkanContext& ctx, VkFormat format, V
     return properties.sampleCounts;
 }
 
-VkRect2D getScissor(const RenderTarget& target, Vector2u size)
+VkRect2D getScissor(const rhi::TargetState& target, Vector2u size)
 {
-    const auto rect  = target.getScissor(target.getView());
+    const auto rect  = target.scissor;
     const auto left  = std::clamp<std::int64_t>(rect.position.x, 0, size.x);
     const auto top   = std::clamp<std::int64_t>(rect.position.y, 0, size.y);
     const auto right = std::clamp<std::int64_t>(static_cast<std::int64_t>(rect.position.x) + rect.size.x, left, size.x);
@@ -327,6 +326,7 @@ void VulkanRenderTarget::viewChanged()
 
 void VulkanRenderTarget::finish()
 {
+    colorWritten();
     const auto lock = m_device->lock();
     if (m_device->commands())
     {
@@ -358,7 +358,7 @@ VkCommandBuffer VulkanRenderTarget::beginPass()
     return command;
 }
 
-void VulkanRenderTarget::clear(RenderTarget& target, std::optional<Color> color, std::optional<StencilValue> stencil)
+void VulkanRenderTarget::clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil)
 {
     const auto lock = m_device->lock();
     const auto area = VulkanTargetImpl::getScissor(target, image()->size);
@@ -391,12 +391,14 @@ void VulkanRenderTarget::clear(RenderTarget& target, std::optional<Color> color,
     }
 }
 
-void VulkanRenderTarget::draw(RenderTarget&       target,
-                              const Vertex*       vertices,
-                              std::size_t         count,
-                              PrimitiveType       type,
-                              const RenderStates& states)
+void VulkanRenderTarget::draw(const rhi::TargetState&  target,
+                              const Vertex*            vertices,
+                              std::size_t              count,
+                              PrimitiveType            type,
+                              const rhi::DrawSettings& states)
 {
+    if (!vertices || !count)
+        return;
     constexpr auto maxVertices = std::min<std::size_t>(std::numeric_limits<std::uint32_t>::max(),
                                                        std::numeric_limits<std::size_t>::max() / sizeof(Vertex));
     if (count > maxVertices)
@@ -408,36 +410,39 @@ void VulkanRenderTarget::draw(RenderTarget&       target,
         draw(target, upload, 0, count, type, states);
 }
 
-void VulkanRenderTarget::draw(RenderTarget&       target,
-                              const VertexBuffer& buffer,
-                              std::size_t         first,
-                              std::size_t         count,
-                              const RenderStates& states)
+void VulkanRenderTarget::draw(const rhi::TargetState&  target,
+                              const rhi::Buffer&       buffer,
+                              std::size_t              first,
+                              std::size_t              count,
+                              PrimitiveType            type,
+                              const rhi::DrawSettings& states)
 {
-    if (!buffer.m_vulkanBuffer || first > std::numeric_limits<std::uint32_t>::max() ||
+    if (first > buffer.getSize() / sizeof(Vertex) || count > buffer.getSize() / sizeof(Vertex) - first)
+        return;
+    if (!nativeVulkanBuffer(buffer) || first > std::numeric_limits<std::uint32_t>::max() ||
         count > std::numeric_limits<std::uint32_t>::max() - first)
         return;
 
     const auto lock = m_device->lock();
-    m_device->retain(buffer.m_vulkanBuffer);
-    draw(target, VulkanDevice::Upload{buffer.m_vulkanBuffer->buffer, 0}, first, count, buffer.getPrimitiveType(), states);
+    m_device->retain(nativeVulkanBuffer(buffer));
+    draw(target, VulkanDevice::Upload{nativeVulkanBuffer(buffer)->buffer, 0}, first, count, type, states);
 }
 
-void VulkanRenderTarget::draw(RenderTarget&        target,
-                              VulkanDevice::Upload buffer,
-                              std::size_t          first,
-                              std::size_t          count,
-                              PrimitiveType        type,
-                              const RenderStates&  states)
+void VulkanRenderTarget::draw(const rhi::TargetState&  target,
+                              VulkanDevice::Upload     buffer,
+                              std::size_t              first,
+                              std::size_t              count,
+                              PrimitiveType            type,
+                              const rhi::DrawSettings& states)
 {
-    const auto& view    = target.getView();
-    const auto  rect    = target.getViewport(view);
-    const auto  scissor = VulkanTargetImpl::getScissor(target, image()->size);
+    const auto rect    = target.viewport;
+    const auto scissor = VulkanTargetImpl::getScissor(target, image()->size);
     if (rect.size.x <= 0 || rect.size.y <= 0 || !scissor.extent.width || !scissor.extent.height)
         return;
 
-    const auto program = states.shader && states.shader->m_vulkanProgram ? states.shader->m_vulkanProgram
-                                                                         : m_device->defaultProgram();
+    const auto program = states.shader && std::dynamic_pointer_cast<VulkanProgram>(states.shader)
+                             ? std::dynamic_pointer_cast<VulkanProgram>(states.shader)
+                             : m_device->defaultProgram();
     if (!program)
         return;
 
@@ -453,11 +458,7 @@ void VulkanRenderTarget::draw(RenderTarget&        target,
     if (!pipeline)
         return;
 
-    const auto           transform = view.getTransform() * states.transform;
-    VulkanDrawParameters parameters{};
-    std::copy_n(transform.getMatrix(), parameters.transform.size(), parameters.transform.begin());
-    std::copy_n(states.transform.getMatrix(), parameters.modelView.size(), parameters.modelView.begin());
-    std::copy_n(view.getTransform().getMatrix(), parameters.projection.size(), parameters.projection.begin());
+    auto parameters = prepareDraw(target, states);
     // SFML's clip-space Y goes up. Vulkan viewports with positive height go down.
     for (std::size_t column = 0; column < 4; ++column)
     {
@@ -465,14 +466,7 @@ void VulkanRenderTarget::draw(RenderTarget&        target,
         parameters.projection[4 * column + 1] *= -1.f;
     }
 
-    auto sample                 = VulkanProgram::sample(states.texture);
-    parameters.textureTransform = {1.f, 1.f, 0.f, 0.f};
-    if (sample.image && states.coordinateType == CoordinateType::Pixels)
-    {
-        parameters.textureTransform[0] /= static_cast<float>(sample.image->size.x);
-        parameters.textureTransform[1] /= static_cast<float>(sample.image->size.y);
-    }
-
+    auto       sample      = VulkanProgram::sample(states.texture.get());
     const auto descriptors = program->prepareDescriptors(*m_device, parameters, sample, image().get());
     if (!descriptors.count)
         return;
@@ -497,5 +491,9 @@ void VulkanRenderTarget::draw(RenderTarget&        target,
         vk.CmdEndRenderPass(command);
         m_device->retain(program);
     }
+}
+Vector2u VulkanRenderTarget::getSize() const
+{
+    return image()->size;
 }
 } // namespace sf::priv

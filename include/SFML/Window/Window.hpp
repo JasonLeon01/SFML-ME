@@ -44,6 +44,10 @@ namespace sf
 {
 namespace priv
 {
+class RhiAccess;
+}
+namespace priv
+{
 class WindowSurface;
 }
 
@@ -338,6 +342,7 @@ public:
     void display();
 
 private:
+    friend class priv::RhiAccess;
     friend class RenderWindow;
     friend class Texture;
 

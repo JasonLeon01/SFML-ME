@@ -24,12 +24,14 @@
 
 #include <SFML/Graphics/GLCheck.hpp>
 #include <SFML/Graphics/GLExtensions.hpp>
+#include <SFML/Graphics/GraphicsDevice.hpp>
+#include <SFML/Graphics/OpenGL/OpenGLBuffer.hpp>
+#include <SFML/Graphics/OpenGL/OpenGLProgram.hpp>
 #include <SFML/Graphics/OpenGL/OpenGLRenderTarget.hpp>
 #include <SFML/Graphics/OpenGL/OpenGLResource.hpp>
-#include <SFML/Graphics/RenderTarget.hpp>
-#include <SFML/Graphics/Shader.hpp>
-#include <SFML/Graphics/Texture.hpp>
-#include <SFML/Graphics/VertexBuffer.hpp>
+#include <SFML/Graphics/OpenGL/OpenGLTexture.hpp>
+#include <SFML/Graphics/RenderTextureImplDefault.hpp>
+#include <SFML/Graphics/RenderTextureImplFBO.hpp>
 
 #include <SFML/Window/Context.hpp>
 
@@ -245,8 +247,8 @@ struct OpenGLRenderTarget::ProgrammableState
 #endif
     };
 
-    std::vector<State> states;
-    Shader             defaultShader;
+    std::vector<State>             states;
+    std::unique_ptr<OpenGLProgram> defaultShader;
 };
 
 OpenGLRenderTarget::OpenGLRenderTarget(bool programmable) :
@@ -262,20 +264,19 @@ void OpenGLRenderTarget::viewChanged()
     m_cache.viewChanged = true;
 }
 
-void OpenGLRenderTarget::clear(RenderTarget& target, std::optional<Color> color, std::optional<StencilValue> stencil)
+void OpenGLRenderTarget::clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil)
 {
-    if (!OpenGLRenderTargetImpl::isActive(m_id) && !target.setActive(true))
+    if (!isActive() && !setActive(true))
         return;
 
     ensureExtensionsInit();
     applyTexture(nullptr);
-    if (!m_cache.enable || m_cache.viewChanged)
-        applyCurrentView(target);
+    applyCurrentView(target);
 
 #ifndef SFML_OPENGL_ES
     if (GLEXT_framebuffer_sRGB)
     {
-        if (target.isSrgb())
+        if (target.sRgb)
             glCheck(glEnable(GL_FRAMEBUFFER_SRGB));
         else
             glCheck(glDisable(GL_FRAMEBUFFER_SRGB));
@@ -296,13 +297,15 @@ void OpenGLRenderTarget::clear(RenderTarget& target, std::optional<Color> color,
     glCheck(glClear(mask));
 }
 
-void OpenGLRenderTarget::draw(RenderTarget&       target,
-                              const Vertex*       vertices,
-                              std::size_t         vertexCount,
-                              PrimitiveType       type,
-                              const RenderStates& states)
+void OpenGLRenderTarget::draw(const rhi::TargetState&  target,
+                              const Vertex*            vertices,
+                              std::size_t              vertexCount,
+                              PrimitiveType            type,
+                              const rhi::DrawSettings& states)
 {
-    if (OpenGLRenderTargetImpl::isActive(m_id) || target.setActive(true))
+    if (!vertices || !vertexCount)
+        return;
+    if (isActive() || setActive(true))
     {
         if (m_modern)
         {
@@ -370,22 +373,26 @@ void OpenGLRenderTarget::draw(RenderTarget&       target,
 }
 
 
-void OpenGLRenderTarget::draw(RenderTarget&       target,
-                              const VertexBuffer& vertexBuffer,
-                              std::size_t         firstVertex,
-                              std::size_t         vertexCount,
-                              const RenderStates& states)
+void OpenGLRenderTarget::draw(const rhi::TargetState&  target,
+                              const rhi::Buffer&       vertexBuffer,
+                              std::size_t              firstVertex,
+                              std::size_t              vertexCount,
+                              PrimitiveType            type,
+                              const rhi::DrawSettings& states)
 {
-    if (OpenGLRenderTargetImpl::isActive(m_id) || target.setActive(true))
+    if (firstVertex > vertexBuffer.getSize() / sizeof(Vertex) ||
+        vertexCount > vertexBuffer.getSize() / sizeof(Vertex) - firstVertex)
+        return;
+    if (isActive() || setActive(true))
     {
         if (m_modern)
         {
             drawProgrammable(target,
                              nullptr,
-                             vertexBuffer.getNativeHandle(),
+                             static_cast<const OpenGLBuffer&>(vertexBuffer).nativeHandle(),
                              firstVertex,
                              vertexCount,
-                             vertexBuffer.getPrimitiveType(),
+                             type,
                              states);
             return;
         }
@@ -393,7 +400,7 @@ void OpenGLRenderTarget::draw(RenderTarget&       target,
         setupDraw(target, false, states);
 
         // Bind vertex buffer
-        VertexBuffer::bind(&vertexBuffer);
+        OpenGLBuffer::bind(&vertexBuffer);
 
         // Always enable texture coordinates
         if (!m_cache.enable || !m_cache.texCoordsArrayEnabled)
@@ -403,10 +410,10 @@ void OpenGLRenderTarget::draw(RenderTarget&       target,
         glCheck(glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(Vertex), reinterpret_cast<const void*>(8)));
         glCheck(glTexCoordPointer(2, GL_FLOAT, sizeof(Vertex), reinterpret_cast<const void*>(12)));
 
-        drawPrimitives(vertexBuffer.getPrimitiveType(), firstVertex, vertexCount);
+        drawPrimitives(type, firstVertex, vertexCount);
 
         // Unbind vertex buffer
-        VertexBuffer::bind(nullptr);
+        OpenGLBuffer::bind(nullptr);
 
         cleanupDraw(states);
 
@@ -417,8 +424,25 @@ void OpenGLRenderTarget::draw(RenderTarget&       target,
 }
 
 
+bool OpenGLRenderTarget::isActive() const
+{
+    return !m_windowResized && OpenGLRenderTargetImpl::isActive(m_id);
+}
+
 bool OpenGLRenderTarget::setActive(bool active)
 {
+    if (m_attachment && !m_attachment->activate(active))
+        return false;
+    // EGL may resize the drawable only when it is rebound, even if this context
+    // was already current. Defer that rebind until the window is next used.
+    if (active && m_windowResized && m_window && !m_window->setActive(false))
+        return false;
+    if (m_window && !m_window->setActive(active))
+        return false;
+    if (active)
+        m_windowResized = false;
+    if (active && m_window && RenderTextureImplFBO::isAvailable())
+        glCheck(GLEXT_glBindFramebuffer(GLEXT_GL_FRAMEBUFFER, m_framebuffer));
     // Mark this RenderTarget as active or no longer active in the tracking map
     const std::scoped_lock lock(OpenGLRenderTargetImpl::getMutex());
 
@@ -462,9 +486,9 @@ bool OpenGLRenderTarget::setActive(bool active)
 
 
 ////////////////////////////////////////////////////////////
-void OpenGLRenderTarget::pushGLStates(RenderTarget& target)
+void OpenGLRenderTarget::pushGLStates(const rhi::TargetState& target)
 {
-    if (OpenGLRenderTargetImpl::isActive(m_id) || target.setActive(true))
+    if (isActive() || setActive(true))
     {
 #ifdef SFML_DEBUG
         ensureExtensionsInit();
@@ -560,9 +584,9 @@ void OpenGLRenderTarget::pushGLStates(RenderTarget& target)
 
 
 ////////////////////////////////////////////////////////////
-void OpenGLRenderTarget::popGLStates(RenderTarget& target)
+void OpenGLRenderTarget::popGLStates(const rhi::TargetState&)
 {
-    if (!OpenGLRenderTargetImpl::isActive(m_id) && !target.setActive(true))
+    if (!isActive() && !setActive(true))
         return;
 
     if (m_modern)
@@ -654,22 +678,22 @@ void OpenGLRenderTarget::popGLStates(RenderTarget& target)
 
 
 ////////////////////////////////////////////////////////////
-void OpenGLRenderTarget::resetGLStates(RenderTarget& target)
+void OpenGLRenderTarget::resetGLStates(const rhi::TargetState&)
 {
     // Check here to make sure a context change does not happen after activate(true)
-    const bool shaderAvailable       = Shader::isAvailable();
-    const bool vertexBufferAvailable = VertexBuffer::isAvailable();
+    const bool shaderAvailable       = true;
+    const bool vertexBufferAvailable = true;
 
 // Workaround for states not being properly reset on
 // macOS unless a context switch really takes place
 #ifdef SFML_SYSTEM_MACOS
-    if (!target.setActive(false))
+    if (!setActive(false))
     {
         err() << "Failed to set render target inactive" << std::endl;
     }
 #endif
 
-    if (OpenGLRenderTargetImpl::isActive(m_id) || target.setActive(true))
+    if (isActive() || setActive(true))
     {
         // Make sure that extensions are initialized
         ensureExtensionsInit();
@@ -714,10 +738,10 @@ void OpenGLRenderTarget::resetGLStates(RenderTarget& target)
         applyStencilMode(StencilMode());
         applyTexture(nullptr);
         if (shaderAvailable)
-            Shader::bind(nullptr);
+            OpenGLProgram::bind(nullptr);
 
         if (vertexBufferAvailable)
-            glCheck(VertexBuffer::bind(nullptr));
+            glCheck(OpenGLBuffer::bind(nullptr));
 
         m_cache.texCoordsArrayEnabled = true;
 
@@ -731,15 +755,15 @@ void OpenGLRenderTarget::resetGLStates(RenderTarget& target)
 }
 
 
-void OpenGLRenderTarget::applyCurrentView(RenderTarget& target)
+void OpenGLRenderTarget::applyCurrentView(const rhi::TargetState& target)
 {
     // Set the viewport
-    const IntRect viewport    = target.getViewport(target.getView());
-    const int     viewportTop = static_cast<int>(target.getSize().y) - (viewport.position.y + viewport.size.y);
+    const IntRect viewport    = target.viewport;
+    const int     viewportTop = static_cast<int>(target.size.y) - (viewport.position.y + viewport.size.y);
     glCheck(glViewport(viewport.position.x, viewportTop, viewport.size.x, viewport.size.y));
 
     // Set the scissor rectangle and enable/disable scissor testing
-    if (target.getView().getScissor() == FloatRect({0, 0}, {1, 1}))
+    if (target.scissor == IntRect({}, Vector2i(target.size)))
     {
         if (!m_cache.enable || m_cache.scissorEnabled)
         {
@@ -749,8 +773,8 @@ void OpenGLRenderTarget::applyCurrentView(RenderTarget& target)
     }
     else
     {
-        const IntRect pixelScissor = target.getScissor(target.getView());
-        const int scissorTop = static_cast<int>(target.getSize().y) - (pixelScissor.position.y + pixelScissor.size.y);
+        const IntRect pixelScissor = target.scissor;
+        const int     scissorTop   = static_cast<int>(target.size.y) - (pixelScissor.position.y + pixelScissor.size.y);
         glCheck(glScissor(pixelScissor.position.x, scissorTop, pixelScissor.size.x, pixelScissor.size.y));
 
         if (!m_cache.enable || !m_cache.scissorEnabled)
@@ -763,7 +787,7 @@ void OpenGLRenderTarget::applyCurrentView(RenderTarget& target)
     if (!m_modern)
     {
         glCheck(glMatrixMode(GL_PROJECTION));
-        glCheck(glLoadMatrixf(target.getView().getTransform().getMatrix()));
+        glCheck(glLoadMatrixf(target.projection.getMatrix()));
         glCheck(glMatrixMode(GL_MODELVIEW));
     }
 
@@ -874,17 +898,17 @@ void OpenGLRenderTarget::applyTransform(const Transform& transform)
 
 
 ////////////////////////////////////////////////////////////
-void OpenGLRenderTarget::applyTexture(const Texture* texture, CoordinateType coordinateType)
+void OpenGLRenderTarget::applyTexture(const rhi::Texture* texture, CoordinateType coordinateType)
 {
-    Texture::bind(texture, coordinateType);
+    bindOpenGLTexture(texture, coordinateType, m_modern != nullptr);
 
-    m_cache.lastTextureId      = texture ? texture->m_cacheId : 0;
+    m_cache.lastTextureId      = texture ? static_cast<const TextureResource*>(texture)->revision() : 0;
     m_cache.lastCoordinateType = coordinateType;
 }
 
 
 ////////////////////////////////////////////////////////////
-void OpenGLRenderTarget::setupDraw(RenderTarget& target, bool useVertexCache, const RenderStates& states)
+void OpenGLRenderTarget::setupDraw(const rhi::TargetState& target, bool useVertexCache, const rhi::DrawSettings& states)
 {
     // GL_FRAMEBUFFER_SRGB is not available on OpenGL ES
     // If a framebuffer supports sRGB, it will always be enabled on OpenGL ES
@@ -893,7 +917,7 @@ void OpenGLRenderTarget::setupDraw(RenderTarget& target, bool useVertexCache, co
     // This is needed for drivers that do not check the format of the surface drawn to before applying sRGB conversion
     if (!m_cache.enable)
     {
-        if (target.isSrgb())
+        if (target.sRgb)
             glCheck(glEnable(GL_FRAMEBUFFER_SRGB));
         else if (GLEXT_framebuffer_sRGB)
             glCheck(glDisable(GL_FRAMEBUFFER_SRGB));
@@ -916,8 +940,7 @@ void OpenGLRenderTarget::setupDraw(RenderTarget& target, bool useVertexCache, co
     }
 
     // Apply the view
-    if (!m_cache.enable || m_cache.viewChanged)
-        applyCurrentView(target);
+    applyCurrentView(target);
 
     // Apply the blend mode
     if (!m_cache.enable || (states.blendMode != m_cache.lastBlendMode))
@@ -932,7 +955,7 @@ void OpenGLRenderTarget::setupDraw(RenderTarget& target, bool useVertexCache, co
         glCheck(glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE));
 
     // Apply the texture
-    if (!m_cache.enable || (states.texture && states.texture->m_fboAttachment))
+    if (!m_cache.enable || (states.texture && static_cast<const TextureResource*>(states.texture.get())->attachment()))
     {
         // If the texture is an FBO attachment, always rebind it
         // in order to inform the OpenGL driver that we want changes
@@ -940,18 +963,20 @@ void OpenGLRenderTarget::setupDraw(RenderTarget& target, bool useVertexCache, co
         // This saves us from having to call glFlush() in
         // RenderTextureImplFBO which can be quite costly
         // See: https://www.khronos.org/opengl/wiki/Memory_Model
-        applyTexture(states.texture, states.coordinateType);
+        applyTexture(states.texture.get(), states.coordinateType);
     }
     else
     {
-        const std::uint64_t textureId = states.texture ? states.texture->m_cacheId : 0;
+        const std::uint64_t textureId = states.texture
+                                            ? static_cast<const TextureResource*>(states.texture.get())->revision()
+                                            : 0;
         if (textureId != m_cache.lastTextureId || states.coordinateType != m_cache.lastCoordinateType)
-            applyTexture(states.texture, states.coordinateType);
+            applyTexture(states.texture.get(), states.coordinateType);
     }
 
     // Apply the shader
     if (!m_modern && states.shader)
-        Shader::bind(states.shader);
+        OpenGLProgram::bind(states.shader.get());
 }
 
 
@@ -969,15 +994,15 @@ void OpenGLRenderTarget::drawPrimitives(PrimitiveType type, std::size_t firstVer
 
 
 ////////////////////////////////////////////////////////////
-void OpenGLRenderTarget::cleanupDraw(const RenderStates& states)
+void OpenGLRenderTarget::cleanupDraw(const rhi::DrawSettings& states)
 {
     // Unbind the shader, if any
     if (m_modern || states.shader)
-        Shader::bind(nullptr);
+        OpenGLProgram::bind(nullptr);
 
     // If the texture we used to draw belonged to a RenderTexture, then forcibly unbind that texture.
     // This prevents a bug where some drivers do not clear RenderTextures properly.
-    if (states.texture && states.texture->m_fboAttachment)
+    if (states.texture && static_cast<const TextureResource*>(states.texture.get())->attachment())
         applyTexture(nullptr);
 
     // Mask the color buffer back on if necessary
@@ -990,13 +1015,13 @@ void OpenGLRenderTarget::cleanupDraw(const RenderStates& states)
 
 
 void OpenGLRenderTarget::drawProgrammable(
-    RenderTarget&       target,
-    const Vertex*       vertices,
-    unsigned int        buffer,
-    std::size_t         first,
-    std::size_t         count,
-    PrimitiveType       type,
-    const RenderStates& states)
+    const rhi::TargetState&  target,
+    const Vertex*            vertices,
+    unsigned int             buffer,
+    std::size_t              first,
+    std::size_t              count,
+    PrimitiveType            type,
+    const rhi::DrawSettings& states)
 {
     struct VertexObjects
     {
@@ -1034,10 +1059,15 @@ void OpenGLRenderTarget::drawProgrammable(
     };
 
     setupDraw(target, false, states);
-    if (!m_modern->defaultShader.getNativeHandle() && !m_modern->defaultShader.loadDefaultOpenGL())
+    if (!m_modern->defaultShader)
     {
-        cleanupDraw(states);
-        return;
+        m_modern->defaultShader = std::make_unique<OpenGLProgram>(std::shared_ptr<void>{}, true);
+        if (!m_modern->defaultShader->loadDefault())
+        {
+            m_modern->defaultShader.reset();
+            cleanupDraw(states);
+            return;
+        }
     }
 
     const auto vertexObjects = objects();
@@ -1059,21 +1089,23 @@ void OpenGLRenderTarget::drawProgrammable(
     for (GLuint index = 0; index < 3; ++index)
         glCheck(glEnableVertexAttribArray(index));
 
-    const Shader* shader = states.shader && states.shader->getNativeHandle() ? states.shader : &m_modern->defaultShader;
-    Shader::bind(shader);
-    const auto program = shader->getNativeHandle();
+    const auto* shader = states.shader ? dynamic_cast<const OpenGLProgram*>(states.shader.get())
+                                       : m_modern->defaultShader.get();
+    OpenGLProgram::bind(shader);
+    const auto program = shader ? shader->nativeHandle() : 0;
     if (program)
     {
-        const auto& view          = target.getView().getTransform();
-        const auto  transform     = view * states.transform;
-        const auto  textureMatrix = Texture::coordinateMatrix(states.texture, states.coordinateType);
+        const auto parameters    = prepareDraw(target, states);
+        const auto textureMatrix = states.texture ? states.texture->coordinateMatrix(states.coordinateType)
+                                                  : std::array<float, 16>{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
         glCheck(
-            glUniformMatrix4fv(glGetUniformLocation(program, "sf_ModelViewMatrix"), 1, GL_FALSE, states.transform.getMatrix()));
-        glCheck(glUniformMatrix4fv(glGetUniformLocation(program, "sf_ProjectionMatrix"), 1, GL_FALSE, view.getMatrix()));
+            glUniformMatrix4fv(glGetUniformLocation(program, "sf_ModelViewMatrix"), 1, GL_FALSE, parameters.modelView.data()));
+        glCheck(
+            glUniformMatrix4fv(glGetUniformLocation(program, "sf_ProjectionMatrix"), 1, GL_FALSE, parameters.projection.data()));
         glCheck(glUniformMatrix4fv(glGetUniformLocation(program, "sf_ModelViewProjectionMatrix"),
                                    1,
                                    GL_FALSE,
-                                   transform.getMatrix()));
+                                   parameters.transform.data()));
         glCheck(glUniformMatrix4fv(glGetUniformLocation(program, "sf_TextureMatrix"), 1, GL_FALSE, textureMatrix.data()));
         glCheck(glUniform1i(glGetUniformLocation(program, "sf_TextureEnabled"), states.texture ? GL_TRUE : GL_FALSE));
         glCheck(glUniform1i(glGetUniformLocation(program, "sf_Texture"), 0));
@@ -1083,4 +1115,40 @@ void OpenGLRenderTarget::drawProgrammable(
     cleanupDraw(states);
 }
 
+std::shared_ptr<OpenGLRenderTarget> OpenGLRenderTarget::create(std::shared_ptr<OpenGLTexture> texture,
+                                                               const ContextSettings&         settings,
+                                                               bool                           programmable)
+{
+    auto target = std::make_shared<OpenGLRenderTarget>(programmable);
+    if (RenderTextureImplFBO::isAvailable())
+    {
+        target->m_attachment     = std::make_unique<RenderTextureImplFBO>();
+        texture->m_fboAttachment = true;
+    }
+    else
+        target->m_attachment = std::make_unique<RenderTextureImplDefault>();
+    if (!target->m_attachment->create(texture->m_actualSize, texture->m_texture, settings))
+        return {};
+    target->m_size                 = texture->getSize();
+    target->m_settings             = settings;
+    target->m_settings.sRgbCapable = target->m_attachment->isSrgb();
+    target->m_color                = std::move(texture);
+    return target;
+}
+void OpenGLRenderTarget::finish()
+{
+    if (!m_attachment || !setActive(true))
+        return;
+    m_attachment->updateTexture(m_color->m_texture);
+    m_color->m_pixelsFlipped = true;
+    m_color->invalidateMipmap();
+}
+void OpenGLRenderTarget::attachWindow(std::shared_ptr<WindowSurface> surface, Vector2u size)
+{
+    m_window   = std::move(surface);
+    m_size     = size;
+    m_settings = m_window->getSettings();
+    if (m_window->setActive(true) && RenderTextureImplFBO::isAvailable())
+        glCheck(glGetIntegerv(GLEXT_GL_FRAMEBUFFER_BINDING, reinterpret_cast<GLint*>(&m_framebuffer)));
+}
 } // namespace sf::priv

@@ -11,6 +11,12 @@ set(SRC
     ${INCROOT}/Export.hpp
     ${SRCROOT}/Font.cpp
     ${SRCROOT}/GraphicsBackend.cpp
+    ${INCROOT}/RHI.hpp
+    ${INCROOT}/RHI/Device.hpp
+    ${SRCROOT}/RHI/Resource.cpp
+    ${SRCROOT}/RHI/Resource.hpp
+    ${SRCROOT}/RHI/Access.hpp
+    ${SRCROOT}/RHI/NativeResources.hpp
     ${SRCROOT}/GraphicsDevice.hpp
     ${SRCROOT}/RenderTargetBackend.hpp
     ${SRCROOT}/ShaderUniformType.hpp
@@ -95,6 +101,8 @@ if(SFML_BUILD_DIRECTX_BACKEND)
     target_compile_definitions(sfml-graphics PUBLIC SFML_RENDER_DIRECTX)
     target_link_libraries(sfml-graphics PRIVATE d3d11 dxgi dxguid)
     target_sources(sfml-graphics PRIVATE
+        ${SRCROOT}/DirectX/DirectXRHI.cpp
+        ${SRCROOT}/DirectX/DirectXRHI.hpp
         ${SRCROOT}/DirectX/DirectXDevice.cpp
         ${SRCROOT}/DirectX/DirectXDevice.hpp
         ${SRCROOT}/DirectX/DirectXProgram.cpp
@@ -116,6 +124,8 @@ if(SFML_BUILD_METAL_BACKEND)
     set(METAL_SRC
         ${SRCROOT}/Metal/BuiltInShaders.hpp
         ${SRCROOT}/Metal/MetalDevice.hpp
+        ${SRCROOT}/Metal/MetalRHI.mm
+        ${SRCROOT}/Metal/MetalRHI.hpp
         ${SRCROOT}/Metal/MetalDevice.mm
         ${SRCROOT}/Metal/MetalObjects.hpp
         ${SRCROOT}/Metal/MetalProgram.hpp
@@ -145,6 +155,13 @@ if(SFML_BUILD_OPENGL_BACKEND)
         ${SRCROOT}/OpenGL/OpenGLRenderTarget.cpp
         ${SRCROOT}/OpenGL/OpenGLRenderTarget.hpp
         ${SRCROOT}/OpenGL/OpenGLResource.hpp
+        ${SRCROOT}/OpenGL/OpenGLRHI.cpp
+        ${SRCROOT}/OpenGL/OpenGLTexture.cpp
+        ${SRCROOT}/OpenGL/OpenGLTexture.hpp
+        ${SRCROOT}/OpenGL/OpenGLBuffer.cpp
+        ${SRCROOT}/OpenGL/OpenGLBuffer.hpp
+        ${SRCROOT}/OpenGL/OpenGLProgram.cpp
+        ${SRCROOT}/OpenGL/OpenGLProgram.hpp
         ${RENDER_TEXTURE_SRC}
     )
 endif()
@@ -164,6 +181,8 @@ if(SFML_BUILD_VULKAN_BACKEND)
     target_compile_options(sfml-spirv-reflect PRIVATE -w)
     target_sources(sfml-graphics PRIVATE
         $<TARGET_OBJECTS:sfml-spirv-reflect>
+        ${SRCROOT}/Vulkan/VulkanRHI.cpp
+        ${SRCROOT}/Vulkan/VulkanRHI.hpp
         ${SRCROOT}/Vulkan/VulkanDevice.cpp
         ${SRCROOT}/Vulkan/VulkanDevice.hpp
         ${SRCROOT}/Vulkan/VulkanFunctions.inc

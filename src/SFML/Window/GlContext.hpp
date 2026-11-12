@@ -116,7 +116,9 @@ public:
     /// \return Pointer to the created context
     ///
     ////////////////////////////////////////////////////////////
-    static std::unique_ptr<GlContext> create(const ContextSettings& settings, const WindowImpl& owner, unsigned int bitsPerPixel);
+    SFML_WINDOW_API static std::unique_ptr<GlContext> create(const ContextSettings& settings,
+                                                             const WindowImpl&      owner,
+                                                             unsigned int           bitsPerPixel);
 
     ////////////////////////////////////////////////////////////
     /// \brief Create a new context that embeds its own rendering target

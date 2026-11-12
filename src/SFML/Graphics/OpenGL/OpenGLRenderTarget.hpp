@@ -27,46 +27,82 @@
 #include <SFML/Graphics/RenderTargetBackend.hpp>
 
 #include <array>
+#include <functional>
 #include <memory>
 
 namespace sf::priv
 {
+class OpenGLTexture;
+class RenderTextureImpl;
 class OpenGLRenderTarget final : public RenderTargetBackend
 {
 public:
     explicit OpenGLRenderTarget(bool programmable);
+    static std::shared_ptr<OpenGLRenderTarget> create(std::shared_ptr<OpenGLTexture> texture,
+                                                      const ContextSettings&         settings,
+                                                      bool                           programmable);
+    [[nodiscard]] Vector2u                     getSize() const override
+    {
+        return m_size;
+    }
+    [[nodiscard]] const ContextSettings& settings() const override
+    {
+        return m_settings;
+    }
+    void finish() override;
+    void resizeWindow(Vector2u size)
+    {
+        m_windowResized = m_windowResized || size != m_size;
+        m_size          = size;
+        viewChanged();
+    }
+    void attachWindow(std::shared_ptr<WindowSurface> surface, Vector2u size);
+
     ~OpenGLRenderTarget() override;
 
-    void clear(RenderTarget& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
-    void draw(RenderTarget& target, const Vertex* vertices, std::size_t count, PrimitiveType type, const RenderStates& states) override;
-    void draw(RenderTarget&       target,
-              const VertexBuffer& buffer,
-              std::size_t         first,
-              std::size_t         count,
-              const RenderStates& states) override;
+    void clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
+    void draw(const rhi::TargetState&  target,
+              const Vertex*            vertices,
+              std::size_t              count,
+              PrimitiveType            type,
+              const rhi::DrawSettings& states) override;
+    void draw(const rhi::TargetState&  target,
+              const rhi::Buffer&       buffer,
+              std::size_t              first,
+              std::size_t              count,
+              PrimitiveType            type,
+              const rhi::DrawSettings& states) override;
     bool setActive(bool active) override;
     void viewChanged() override;
-    void pushGLStates(RenderTarget& target) override;
-    void popGLStates(RenderTarget& target) override;
-    void resetGLStates(RenderTarget& target) override;
+    void pushGLStates(const rhi::TargetState& target) override;
+    void popGLStates(const rhi::TargetState& target) override;
+    void resetGLStates(const rhi::TargetState& target) override;
 
 private:
-    void applyCurrentView(RenderTarget& target);
-    void applyBlendMode(const BlendMode& mode);
-    void applyStencilMode(const StencilMode& mode);
-    void applyTransform(const Transform& transform);
-    void applyTexture(const Texture* texture, CoordinateType coordinateType = CoordinateType::Pixels);
-    void setupDraw(RenderTarget& target, bool useVertexCache, const RenderStates& states);
+    [[nodiscard]] bool isActive() const;
+    void               applyCurrentView(const rhi::TargetState& target);
+    void               applyBlendMode(const BlendMode& mode);
+    void               applyStencilMode(const StencilMode& mode);
+    void               applyTransform(const Transform& transform);
+    void applyTexture(const rhi::Texture* texture, CoordinateType coordinateType = CoordinateType::Pixels);
+    void setupDraw(const rhi::TargetState& target, bool useVertexCache, const rhi::DrawSettings& states);
     void drawPrimitives(PrimitiveType type, std::size_t first, std::size_t count);
-    void cleanupDraw(const RenderStates& states);
-    void drawProgrammable(RenderTarget&       target,
-                          const Vertex*       vertices,
-                          unsigned int        buffer,
-                          std::size_t         first,
-                          std::size_t         count,
-                          PrimitiveType       type,
-                          const RenderStates& states);
+    void cleanupDraw(const rhi::DrawSettings& states);
+    void drawProgrammable(const rhi::TargetState&  target,
+                          const Vertex*            vertices,
+                          unsigned int             buffer,
+                          std::size_t              first,
+                          std::size_t              count,
+                          PrimitiveType            type,
+                          const rhi::DrawSettings& states);
 
+    Vector2u                           m_size;
+    ContextSettings                    m_settings;
+    std::shared_ptr<OpenGLTexture>     m_color;
+    std::unique_ptr<RenderTextureImpl> m_attachment;
+    std::shared_ptr<WindowSurface>     m_window;
+    unsigned int                       m_framebuffer{};
+    bool                               m_windowResized{};
     struct StatesCache
     {
         bool                  enable{};                //!< Is the cache enabled?

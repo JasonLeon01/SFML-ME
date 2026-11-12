@@ -24,12 +24,10 @@
 
 #include <SFML/Graphics/Drawable.hpp>
 #include <SFML/Graphics/GraphicsDevice.hpp>
+#include <SFML/Graphics/RHI/Access.hpp>
+#include <SFML/Graphics/RenderTarget.hpp>
 #include <SFML/Graphics/RenderTargetBackend.hpp>
 #include <SFML/Graphics/VertexBuffer.hpp>
-
-#ifdef SFML_RENDER_GL
-#include <SFML/Graphics/OpenGL/OpenGLRenderTarget.hpp>
-#endif
 
 #include <SFML/System/Err.hpp>
 
@@ -43,19 +41,19 @@ namespace sf
 void RenderTarget::clear(Color color)
 {
     if (m_backend)
-        m_backend->clear(*this, color, {});
+        m_backend->clear(priv::prepareTarget(*this), color, {});
 }
 
 void RenderTarget::clearStencil(StencilValue stencilValue)
 {
     if (m_backend)
-        m_backend->clear(*this, {}, stencilValue);
+        m_backend->clear(priv::prepareTarget(*this), {}, stencilValue);
 }
 
 void RenderTarget::clear(Color color, StencilValue stencilValue)
 {
     if (m_backend)
-        m_backend->clear(*this, color, stencilValue);
+        m_backend->clear(priv::prepareTarget(*this), color, stencilValue);
 }
 
 void RenderTarget::setView(const View& view)
@@ -152,7 +150,7 @@ void RenderTarget::draw(const Drawable& drawable, const RenderStates& states)
 void RenderTarget::draw(const Vertex* vertices, std::size_t vertexCount, PrimitiveType type, const RenderStates& states)
 {
     if (m_backend && vertices && vertexCount)
-        m_backend->draw(*this, vertices, vertexCount, type, states);
+        m_backend->draw(priv::prepareTarget(*this), vertices, vertexCount, type, priv::prepareState(states));
 }
 
 void RenderTarget::draw(const VertexBuffer& vertexBuffer, const RenderStates& states)
@@ -164,7 +162,12 @@ void RenderTarget::draw(const VertexBuffer& vertexBuffer, std::size_t firstVerte
 {
     const auto available = vertexBuffer.getVertexCount();
     if (m_backend && firstVertex < available && vertexCount)
-        m_backend->draw(*this, vertexBuffer, firstVertex, std::min(vertexCount, available - firstVertex), states);
+        m_backend->draw(priv::prepareTarget(*this),
+                        *priv::RhiAccess::buffer(vertexBuffer),
+                        firstVertex,
+                        std::min(vertexCount, available - firstVertex),
+                        vertexBuffer.getPrimitiveType(),
+                        priv::prepareState(states));
 }
 
 bool RenderTarget::isSrgb() const
@@ -180,53 +183,25 @@ bool RenderTarget::setActive(bool active)
 void RenderTarget::pushGLStates()
 {
     if (m_backend)
-        m_backend->pushGLStates(*this);
+        m_backend->pushGLStates(priv::prepareTarget(*this));
 }
 
 void RenderTarget::popGLStates()
 {
     if (m_backend)
-        m_backend->popGLStates(*this);
+        m_backend->popGLStates(priv::prepareTarget(*this));
 }
 
 void RenderTarget::resetGLStates()
 {
     if (m_backend)
-        m_backend->resetGLStates(*this);
+        m_backend->resetGLStates(priv::prepareTarget(*this));
 }
 
 void RenderTarget::initialize()
 {
     m_defaultView = View(FloatRect({0, 0}, Vector2f(getSize())));
     m_view        = m_defaultView;
-
-#ifdef SFML_RENDER_GL
-    if (!m_backend)
-    {
-        if (const auto* device = priv::getGraphicsDevice(); device && device->glContext)
-        {
-            const auto* gl = std::get_if<OpenGLSettings>(&device->settings);
-            m_backend      = std::make_shared<priv::OpenGLRenderTarget>(!gl || gl->profile == OpenGLProfile::Core);
-        }
-    }
-#endif
 }
 
-namespace priv
-{
-void RenderTargetBackend::pushGLStates(RenderTarget&)
-{
-    err() << "OpenGL state operations require an OpenGL render target" << std::endl;
-}
-
-void RenderTargetBackend::popGLStates(RenderTarget& target)
-{
-    pushGLStates(target);
-}
-
-void RenderTargetBackend::resetGLStates(RenderTarget& target)
-{
-    pushGLStates(target);
-}
-} // namespace priv
 } // namespace sf

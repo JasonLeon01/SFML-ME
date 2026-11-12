@@ -23,12 +23,8 @@
 ////////////////////////////////////////////////////////////
 
 #include <SFML/Graphics/Metal/MetalObjects.hpp>
+#include <SFML/Graphics/Metal/MetalRHI.hpp>
 #include <SFML/Graphics/Metal/MetalRenderTarget.hpp>
-#include <SFML/Graphics/RenderStates.hpp>
-#include <SFML/Graphics/RenderTarget.hpp>
-#include <SFML/Graphics/Shader.hpp>
-#include <SFML/Graphics/Texture.hpp>
-#include <SFML/Graphics/VertexBuffer.hpp>
 
 #include <SFML/System/Err.hpp>
 
@@ -249,15 +245,15 @@ MetalRenderTarget::~MetalRenderTarget()
         m_impl->device->impl().endEncoding();
 }
 
-std::shared_ptr<MetalRenderTarget> MetalRenderTarget::create(std::shared_ptr<MetalDevice> device,
-                                                             std::shared_ptr<MetalImage>  image,
-                                                             const ContextSettings&       settings)
+std::shared_ptr<MetalRenderTarget> MetalRenderTarget::create(std::shared_ptr<MetalDevice>       device,
+                                                             const std::shared_ptr<MetalImage>& image,
+                                                             const ContextSettings&             settings)
 {
     auto result = std::shared_ptr<MetalRenderTarget>(new MetalRenderTarget(std::move(device), settings));
-    return result->attach(std::move(image)) ? result : nullptr;
+    return result->attach(image) ? result : nullptr;
 }
 
-bool MetalRenderTarget::attach(std::shared_ptr<MetalImage> image)
+bool MetalRenderTarget::attach(const std::shared_ptr<MetalImage>& image)
 {
     using namespace MetalTargetImpl;
     auto&      impl   = *m_impl;
@@ -297,7 +293,7 @@ bool MetalRenderTarget::attach(std::shared_ptr<MetalImage> image)
         if (device.rendering(this))
             device.endEncoding();
         impl.settings      = actual;
-        impl.image         = std::move(image);
+        impl.image         = image;
         impl.multisample   = multisample;
         impl.depth         = depth;
         impl.depthFormat   = depthFormat;
@@ -342,63 +338,54 @@ unsigned int MetalRenderTarget::getMaximumAntiAliasingLevel(const MetalDevice& d
 
 void MetalRenderTarget::finish()
 {
+    colorWritten();
     const auto guard = m_impl->device->lock();
     if (m_impl->device->impl().rendering(this))
         m_impl->device->impl().endEncoding();
 }
 
-void MetalRenderTarget::clear(RenderTarget& target, std::optional<Color> color, std::optional<StencilValue> stencil)
+void MetalRenderTarget::clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil)
 {
     if (!color && (!stencil || !m_impl->settings.stencilBits))
         return;
-    const auto                  value = color.value_or(Color::White);
-    const std::array<Vertex, 6> vertices{
-        {{{-1.f, -1.f}, value},
-         {{1.f, -1.f}, value},
-         {{-1.f, 1.f}, value},
-         {{-1.f, 1.f}, value},
-         {{1.f, -1.f}, value},
-         {{1.f, 1.f}, value}}};
-    RenderStates states;
-    states.blendMode               = BlendNone;
-    states.stencilMode.stencilOnly = !color;
-    if (stencil)
-    {
-        states.stencilMode.stencilUpdateOperation = StencilUpdateOperation::Replace;
-        states.stencilMode.stencilReference       = StencilValue(stencil->value & 0xFFu);
-    }
+    const auto clear = prepareClear(color, stencil);
     // A draw rather than a load action, so that clearing honors the scissor like the other backends
-    drawVertices(target, vertices.data(), nullptr, 0, vertices.size(), PrimitiveType::Triangles, states, true);
+    drawVertices(target, clear.vertices.data(), nullptr, 0, clear.vertices.size(), PrimitiveType::Triangles, clear.settings, true);
 }
 
-void MetalRenderTarget::draw(RenderTarget&       target,
-                             const Vertex*       vertices,
-                             std::size_t         count,
-                             PrimitiveType       type,
-                             const RenderStates& states)
+void MetalRenderTarget::draw(const rhi::TargetState&  target,
+                             const Vertex*            vertices,
+                             std::size_t              count,
+                             PrimitiveType            type,
+                             const rhi::DrawSettings& states)
 {
+    if (!vertices || !count)
+        return;
     drawVertices(target, vertices, nullptr, 0, count, type, states, false);
 }
 
-void MetalRenderTarget::draw(RenderTarget&       target,
-                             const VertexBuffer& buffer,
-                             std::size_t         first,
-                             std::size_t         count,
-                             const RenderStates& states)
+void MetalRenderTarget::draw(const rhi::TargetState&  target,
+                             const rhi::Buffer&       buffer,
+                             std::size_t              first,
+                             std::size_t              count,
+                             PrimitiveType            type,
+                             const rhi::DrawSettings& states)
 {
-    if (buffer.m_metalBuffer)
-        drawVertices(target, nullptr, &buffer, first, count, buffer.getPrimitiveType(), states, false);
+    if (first > buffer.getSize() / sizeof(Vertex) || count > buffer.getSize() / sizeof(Vertex) - first)
+        return;
+    if (nativeMetalBuffer(buffer))
+        drawVertices(target, nullptr, &buffer, first, count, type, states, false);
 }
 
 void MetalRenderTarget::drawVertices(
-    RenderTarget&       target,
-    const Vertex*       vertices,
-    const VertexBuffer* buffer,
-    std::size_t         first,
-    std::size_t         count,
-    PrimitiveType       type,
-    const RenderStates& states,
-    bool                clearing)
+    const rhi::TargetState&  target,
+    const Vertex*            vertices,
+    const rhi::Buffer*       buffer,
+    std::size_t              first,
+    std::size_t              count,
+    PrimitiveType            type,
+    const rhi::DrawSettings& states,
+    bool                     clearing)
 {
     using namespace MetalTargetImpl;
     auto&      impl  = *m_impl;
@@ -410,30 +397,16 @@ void MetalRenderTarget::drawVertices(
     {
         auto&      device   = impl.device->impl();
         const auto size     = Vector2i(impl.image->size);
-        const auto viewport = clearing ? IntRect({0, 0}, size) : target.getViewport(target.getView());
-        const auto scissor  = target.getScissor(target.getView()).findIntersection(IntRect({0, 0}, size));
+        const auto viewport = clearing ? IntRect({0, 0}, size) : target.viewport;
+        const auto scissor  = target.scissor.findIntersection(IntRect({0, 0}, size));
         if (!scissor || viewport.size.x <= 0 || viewport.size.y <= 0)
             return;
-        const auto program = states.shader ? states.shader->m_metalProgram : impl.device->defaultProgram();
+        const auto program = states.shader ? std::dynamic_pointer_cast<MetalProgram>(states.shader)
+                                           : impl.device->defaultProgram();
         if (!program)
             return;
-        MetalDrawParameters parameters{};
-        const auto          modelView  = clearing ? Transform::Identity : states.transform;
-        const auto          projection = clearing ? Transform::Identity : target.getView().getTransform();
-        std::copy_n((projection * modelView).getMatrix(), parameters.transform.size(), parameters.transform.begin());
-        std::copy_n(modelView.getMatrix(), parameters.modelView.size(), parameters.modelView.begin());
-        std::copy_n(projection.getMatrix(), parameters.projection.size(), parameters.projection.begin());
-        parameters.textureTransform = {1.f, 1.f, 0.f, 0.f};
-        if (states.texture && states.coordinateType == CoordinateType::Pixels)
-        {
-            const auto textureSize = states.texture->getSize();
-            if (textureSize.x && textureSize.y)
-            {
-                parameters.textureTransform[0] /= static_cast<float>(textureSize.x);
-                parameters.textureTransform[1] /= static_cast<float>(textureSize.y);
-            }
-        }
-        const auto&                      blend = states.blendMode;
+        auto                             parameters = prepareDraw(target, states, clearing);
+        const auto&                      blend      = states.blendMode;
         const MetalPipelineKey           key{impl.image->texture.pixelFormat,
                                    impl.depthFormat,
                                    impl.stencilFormat,
@@ -476,11 +449,11 @@ void MetalRenderTarget::drawVertices(
                                                static_cast<NSUInteger>(scissor->position.y),
                                                static_cast<NSUInteger>(scissor->size.x),
                                                static_cast<NSUInteger>(scissor->size.y)}];
-        if (!program->impl().bind(device, encoder, parameters, states.texture, impl.image->texture))
+        if (!program->impl().bind(device, encoder, parameters, states.texture.get(), impl.image->texture))
             return;
         if (buffer)
         {
-            [encoder setVertexBuffer:buffer->m_metalBuffer->buffer offset:0 atIndex:metalVertexBufferIndex];
+            [encoder setVertexBuffer:nativeMetalBuffer(*buffer)->buffer offset:0 atIndex:metalVertexBufferIndex];
         }
         else
         {
@@ -525,5 +498,9 @@ void MetalRenderTarget::drawVertices(
             [encoder drawPrimitives:primitive(type) vertexStart:first vertexCount:count];
         }
     }
+}
+Vector2u MetalRenderTarget::getSize() const
+{
+    return image()->size;
 }
 } // namespace sf::priv

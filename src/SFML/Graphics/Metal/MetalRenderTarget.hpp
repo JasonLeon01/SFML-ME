@@ -36,37 +36,43 @@ class MetalRenderTarget final : public RenderTargetBackend
 public:
     struct Impl;
 
-    [[nodiscard]] static std::shared_ptr<MetalRenderTarget> create(std::shared_ptr<MetalDevice> device,
-                                                                   std::shared_ptr<MetalImage>  image,
-                                                                   const ContextSettings&       settings);
+    [[nodiscard]] static std::shared_ptr<MetalRenderTarget> create(std::shared_ptr<MetalDevice>       device,
+                                                                   const std::shared_ptr<MetalImage>& image,
+                                                                   const ContextSettings&             settings);
     ~MetalRenderTarget() override;
 
-    void clear(RenderTarget& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
-    void draw(RenderTarget& target, const Vertex* vertices, std::size_t count, PrimitiveType type, const RenderStates& states) override;
-    void                                             draw(RenderTarget&       target,
-                                                          const VertexBuffer& buffer,
-                                                          std::size_t         first,
-                                                          std::size_t         count,
-                                                          const RenderStates& states) override;
+    [[nodiscard]] Vector2u getSize() const override;
+    void clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
+    void                                             draw(const rhi::TargetState&  target,
+                                                          const Vertex*            vertices,
+                                                          std::size_t              count,
+                                                          PrimitiveType            type,
+                                                          const rhi::DrawSettings& states) override;
+    void                                             draw(const rhi::TargetState&  target,
+                                                          const rhi::Buffer&       buffer,
+                                                          std::size_t              first,
+                                                          std::size_t              count,
+                                                          PrimitiveType            type,
+                                                          const rhi::DrawSettings& states) override;
     bool                                             setActive(bool active) override;
     void                                             viewChanged() override;
     [[nodiscard]] bool                               resize(Vector2u size);
-    void                                             finish();
-    [[nodiscard]] const ContextSettings&             settings() const;
+    void                                             finish() override;
+    [[nodiscard]] const ContextSettings&             settings() const override;
     [[nodiscard]] const std::shared_ptr<MetalImage>& image() const;
     [[nodiscard]] static unsigned int                getMaximumAntiAliasingLevel(const MetalDevice& device);
 
 private:
     MetalRenderTarget(std::shared_ptr<MetalDevice> device, const ContextSettings& settings);
-    [[nodiscard]] bool    attach(std::shared_ptr<MetalImage> image);
-    void                  drawVertices(RenderTarget&       target,
-                                       const Vertex*       vertices,
-                                       const VertexBuffer* buffer,
-                                       std::size_t         first,
-                                       std::size_t         count,
-                                       PrimitiveType       type,
-                                       const RenderStates& states,
-                                       bool                clearing);
+    [[nodiscard]] bool    attach(const std::shared_ptr<MetalImage>& image);
+    void                  drawVertices(const rhi::TargetState&  target,
+                                       const Vertex*            vertices,
+                                       const rhi::Buffer*       buffer,
+                                       std::size_t              first,
+                                       std::size_t              count,
+                                       PrimitiveType            type,
+                                       const rhi::DrawSettings& states,
+                                       bool                     clearing);
     std::unique_ptr<Impl> m_impl;
 };
 } // namespace sf::priv
