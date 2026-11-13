@@ -83,12 +83,14 @@ void socketClose(SocketHandle handle);
 void socketSetBlocking(SocketHandle handle, bool blocking);
 
 ////////////////////////////////////////////////////////////
-/// \brief Accept or reject a host before DNS resolution
+/// \brief Prepare an HTTP host using the backend's name-resolution policy
 ///
-/// \return false when this backend cannot use the requested address type
+/// \return false when the host or requested address type cannot be used
 ///
 ////////////////////////////////////////////////////////////
-[[nodiscard]] bool httpAcceptHost(std::optional<IpAddress::Type> addressType);
+[[nodiscard]] bool httpPrepareHost(const std::string&             hostname,
+                                   std::optional<IpAddress::Type> addressType,
+                                   std::vector<IpAddress>&        hosts);
 
 ////////////////////////////////////////////////////////////
 /// \brief One HTTP request after the shared field defaults have been filled in

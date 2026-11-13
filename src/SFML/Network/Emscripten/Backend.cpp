@@ -72,15 +72,17 @@ void socketSetBlocking(SocketHandle, bool)
 
 
 ////////////////////////////////////////////////////////////
-bool httpAcceptHost(std::optional<IpAddress::Type> addressType)
+bool httpPrepareHost(const std::string& hostname, std::optional<IpAddress::Type> addressType, std::vector<IpAddress>& hosts)
 {
+    hosts.clear();
     if (addressType.has_value())
     {
         webSkip("Http::setHost with an address type");
         return false;
     }
 
-    return true;
+    // Fetch resolves the URL itself, including hosts only visible to the browser.
+    return !hostname.empty();
 }
 
 
@@ -99,7 +101,7 @@ std::optional<std::string> httpSend(const HttpMessage& message, Time timeout, bo
         return std::nullopt;
     }
 
-    if (message.hosts.empty())
+    if (message.hostName.empty())
         return std::nullopt;
 
     const char* methodName = "GET";

@@ -26,6 +26,7 @@
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Network/Backend.hpp>
+#include <SFML/Network/Dns.hpp>
 #include <SFML/Network/SocketImpl.hpp>
 #include <SFML/Network/TcpSocket.hpp>
 
@@ -103,9 +104,10 @@ void socketSetBlocking(SocketHandle handle, bool blocking)
 
 
 ////////////////////////////////////////////////////////////
-bool httpAcceptHost(std::optional<IpAddress::Type>)
+bool httpPrepareHost(const std::string& hostname, std::optional<IpAddress::Type>, std::vector<IpAddress>& hosts)
 {
-    return true;
+    hosts = Dns::resolve(hostname).value_or(std::vector<IpAddress>{});
+    return !hosts.empty();
 }
 
 

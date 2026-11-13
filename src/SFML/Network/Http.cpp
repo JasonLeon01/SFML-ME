@@ -26,7 +26,6 @@
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Network/Backend.hpp>
-#include <SFML/Network/Dns.hpp>
 #include <SFML/Network/Http.hpp>
 
 #include <SFML/System/Utils.hpp>
@@ -325,14 +324,7 @@ bool Http::setHost(const std::string& host, unsigned short port, std::optional<I
 
     m_addressType = addressType;
 
-    if (!priv::httpAcceptHost(addressType))
-    {
-        m_hosts.clear();
-        return false;
-    }
-
-    m_hosts = Dns::resolve(m_hostName).value_or(decltype(m_hosts){});
-    return !m_hosts.empty();
+    return priv::httpPrepareHost(m_hostName, addressType, m_hosts);
 }
 
 

@@ -175,18 +175,25 @@ EM_JS(void, sfmlWebInit, (), {
         return written;
     }
 
-    function enqueue(sock, data)
+    function enqueue(sock, data, connection)
     {
         const store = (bytes) =>
         {
+            if (sock.ws !== connection)
+                return;
             if (bytes.length > 0)
+            {
+                sock.receivedApp = true;
                 sock.chunks.push({data: bytes, offset: 0});
+            }
             wake(sock);
         };
         if (data && typeof data.arrayBuffer === 'function' && !(data instanceof Uint8Array))
         {
             data.arrayBuffer().then((buffer) => store(new Uint8Array(buffer))).catch(() =>
             {
+                if (sock.ws !== connection)
+                    return;
                 sock.failed = true;
                 wake(sock);
             });
@@ -202,7 +209,27 @@ EM_JS(void, sfmlWebInit, (), {
         return host;
     }
 
-    function openTcp(sock, host, port, secure)
+    function webSocketUrl(transport, host, port, secure)
+    {
+        secure = !!secure || (globalThis.location && globalThis.location.protocol === 'https:');
+        secure = !!secure;
+        const config = Module['sfmlNetwork'];
+        const resolver = config && config['resolveWebSocketUrl'];
+        if (resolver !== undefined && typeof resolver !== 'function')
+            throw new TypeError('resolveWebSocketUrl must be a function');
+        const value = resolver
+            ? resolver({transport, host, port, secure})
+            : (secure ? 'wss' : 'ws') + '://' + formatHost(host) + ':' + port + '/';
+        if (typeof value !== 'string')
+            throw new TypeError('resolveWebSocketUrl must return an absolute WebSocket URL');
+        const url = new URL(value);
+        if ((url.protocol !== 'ws:' && url.protocol !== 'wss:') || url.hash || url.username || url.password ||
+            (secure && url.protocol !== 'wss:'))
+            throw new TypeError('Invalid or insecure WebSocket URL');
+        return url;
+    }
+
+    function closeTcp(sock)
     {
         if (sock.ws)
         {
@@ -212,8 +239,13 @@ EM_JS(void, sfmlWebInit, (), {
             previous.onmessage = null;
             previous.onerror = null;
             previous.onclose = null;
-            previous.close();
+            try { previous.close(); } catch (error) {}
         }
+    }
+
+    function openTcp(sock, host, port, secure, endpoint)
+    {
+        closeTcp(sock);
 
         sock.host = host;
         sock.port = port;
@@ -222,7 +254,9 @@ EM_JS(void, sfmlWebInit, (), {
         sock.failed = false;
         sock.closed = false;
         sock.sentApp = false;
+        sock.receivedApp = false;
         sock.chunks = [];
+        sock.url = "";
 
         if (!host || !globalThis.WebSocket)
         {
@@ -233,16 +267,18 @@ EM_JS(void, sfmlWebInit, (), {
 
         try
         {
-            const scheme = secure ? 'wss' : 'ws';
-            const ws = new WebSocket(scheme + '://' + formatHost(host) + ':' + port + '/', ['sfml.tcp']);
+            const url = endpoint || webSocketUrl('tcp', host, port, secure);
+            const ws = new WebSocket(url.href, ['sfml.tcp']);
             sock.ws = ws;
+            sock.url = url.href;
+            sock.secure = url.protocol === 'wss:';
             ws.binaryType = 'arraybuffer';
             ws.onopen = () =>
             {
                 sock.open = true;
                 wake(sock);
             };
-            ws.onmessage = (event) => enqueue(sock, event.data);
+            ws.onmessage = (event) => enqueue(sock, event.data, ws);
             ws.onerror = () =>
             {
                 sock.failed = true;
@@ -263,6 +299,42 @@ EM_JS(void, sfmlWebInit, (), {
             sock.failed = true;
             sock.closed = true;
         }
+        wake(sock);
+    }
+
+    function udpFailed(sock)
+    {
+        if (sock.closed)
+            return true;
+        if (sock.peers.size === 0)
+            return false;
+        for (const peer of sock.peers.values())
+            if (!peer.failed)
+                return false;
+        return true;
+    }
+
+    function endPeer(sock, peer)
+    {
+        peer.open = false;
+        peer.failed = true;
+        for (const object of [peer.ws, peer.channel, peer.pc])
+        {
+            if (!object)
+                continue;
+            object.onopen = null;
+            object.onmessage = null;
+            object.onerror = null;
+            object.onclose = null;
+            object.onicecandidate = null;
+            object.onconnectionstatechange = null;
+            object.oniceconnectionstatechange = null;
+            try { object.close(); } catch (error) {}
+        }
+        peer.ws = null;
+        peer.channel = null;
+        peer.pc = null;
+        wake(sock);
     }
 
     function readable(sock)
@@ -270,7 +342,7 @@ EM_JS(void, sfmlWebInit, (), {
         if (!sock)
             return false;
         if (sock.kind === 'udp')
-            return sock.datagrams.length > 0;
+            return sock.datagrams.length > 0 || udpFailed(sock);
         return pendingBytes(sock) > 0 || sock.closed || sock.failed;
     }
 
@@ -280,6 +352,8 @@ EM_JS(void, sfmlWebInit, (), {
             return false;
         if (sock.kind === 'udp')
         {
+            if (sock.closed)
+                return true;
             if (sock.peers.size === 0)
                 return true;
             for (const peer of sock.peers.values())
@@ -295,119 +369,128 @@ EM_JS(void, sfmlWebInit, (), {
     function openPeer(sock, host, port)
     {
         const peer = {host, port, open: false, failed: false, channel: null, pc: null, ws: null};
-        const PeerConnection = globalThis.RTCPeerConnection;
-        if (!PeerConnection || !globalThis.WebSocket || !host)
+        try
         {
-            peer.failed = true;
-            return peer;
-        }
+            const PeerConnection = globalThis.RTCPeerConnection;
+            if (!PeerConnection || !globalThis.WebSocket || !host)
+                throw new Error('WebRTC or WebSocket is unavailable');
+            const url = webSocketUrl('udp', host, port, false);
 
-        const pc = new PeerConnection({iceServers: [{urls: 'stun:stun.l.google.com:19302'}]});
-        peer.pc = pc;
-        const channel = pc.createDataChannel('sfml', {ordered: false, maxRetransmits: 0});
-        peer.channel = channel;
-        channel.binaryType = 'arraybuffer';
-        channel.onopen = () =>
-        {
-            peer.open = true;
-            wake(sock);
-        };
-        channel.onclose = () =>
-        {
-            peer.open = false;
-            wake(sock);
-        };
-        channel.onerror = () =>
-        {
-            peer.failed = true;
-            wake(sock);
-        };
-        channel.onmessage = (event) =>
-        {
-            const deliver = (bytes) =>
+            const pc = new PeerConnection({iceServers: [{urls: 'stun:stun.l.google.com:19302'}]});
+            peer.pc = pc;
+            const failedConnection = () =>
             {
-                sock.datagrams.push({data: bytes, host, port});
+                if (pc.connectionState === 'failed' || pc.connectionState === 'closed' ||
+                    pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed')
+                    endPeer(sock, peer);
+            };
+            pc.onconnectionstatechange = failedConnection;
+            pc.oniceconnectionstatechange = failedConnection;
+            const channel = pc.createDataChannel('sfml', {ordered: false, maxRetransmits: 0});
+            peer.channel = channel;
+            channel.binaryType = 'arraybuffer';
+            channel.onopen = () =>
+            {
+                if (peer.failed || sock.closed)
+                    return;
+                peer.open = true;
                 wake(sock);
             };
-            const data = event.data;
-            if (data && typeof data.arrayBuffer === 'function' && !(data instanceof Uint8Array))
+            channel.onclose = () => endPeer(sock, peer);
+            channel.onerror = () => endPeer(sock, peer);
+            channel.onmessage = (event) =>
             {
-                data.arrayBuffer().then((buffer) => deliver(new Uint8Array(buffer))).catch(() =>
+                const deliver = (bytes) =>
                 {
-                    peer.failed = true;
+                    if (peer.failed || sock.closed)
+                        return;
+                    sock.datagrams.push({data: bytes, host, port});
                     wake(sock);
-                });
-                return;
-            }
-            deliver(toBytes(data));
-        };
-
-        const ws = new WebSocket('ws://' + formatHost(host) + ':' + port + '/', ['sfml.udp']);
-        peer.ws = ws;
-        ws.binaryType = 'arraybuffer';
-        pc.onicecandidate = (event) =>
-        {
-            if (!event.candidate || ws.readyState !== 1)
-                return;
-            ws.send(JSON.stringify({
-                type: 'candidate',
-                candidate: event.candidate.candidate,
-                sdpMid: event.candidate.sdpMid,
-                sdpMLineIndex: event.candidate.sdpMLineIndex
-            }));
-        };
-        ws.onmessage = (event) =>
-        {
-            const parse = async (data) =>
-            {
-                let text = data;
-                if (data instanceof ArrayBuffer)
-                    text = new TextDecoder().decode(data);
-                else if (data && typeof data.text === 'function')
-                    text = await data.text();
-                const message = JSON.parse(text);
-                if (message.type === 'answer')
-                    await pc.setRemoteDescription({type: 'answer', sdp: message.sdp});
-                else if (message.type === 'candidate' && message.candidate)
-                    await pc.addIceCandidate({
-                        candidate: message.candidate,
-                        sdpMid: message.sdpMid || "",
-                        sdpMLineIndex: message.sdpMLineIndex || 0
+                };
+                const data = event.data;
+                if (data && typeof data.arrayBuffer === 'function' && !(data instanceof Uint8Array))
+                {
+                    data.arrayBuffer().then((buffer) => deliver(new Uint8Array(buffer))).catch(() =>
+                    {
+                        endPeer(sock, peer);
                     });
-                wake(sock);
+                    return;
+                }
+                deliver(toBytes(data));
             };
-            parse(event.data).catch(() =>
+
+            const ws = new WebSocket(url.href, ['sfml.udp']);
+            peer.ws = ws;
+            ws.binaryType = 'arraybuffer';
+            pc.onicecandidate = (event) =>
             {
-                peer.failed = true;
-                wake(sock);
-            });
-        };
-        ws.onopen = () =>
-        {
-            pc.createOffer()
-                .then((offer) => pc.setLocalDescription(offer))
-                .then(() =>
+                if (!event.candidate || ws.readyState !== 1)
+                    return;
+                ws.send(JSON.stringify({
+                    type: 'candidate',
+                    candidate: event.candidate.candidate,
+                    sdpMid: event.candidate.sdpMid,
+                    sdpMLineIndex: event.candidate.sdpMLineIndex
+                }));
+            };
+            ws.onmessage = (event) =>
+            {
+                const parse = async (data) =>
                 {
-                    if (ws.readyState === 1)
-                        ws.send(JSON.stringify({type: 'offer', sdp: pc.localDescription.sdp}));
-                })
-                .catch(() =>
-                {
-                    peer.failed = true;
+                    let text = data;
+                    if (data instanceof ArrayBuffer)
+                        text = new TextDecoder().decode(data);
+                    else if (data && typeof data.text === 'function')
+                        text = await data.text();
+                    if (peer.failed || sock.closed)
+                        return;
+                    const message = JSON.parse(text);
+                    if (message.type === 'answer')
+                        await pc.setRemoteDescription({type: 'answer', sdp: message.sdp});
+                    else if (message.type === 'candidate' && message.candidate)
+                        await pc.addIceCandidate({
+                            candidate: message.candidate,
+                            sdpMid: message.sdpMid || "",
+                            sdpMLineIndex: message.sdpMLineIndex || 0
+                        });
                     wake(sock);
+                };
+                parse(event.data).catch(() =>
+                {
+                    endPeer(sock, peer);
                 });
-        };
-        ws.onerror = () =>
+            };
+            ws.onopen = async () =>
+            {
+                try
+                {
+                    const offer = await pc.createOffer();
+                    if (peer.failed || sock.closed)
+                        return;
+                    await pc.setLocalDescription(offer);
+                    if (!peer.failed && !sock.closed && ws.readyState === 1)
+                        ws.send(JSON.stringify({type: 'offer', sdp: pc.localDescription.sdp}));
+                }
+                catch (error)
+                {
+                    endPeer(sock, peer);
+                }
+            };
+            ws.onerror = () =>
+            {
+                if (!peer.open)
+                    endPeer(sock, peer);
+            };
+            ws.onclose = () =>
+            {
+                if (!peer.open)
+                    endPeer(sock, peer);
+            };
+        }
+        catch (error)
         {
-            peer.failed = true;
-            wake(sock);
-        };
-        ws.onclose = () =>
-        {
-            if (!peer.open)
-                peer.failed = true;
-            wake(sock);
-        };
+            endPeer(sock, peer);
+        }
         return peer;
     }
 
@@ -423,6 +506,9 @@ EM_JS(void, sfmlWebInit, (), {
                 failed: false,
                 closed: false,
                 sentApp: false,
+                receivedApp: false,
+                tlsHost: null,
+                url: "",
                 host: "",
                 port: 0,
                 secure: false,
@@ -443,24 +529,9 @@ EM_JS(void, sfmlWebInit, (), {
                 return;
             sock.closed = true;
             sock.open = false;
-            if (sock.ws)
-            {
-                sock.ws.onopen = null;
-                sock.ws.onmessage = null;
-                sock.ws.onerror = null;
-                sock.ws.onclose = null;
-                sock.ws.close();
-            }
+            closeTcp(sock);
             for (const peer of sock.peers.values())
-            {
-                if (peer.ws)
-                    peer.ws.close();
-                if (peer.channel && peer.channel.close)
-                    peer.channel.close();
-                if (peer.pc && peer.pc.close)
-                    peer.pc.close();
-                peer.failed = true;
-            }
+                endPeer(sock, peer);
             wake(sock);
             sockets.delete(id);
         },
@@ -470,6 +541,7 @@ EM_JS(void, sfmlWebInit, (), {
             const sock = sockets.get(id);
             if (!sock)
                 return 4;
+            sock.tlsHost = null;
             openTcp(sock, host, port, secure);
             if (sock.failed)
                 return 4;
@@ -486,10 +558,28 @@ EM_JS(void, sfmlWebInit, (), {
             const sock = sockets.get(id);
             if (!sock || !sock.ws)
                 return 2;
-            if (sock.sentApp || pendingBytes(sock) > 0)
+            const requestedHost = host || sock.host;
+            const tlsHost = requestedHost.toLowerCase();
+            if (sock.tlsHost !== null && sock.tlsHost !== tlsHost)
                 return 4;
-            openTcp(sock, host || sock.host, sock.port, true);
-            if (sock.failed)
+            if (sock.failed || sock.closed)
+                return 4;
+            if (sock.tlsHost === null)
+            {
+                let url;
+                try { url = webSocketUrl('tcp', requestedHost, sock.port, true); }
+                catch (error) { return 4; }
+                if (sock.url !== url.href || !sock.secure)
+                {
+                    if (sock.secure || sock.sentApp || sock.receivedApp || pendingBytes(sock) > 0)
+                        return 4;
+                    sock.tlsHost = tlsHost;
+                    openTcp(sock, requestedHost, sock.port, true, url);
+                }
+                else
+                    sock.tlsHost = tlsHost;
+            }
+            if (sock.failed || sock.closed)
                 return 4;
             if (!wait)
                 return sock.open ? 0 : 1;
@@ -574,7 +664,7 @@ EM_JS(void, sfmlWebInit, (), {
         async udpSend(id, data, size, host, port, wait)
         {
             const sock = sockets.get(id);
-            if (!sock)
+            if (!sock || sock.closed)
                 return 4;
             const key = host + '\n' + port;
             let peer = sock.peers.get(key);
@@ -589,8 +679,8 @@ EM_JS(void, sfmlWebInit, (), {
             {
                 if (!wait)
                     return 1;
-                await waitUntil(sock, () => peer.open || peer.failed, -1);
-                if (!peer.open)
+                await waitUntil(sock, () => peer.open || peer.failed || sock.closed, -1);
+                if (!peer.open || peer.failed || sock.closed)
                     return 4;
             }
             try
@@ -611,12 +701,14 @@ EM_JS(void, sfmlWebInit, (), {
                 return 4;
             if (sock.datagrams.length === 0)
             {
+                if (udpFailed(sock))
+                    return 4;
                 if (!wait)
                     return 1;
-                await waitUntil(sock, () => sock.datagrams.length > 0, -1);
+                await waitUntil(sock, () => sock.datagrams.length > 0 || udpFailed(sock), -1);
             }
             if (sock.datagrams.length === 0)
-                return 1;
+                return udpFailed(sock) ? 4 : 1;
             const item = sock.datagrams.shift();
             const take = Math.min(size, item.data.length);
             if (take > 0)
@@ -723,6 +815,9 @@ EM_JS(void, sfmlWebInit, (), {
                     }
                 }
                 const response = await fetch(url, init);
+                // Browsers hide manual redirects instead of exposing their 3xx status.
+                if (response.type === 'opaqueredirect' || response.status === 0)
+                    return -1;
                 const headerLines = [];
                 response.headers.forEach((value, name) =>
                 {
@@ -1126,7 +1221,9 @@ bool webFetch(const std::string& url,
                                 &payloadLen);
     const MallocPointer<char>          header(headerRaw);
     const MallocPointer<unsigned char> payload(payloadRaw);
-    if (!ok)
+    if (ok == -1)
+        webSkip("Http::sendRequest with an opaque browser response or redirect");
+    if (ok != 1)
         return false;
 
     if (header)

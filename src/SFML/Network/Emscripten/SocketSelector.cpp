@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -50,9 +51,12 @@ struct SocketSelector::SocketSelectorImpl
         std::function<void(SocketSelector::ReadinessType)> callback;
         bool                                               readyReceive{};
         bool                                               readySend{};
+        std::uint64_t                                      registration{};
     };
 
-    std::vector<Entry> entries;
+    std::vector<Entry>                entries;
+    std::unordered_set<std::uint64_t> registrations;
+    std::uint64_t                     nextRegistration{};
 
     bool add(const Socket*                                      socket,
              SocketHandle                                       handle,
@@ -64,13 +68,14 @@ struct SocketSelector::SocketSelectorImpl
                                        [socket](const Entry& entry) { return entry.socket == socket; });
         if (iter != entries.end())
         {
-            iter->handle   = handle;
-            iter->mask     = mask;
-            iter->callback = std::move(callback);
+            registrations.erase(iter->registration);
+            *iter = Entry{socket, handle, mask, std::move(callback), false, false, ++nextRegistration};
+            registrations.insert(iter->registration);
             return true;
         }
 
-        entries.push_back(Entry{socket, handle, mask, std::move(callback), false, false});
+        entries.push_back(Entry{socket, handle, mask, std::move(callback), false, false, ++nextRegistration});
+        registrations.insert(entries.back().registration);
         return true;
     }
 
@@ -82,6 +87,7 @@ struct SocketSelector::SocketSelectorImpl
         if (iter == entries.end())
             return false;
 
+        registrations.erase(iter->registration);
         entries.erase(iter);
         return true;
     }
@@ -89,6 +95,7 @@ struct SocketSelector::SocketSelectorImpl
     void clear()
     {
         entries.clear();
+        registrations.clear();
     }
 
     bool wait(Time timeout)
@@ -144,9 +151,18 @@ struct SocketSelector::SocketSelectorImpl
 
     void dispatchReadyCallbacks()
     {
+        // Callbacks may add, remove, clear or replace registrations. Keep their
+        // storage alive, but do not dispatch entries canceled during this batch.
+        std::vector<Entry> pending;
         for (const auto& entry : entries)
         {
-            if (!entry.callback)
+            if (entry.callback && (entry.readyReceive || entry.readySend))
+                pending.push_back(entry);
+        }
+
+        for (const auto& entry : pending)
+        {
+            if (registrations.find(entry.registration) == registrations.end())
                 continue;
 
             SocketSelector::ReadinessType readinessType{};

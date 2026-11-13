@@ -23,23 +23,27 @@
 ////////////////////////////////////////////////////////////
 
 #include <emscripten.h>
+#include <limits.h>
+#include <mbedtls/entropy.h>
 #include <stddef.h>
 
 // JavaScript bodies must not be formatted as C++.
 // clang-format off
-EM_JS(void, sfmlFillHardwareRandom, (unsigned char* output, int length), {
-    const bytes = HEAPU8.subarray(output, output + length);
-    const cryptoObject = globalThis.crypto;
-    if (cryptoObject && cryptoObject.getRandomValues)
+EM_JS(int, sfmlFillHardwareRandom, (unsigned char* output, int length), {
+    try
     {
+        const cryptoObject = globalThis.crypto;
+        if (!cryptoObject || typeof cryptoObject.getRandomValues !== 'function')
+            return 0;
+        const bytes = HEAPU8.subarray(output, output + length);
         const chunk = 65536;
         for (let offset = 0; offset < length; offset += chunk)
             cryptoObject.getRandomValues(bytes.subarray(offset, Math.min(length, offset + chunk)));
+        return 1;
     }
-    else
+    catch (error)
     {
-        for (let index = 0; index < length; ++index)
-            bytes[index] = (Math.random() * 256) | 0;
+        return 0;
     }
 });
 // clang-format on
@@ -48,11 +52,15 @@ int mbedtls_hardware_poll(void* data, unsigned char* output, size_t len, size_t*
 {
     (void)data;
 
-    if (!output || !olen)
-        return -1;
+    if (!olen)
+        return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
 
-    if (len > 0)
-        sfmlFillHardwareRandom(output, (int)len);
+    *olen = 0;
+    if (len == 0)
+        return 0;
+
+    if (!output || len > INT_MAX || !sfmlFillHardwareRandom(output, (int)len))
+        return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
 
     *olen = len;
     return 0;

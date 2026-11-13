@@ -110,23 +110,70 @@ Blocking calls wait through Asyncify. Non-blocking calls still return
 `Time::Zero` keeps its existing meaning: a blocking connect or selector wait
 does not time out. `SocketHandle` remains an `int`, but it identifies an
 internal socket rather than an operating-system descriptor.
+Selector callbacks may add, remove, replace, or clear registrations. Dispatch
+uses a snapshot: canceled or replaced callbacks are skipped, and newly added
+registrations are considered after the next wait.
 
 `fetch` and WebSocket calls are subject to CORS, mixed content, and the
 browser's certificate policy. An HTTPS page cannot open `ws://`. `fetch` cannot
 turn certificate checks off or choose an address family.
 
+WebSocket connections and WebRTC signaling use WSS by default on HTTPS pages,
+and WS on HTTP pages or under Node. An explicit TLS request always requires
+WSS. To use a certificate hostname or a non-root path with the existing
+IP-based C++ socket API, configure the host's Module object before loading the
+generated JavaScript:
+
+```js
+Module['sfmlNetwork'] = {
+    resolveWebSocketUrl: ({transport, host, port, secure}) =>
+        transport === 'tcp'
+            ? 'wss://game.example.net/stream'
+            : 'wss://game.example.net/signaling'
+};
+```
+
+The optional callback receives `transport` (`tcp` or `udp`), the requested
+`host` and `port`, and whether a secure connection is required. It must synchronously return
+an absolute WS/WSS URL; `host` can be the IP from `connect` or the hostname from
+`setupTlsClient`. Map both to the same endpoint when they identify one service.
+Certificates are verified by the browser for the final URL's hostname.
+The peer must still speak `sfml.tcp` or `sfml.udp`; this callback does not turn
+an ordinary TCP/UDP server into a browser endpoint. Invalid URLs, callback or
+constructor exceptions, and attempts to use WS when WSS is required return
+the existing socket error status. The implementation never silently downgrades
+WSS or reports success before the WebSocket handshake completes.
+
 | SFML call | Web replacement |
 | --- | --- |
-| `sf::Http` | `fetch`. Method, fields, body, timeout, and "do not follow redirects" are preserved. The response is turned back into an HTTP message and parsed by the existing parser. `fetch` has already decoded the body, so transfer and content encodings are left out of that message. Ordinary HTTPS uses the browser trust store. |
+| `sf::Http` | `fetch`, using the browser's own hostname resolution without a preliminary DoH query. Method, fields, body, timeout, and "do not follow redirects" are preserved. The response is turned back into an HTTP message and parsed by the existing parser. `fetch` has already decoded the body, so transfer and content encodings are left out of that message. Ordinary HTTPS uses the browser trust store. |
 | `sf::Dns` without a server list | DNS-over-HTTPS (`application/dns-message`) to `https://cloudflare-dns.com/dns-query`. `localhost` resolves to the loopback addresses locally. `SFML_DOH_URL` selects another endpoint for tests. |
-| `sf::TcpSocket` connect, send, receive, and `sf::Packet` | WebSocket binary frames at `ws://address:port/` with subprotocol `sfml.tcp`. Frames are queued and read as a byte stream. |
-| `TcpSocket::setupTlsClient(hostname)` with the default verifier | If no application data has been exchanged, the socket reopens `wss://hostname:port/` and returns `HandshakeComplete` after the browser handshake. |
-| `sf::UdpSocket` send and receive | Unreliable, unordered WebRTC data channel named `sfml`. Signaling is an outbound WebSocket to `ws://address:port/` with subprotocol `sfml.udp`. The messages are JSON: `{"type":"offer","sdp":...}`, `{"type":"answer","sdp":...}`, and `{"type":"candidate","candidate":...,"sdpMid":...,"sdpMLineIndex":...}`. ICE uses `stun:stun.l.google.com:19302`. After the channel opens, the address and port still identify that peer. |
+| `sf::TcpSocket` connect, send, receive, and `sf::Packet` | WebSocket binary frames at the selected WS/WSS endpoint with subprotocol `sfml.tcp`. Frames are queued and read as a byte stream. |
+| `TcpSocket::setupTlsClient(hostname)` with the default verifier | Reuses an existing WSS connection to the same resolved endpoint. A WS connection can be reopened as WSS only before application data is sent or received. Non-blocking calls return `HandshakeStarted` until the same handshake completes; repeated calls do not reconnect. Once TLS setup starts, changing its hostname requires disconnecting and reconnecting. |
+| `sf::UdpSocket` send and receive | Unreliable, unordered WebRTC data channel named `sfml`. Signaling is an outbound WebSocket to the selected WS/WSS endpoint with subprotocol `sfml.udp`. The messages are JSON: `{"type":"offer","sdp":...}`, `{"type":"answer","sdp":...}`, and `{"type":"candidate","candidate":...,"sdpMid":...,"sdpMLineIndex":...}`. ICE uses `stun:stun.l.google.com:19302`. After the channel opens, the address and port still identify that peer. |
 | `sf::Ftp` and `sf::Sftp` | They still call `sf::TcpSocket`, so their bytes use the `sfml.tcp` stream. SFTP encryption remains libssh2 and Mbed TLS. The peer must accept that WebSocket convention; it is not raw FTP or SSH on the port. |
+
+Web `Http::setHost` does not check whether a hostname resolves. A successful
+return accepts the host parameters; actual resolution and connection failures
+are reported by `sendRequest`.
 
 `UdpSocket::bind` records the requested port and returns `Done`. It does not
 open a host port. `AnyPort` therefore stays `0`. A later `receive` only returns
 datagrams from data channels that this socket has already opened.
+Closed or failed channels wake pending sends and return `Error`; they are not
+automatically reopened. Rebind or recreate the socket to reset those peers.
+Receive drains queued datagrams first, then returns `Error` when all previously
+opened peers have terminated. Other live peers continue to work. Local socket
+closure also releases pending operations.
+
+Browser fetch hides manual redirects as `opaqueredirect`: their real 3xx status
+and Location cannot be read. Those responses, and other opaque responses with
+status zero, return `Http::Response::Status::ConnectionFailed` with one diagnostic.
+They are not followed or synthesized into an HTTP status-zero response. Under
+Node, a readable manual 3xx response retains its status and headers.
+
+SFTP's cryptographic entropy requires `crypto.getRandomValues`. If it is missing
+or fails, entropy collection fails; there is no fallback to `Math.random`.
 
 `sf::TcpListener` is not declared or compiled for web. A browser cannot listen
 for or accept connections, and the type is absent rather than stubbed. Native
@@ -166,7 +213,7 @@ node build/web/bin/sockets.js
 node build/web/bin/voip.js
 ```
 
-`sockets.js` and `voip.js` can run as clients. Choosing the server role prints that `sf::TcpListener` is absent and returns. `ftp.js`, `sftp.js`, and a sockets or VoIP client open `ws://address:port/` with subprotocol `sfml.tcp`; the peer has to speak that convention.
+`sockets.js` and `voip.js` can run as clients. Choosing the server role prints that `sf::TcpListener` is absent and returns. `ftp.js`, `sftp.js`, and a TCP sockets or VoIP client use the selected WS/WSS endpoint with subprotocol `sfml.tcp`; the peer has to speak that convention.
 
 The smaller transport check still has its own runner:
 
