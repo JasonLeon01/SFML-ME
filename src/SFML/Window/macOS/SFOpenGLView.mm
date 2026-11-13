@@ -127,7 +127,6 @@
         [m_hiddenTextView setNextResponder:m_silentResponder];
 
         // If high DPI is requested, then use high resolution for the OpenGL view.
-        // Currently, isHighDpi is always expected to be NO, and so the OpenGL view will render scaled.
         // Note: setWantsBestResolutionOpenGLSurface requires YES to work properly, rather than simply non-zero value.
         // isHighDpi is an Objective-C BOOL, which can have non-zero values other than YES.
         m_highDpi = isHighDpi ? YES : NO;
@@ -174,7 +173,7 @@
                name:NSWindowWillCloseNotification
              object:[self window]];
 
-    // Register for changed screen and changed screen's profile events
+    // Track both screen changes and backing-scale changes within the same screen.
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(updateScaleFactor)
@@ -183,7 +182,7 @@
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(updateScaleFactor)
-               name:NSWindowDidChangeScreenProfileNotification
+               name:NSWindowDidChangeBackingPropertiesNotification
              object:[self window]];
 
     // Now that we have a window, set up correctly the scale factor and cursor grabbing
@@ -259,7 +258,7 @@
     NSWindow* window         = [self window];
     NSScreen* screen         = window ? [window screen] : [NSScreen mainScreen];
     CGFloat   oldScaleFactor = m_scaleFactor;
-    m_scaleFactor            = m_highDpi ? [screen backingScaleFactor] : 1.0;
+    m_scaleFactor            = m_highDpi ? (window ? [window backingScaleFactor] : [screen backingScaleFactor]) : 1.0;
     [m_metalLayer setContentsScale:m_scaleFactor];
 
     // Send a resize event if the scaling factor changed

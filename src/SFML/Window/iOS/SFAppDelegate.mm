@@ -29,8 +29,9 @@
 #include <SFML/Window/iOS/SFMain.hpp>
 
 #import <TargetConditionals.h>
-#include <cstdlib>
 #include <vector>
+
+#include <cstdlib>
 
 #if TARGET_IPHONE_SIMULATOR
 #include <crt_externs.h>
