@@ -1,4 +1,7 @@
+#include <SFML/Graphics/GraphicsBackend.hpp>
 #include <SFML/Graphics/Shader.hpp>
+
+#include <SFML/Window/Context.hpp>
 
 // Other 1st party headers
 #include <SFML/System/Exception.hpp>
@@ -6,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <WindowUtil.hpp>
 #include <type_traits>
 
 namespace
@@ -103,74 +107,21 @@ void main()
 }
 )";
 
-#ifdef SFML_RUN_DISPLAY_TESTS
-#ifdef SFML_OPENGL_ES
-constexpr bool skipShaderDummyTest = false;
-constexpr bool skipShaderFullTest  = true;
-#else
-constexpr bool skipShaderDummyTest = true;
-constexpr bool skipShaderFullTest  = false;
-#endif
-#else
-constexpr bool skipShaderDummyTest = true;
-constexpr bool skipShaderFullTest  = true;
-#endif
-
-std::string skipShaderDummyTests()
-{
-    if constexpr (skipShaderDummyTest)
-        // https://github.com/catchorg/Catch2/blob/devel/docs/test-cases-and-sections.md#special-tags
-        // This tag tells Catch2 to not run a given TEST_CASE
-        return "[.shaderDummy]";
-    else
-        return "";
-}
-
-std::string skipShaderFullTests()
-{
-    if constexpr (skipShaderFullTest)
-        // https://github.com/catchorg/Catch2/blob/devel/docs/test-cases-and-sections.md#special-tags
-        // This tag tells Catch2 to not run a given TEST_CASE
-        return "[.shaderFull]";
-    else
-        return "";
-}
-
 } // namespace
 
-TEST_CASE("[Graphics] sf::Shader (Dummy Implementation)", skipShaderDummyTests())
+TEST_CASE("[Graphics] sf::Shader", runDisplayTests())
 {
-    SECTION("Available")
+    REQUIRE(sf::Shader::isAvailable());
+    if (sf::getGraphicsBackend() != sf::GraphicsBackend::OpenGL)
+        SKIP("These fixtures use desktop compatibility GLSL");
+
     {
-        CHECK_FALSE(sf::Shader::isAvailable());
-        CHECK_FALSE(sf::Shader::isGeometryAvailable());
+        const sf::Context context;
+        const auto*       gl = std::get_if<sf::OpenGLSettings>(&context.getSettings().backend);
+        if (!gl || gl->profile != sf::OpenGLProfile::Compatibility)
+            SKIP("These fixtures use desktop compatibility GLSL");
     }
 
-    SECTION("Construct from memory")
-    {
-        CHECK_THROWS_AS(sf::Shader(std::string_view(vertexSource), sf::Shader::Type::Vertex), sf::Exception);
-        CHECK_THROWS_AS(sf::Shader(std::string_view(geometrySource), sf::Shader::Type::Geometry), sf::Exception);
-        CHECK_THROWS_AS(sf::Shader(std::string_view(fragmentSource), sf::Shader::Type::Fragment), sf::Exception);
-        CHECK_THROWS_AS(sf::Shader(std::string_view(vertexSource), std::string_view(fragmentSource)), sf::Exception);
-        CHECK_THROWS_AS(sf::Shader(std::string_view(vertexSource),
-                                   std::string_view(geometrySource),
-                                   std::string_view(fragmentSource)),
-                        sf::Exception);
-    }
-
-    SECTION("loadFromMemory()")
-    {
-        sf::Shader shader;
-        CHECK_FALSE(shader.loadFromMemory(vertexSource, sf::Shader::Type::Vertex));
-        CHECK_FALSE(shader.loadFromMemory(geometrySource, sf::Shader::Type::Geometry));
-        CHECK_FALSE(shader.loadFromMemory(fragmentSource, sf::Shader::Type::Fragment));
-        CHECK_FALSE(shader.loadFromMemory(vertexSource, fragmentSource));
-        CHECK_FALSE(shader.loadFromMemory(vertexSource, geometrySource, fragmentSource));
-    }
-}
-
-TEST_CASE("[Graphics] sf::Shader", skipShaderFullTests())
-{
     SECTION("Type traits")
     {
         STATIC_CHECK(!std::is_copy_constructible_v<sf::Shader>);

@@ -41,7 +41,7 @@
 
 #include <SFML/System/Vector2.hpp>
 
-#include <array>
+#include <memory>
 
 #include <cstddef>
 #include <cstdint>
@@ -54,6 +54,11 @@ class Shader;
 class Texture;
 class Transform;
 class VertexBuffer;
+
+namespace priv
+{
+class RenderTargetBackend;
+}
 
 ////////////////////////////////////////////////////////////
 /// \brief Base class for all render targets (window, texture, ...)
@@ -467,107 +472,12 @@ protected:
     void initialize();
 
 private:
-    ////////////////////////////////////////////////////////////
-    /// \brief Apply the current view
-    ///
-    ////////////////////////////////////////////////////////////
-    void applyCurrentView();
+    friend class RenderWindow;
+    friend class RenderTexture;
 
-    ////////////////////////////////////////////////////////////
-    /// \brief Apply a new blending mode
-    ///
-    /// \param mode Blending mode to apply
-    ///
-    ////////////////////////////////////////////////////////////
-    void applyBlendMode(const BlendMode& mode);
-
-    ////////////////////////////////////////////////////////////
-    /// \brief Apply a new stencil mode
-    ///
-    /// \param mode Stencil mode to apply
-    ///
-    ////////////////////////////////////////////////////////////
-    void applyStencilMode(const StencilMode& mode);
-
-    ////////////////////////////////////////////////////////////
-    /// \brief Apply a new transform
-    ///
-    /// \param transform Transform to apply
-    ///
-    ////////////////////////////////////////////////////////////
-    void applyTransform(const Transform& transform);
-
-    ////////////////////////////////////////////////////////////
-    /// \brief Apply a new texture
-    ///
-    /// \param texture        Texture to apply
-    /// \param coordinateType The texture coordinate type to use
-    ///
-    ////////////////////////////////////////////////////////////
-    void applyTexture(const Texture* texture, CoordinateType coordinateType = CoordinateType::Pixels);
-
-    ////////////////////////////////////////////////////////////
-    /// \brief Apply a new shader
-    ///
-    /// \param shader Shader to apply
-    ///
-    ////////////////////////////////////////////////////////////
-    void applyShader(const Shader* shader);
-
-    ////////////////////////////////////////////////////////////
-    /// \brief Setup environment for drawing
-    ///
-    /// \param useVertexCache Are we going to use the vertex cache?
-    /// \param states         Render states to use for drawing
-    ///
-    ////////////////////////////////////////////////////////////
-    void setupDraw(bool useVertexCache, const RenderStates& states);
-
-    ////////////////////////////////////////////////////////////
-    /// \brief Draw the primitives
-    ///
-    /// \param type        Type of primitives to draw
-    /// \param firstVertex Index of the first vertex to use when drawing
-    /// \param vertexCount Number of vertices to use when drawing
-    ///
-    ////////////////////////////////////////////////////////////
-    void drawPrimitives(PrimitiveType type, std::size_t firstVertex, std::size_t vertexCount);
-
-    ////////////////////////////////////////////////////////////
-    /// \brief Clean up environment after drawing
-    ///
-    /// \param states Render states used for drawing
-    ///
-    ////////////////////////////////////////////////////////////
-    void cleanupDraw(const RenderStates& states);
-
-    ////////////////////////////////////////////////////////////
-    /// \brief Render states cache
-    ///
-    ////////////////////////////////////////////////////////////
-    struct StatesCache
-    {
-        bool                  enable{};                //!< Is the cache enabled?
-        bool                  glStatesSet{};           //!< Are our internal GL states set yet?
-        bool                  viewChanged{};           //!< Has the current view changed since last draw?
-        bool                  scissorEnabled{};        //!< Is scissor testing enabled?
-        bool                  stencilEnabled{};        //!< Is stencil testing enabled?
-        BlendMode             lastBlendMode;           //!< Cached blending mode
-        StencilMode           lastStencilMode;         //!< Cached stencil
-        std::uint64_t         lastTextureId{};         //!< Cached texture
-        CoordinateType        lastCoordinateType{};    //!< Texture coordinate type
-        bool                  texCoordsArrayEnabled{}; //!< Is `GL_TEXTURE_COORD_ARRAY` client state enabled?
-        bool                  useVertexCache{};        //!< Did we previously use the vertex cache?
-        std::array<Vertex, 4> vertexCache{};           //!< Pre-transformed vertices cache
-    };
-
-    ////////////////////////////////////////////////////////////
-    // Member data
-    ////////////////////////////////////////////////////////////
-    View          m_defaultView; //!< Default view
-    View          m_view;        //!< Current view
-    StatesCache   m_cache{};     //!< Render states cache
-    std::uint64_t m_id{};        //!< Unique number that identifies the RenderTarget
+    View                                       m_defaultView;
+    View                                       m_view;
+    std::shared_ptr<priv::RenderTargetBackend> m_backend;
 };
 
 } // namespace sf

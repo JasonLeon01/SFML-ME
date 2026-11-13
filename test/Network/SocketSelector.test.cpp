@@ -1,7 +1,9 @@
 #include <SFML/Network/SocketSelector.hpp>
 
 // Other 1st party headers
+#if !defined(SFML_SYSTEM_EMSCRIPTEN)
 #include <SFML/Network/TcpListener.hpp>
+#endif
 #include <SFML/Network/TcpSocket.hpp>
 #include <SFML/Network/UdpSocket.hpp>
 
@@ -35,6 +37,7 @@ TEST_CASE("[Network] sf::SocketSelector")
     }
 }
 
+#if !defined(SFML_SYSTEM_EMSCRIPTEN)
 TEST_CASE("[Network] sf::SocketSelector Many Connections", runIpV4LoopbackTests())
 {
     std::cout << "Running sf::SocketSelector Many Connections tests with SFML_NETWORK_TESTS_MAX_FDS set to "
@@ -199,3 +202,4 @@ TEST_CASE("[Network] sf::SocketSelector Many Connections", runIpV4LoopbackTests(
     for (const auto& state : incomingConnections)
         CHECK(std::memcmp(state.data.get(), randomData.get(), randomDataSize) == 0);
 }
+#endif

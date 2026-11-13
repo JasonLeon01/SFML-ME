@@ -51,11 +51,15 @@
     defined(SFML_SYSTEM_NETBSD)
 
 #if defined(SFML_OPENGL_ES)
-#include <GLES/gl.h>
-#include <GLES/glext.h>
+#include <GLES2/gl2ext.h>
+#include <GLES3/gl3.h>
 #else
 #include <GL/gl.h>
 #endif
+
+#elif defined(SFML_SYSTEM_EMSCRIPTEN)
+
+#include <GLES3/gl3.h>
 
 #elif defined(SFML_SYSTEM_MACOS)
 
@@ -63,16 +67,13 @@
 
 #elif defined(SFML_SYSTEM_IOS)
 
-#include <OpenGLES/ES1/gl.h>
-#include <OpenGLES/ES1/glext.h>
+#include <OpenGLES/ES3/gl.h>
+#include <OpenGLES/ES3/glext.h>
 
 #elif defined(SFML_SYSTEM_ANDROID)
 
-#include <GLES/gl.h>
-#include <GLES/glext.h>
-
-// We're not using OpenGL ES 2+ yet, but we can use the sRGB extension
 #include <GLES2/gl2ext.h>
-#include <GLES2/gl2platform.h>
+#include <GLES3/gl3.h>
+
 
 #endif

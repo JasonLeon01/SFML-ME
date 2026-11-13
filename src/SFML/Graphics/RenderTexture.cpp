@@ -25,17 +25,17 @@
 ////////////////////////////////////////////////////////////
 // Headers
 ////////////////////////////////////////////////////////////
+#include <SFML/Graphics/GraphicsDevice.hpp>
+#include <SFML/Graphics/RHI/Access.hpp>
+#include <SFML/Graphics/RenderTargetBackend.hpp>
 #include <SFML/Graphics/RenderTexture.hpp>
-#include <SFML/Graphics/RenderTextureImplDefault.hpp>
-#include <SFML/Graphics/RenderTextureImplFBO.hpp>
 
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Exception.hpp>
 
 #include <memory>
 #include <ostream>
-
-#include <cassert>
+#include <utility>
 
 
 namespace sf
@@ -67,53 +67,29 @@ RenderTexture& RenderTexture::operator=(RenderTexture&&) noexcept = default;
 ////////////////////////////////////////////////////////////
 bool RenderTexture::resize(Vector2u size, const ContextSettings& settings)
 {
-    // Create the texture
-    // Set texture to be in sRGB scale if requested
-    if (!m_texture.resize(size, settings.sRgbCapable))
-    {
-        err() << "Impossible to create render texture (failed to create the target texture)" << std::endl;
-        return false;
-    }
-
-    // We disable smoothing by default for render textures
-    setSmooth(false);
-
-    // Create the implementation
-    if (priv::RenderTextureImplFBO::isAvailable())
-    {
-        // Use frame-buffer object (FBO)
-        m_impl = std::make_unique<priv::RenderTextureImplFBO>();
-
-        // Mark the texture as being a framebuffer object attachment
-        m_texture.m_fboAttachment = true;
-    }
-    else
-    {
-        // Use default implementation
-        m_impl = std::make_unique<priv::RenderTextureImplDefault>();
-    }
-
-    // Initialize the render texture
-    // We pass the actual size of our texture since OpenGL ES requires that all attachments have identical sizes
-    if (!m_impl->create(m_texture.m_actualSize, m_texture.m_texture, settings))
-        return false;
-
-    // We can now initialize the render target part
-    RenderTarget::initialize();
-
-    return true;
+    return priv::withGraphicsDevice(settings,
+                                    [&](const priv::GraphicsDevice& device, const ContextSettings& effective)
+                                    {
+                                        Texture texture;
+                                        texture.setRepeated(m_texture.isRepeated());
+                                        if (!texture.resize(size, settings.sRgbCapable))
+                                            return false;
+                                        auto target = device.device->createRenderTarget(texture.m_resource, effective);
+                                        if (!target)
+                                            return false;
+                                        m_backend = std::static_pointer_cast<priv::RenderTargetBackend>(target);
+                                        m_texture = std::move(texture);
+                                        RenderTarget::initialize();
+                                        return true;
+                                    });
 }
 
 
 ////////////////////////////////////////////////////////////
 unsigned int RenderTexture::getMaximumAntiAliasingLevel()
 {
-    if (priv::RenderTextureImplFBO::isAvailable())
-    {
-        return priv::RenderTextureImplFBO::getMaximumAntiAliasingLevel();
-    }
-
-    return priv::RenderTextureImplDefault::getMaximumAntiAliasingLevel();
+    const auto device = rhi::getDevice();
+    return device ? device->capabilities().maximumAntiAliasingLevel : 0;
 }
 
 
@@ -155,37 +131,20 @@ bool RenderTexture::generateMipmap()
 ////////////////////////////////////////////////////////////
 bool RenderTexture::setActive(bool active)
 {
-    // Update RenderTarget tracking
-    if (m_impl && m_impl->activate(active))
-        return RenderTarget::setActive(active);
-
-    return false;
+    return m_backend && m_backend->setActive(active);
 }
 
 
 ////////////////////////////////////////////////////////////
 void RenderTexture::display()
 {
-    if (!m_impl)
-        return;
-
-    if (priv::RenderTextureImplFBO::isAvailable())
+    if (m_backend)
     {
-        // Perform a RenderTarget-only activation if we are using FBOs
-        if (!RenderTarget::setActive())
-            return;
+        m_backend->finish();
+        m_texture.invalidateMipmap();
+        if (const auto device = rhi::getDevice())
+            (void)device->submit(false);
     }
-    else
-    {
-        // Perform a full activation if we are not using FBOs
-        if (!setActive())
-            return;
-    }
-
-    // Update the target texture
-    m_impl->updateTexture(m_texture.m_texture);
-    m_texture.m_pixelsFlipped = true;
-    m_texture.invalidateMipmap();
 }
 
 
@@ -199,8 +158,7 @@ Vector2u RenderTexture::getSize() const
 ////////////////////////////////////////////////////////////
 bool RenderTexture::isSrgb() const
 {
-    assert(m_impl && "RenderTexture::isSrgb() Must first initialize render texture");
-    return m_impl->isSrgb();
+    return m_backend ? m_backend->settings().sRgbCapable : m_texture.isSrgb();
 }
 
 

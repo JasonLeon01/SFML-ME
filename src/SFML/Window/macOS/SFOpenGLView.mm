@@ -33,6 +33,8 @@
 
 #include <SFML/System/Err.hpp>
 
+#import <QuartzCore/CAMetalLayer.h>
+
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 
@@ -144,7 +146,8 @@
 {
     // In order to prevent an infinite recursion when the window/view is
     // resized to zero-height/width, we ignore update event when resizing.
-    if (![self inLiveResize])
+    // A Metal-hosting view has no OpenGL context to update.
+    if (![self inLiveResize] && (m_metalLayer == nil))
     {
         [super update];
     }
@@ -235,12 +238,29 @@
 
 
 ////////////////////////////////////////////////////////
+- (CAMetalLayer*)metalLayer
+{
+    if (m_metalLayer == nil)
+    {
+        m_metalLayer = [[CAMetalLayer alloc] init];
+        [m_metalLayer setContentsScale:m_scaleFactor];
+        [m_metalLayer setNeedsDisplayOnBoundsChange:NO];
+        // Setting the layer before wantsLayer makes this a layer-hosting view
+        [self setLayer:m_metalLayer];
+        [self setWantsLayer:YES];
+    }
+    return m_metalLayer;
+}
+
+
+////////////////////////////////////////////////////////
 - (void)updateScaleFactor
 {
     NSWindow* window         = [self window];
     NSScreen* screen         = window ? [window screen] : [NSScreen mainScreen];
     CGFloat   oldScaleFactor = m_scaleFactor;
     m_scaleFactor            = m_highDpi ? [screen backingScaleFactor] : 1.0;
+    [m_metalLayer setContentsScale:m_scaleFactor];
 
     // Send a resize event if the scaling factor changed
     if ((m_scaleFactor != oldScaleFactor) && (m_requester != nullptr))
@@ -359,6 +379,7 @@
     [m_hiddenTextView release];
     [m_silentResponder release];
     [m_trackingArea release];
+    [m_metalLayer release];
 
     [self setRequesterTo:nullptr];
 

@@ -116,18 +116,15 @@ bool RenderTextureImplFBO::isAvailable()
 ////////////////////////////////////////////////////////////
 unsigned int RenderTextureImplFBO::getMaximumAntiAliasingLevel()
 {
-#ifdef SFML_OPENGL_ES
-
-    return 0;
-
-#else
 
     const TransientContextLock lock;
-    GLint                      samples = 0;
+    ensureExtensionsInit();
+    if (!GLEXT_framebuffer_multisample_blit)
+        return 0;
+
+    GLint samples = 0;
     glCheck(glGetIntegerv(GLEXT_GL_MAX_SAMPLES, &samples));
     return static_cast<unsigned int>(samples);
-
-#endif
 }
 
 
@@ -150,12 +147,11 @@ bool RenderTextureImplFBO::create(Vector2u size, unsigned int textureId, const C
         // Make sure that extensions are initialized
         ensureExtensionsInit();
 
-        if (settings.antiAliasingLevel && !(GLEXT_framebuffer_multisample && GLEXT_framebuffer_blit))
+        if (settings.antiAliasingLevel && !GLEXT_framebuffer_multisample_blit)
             return false;
 
-        m_sRgb = settings.sRgbCapable && GL_EXT_texture_sRGB;
+        m_sRgb = settings.sRgbCapable && GLEXT_texture_sRGB;
 
-#ifndef SFML_OPENGL_ES
 
         // Check if the requested anti-aliasing level is supported
         if (settings.antiAliasingLevel)
@@ -171,7 +167,6 @@ bool RenderTextureImplFBO::create(Vector2u size, unsigned int textureId, const C
             }
         }
 
-#endif
 
         if (!settings.antiAliasingLevel)
         {
@@ -247,7 +242,6 @@ bool RenderTextureImplFBO::create(Vector2u size, unsigned int textureId, const C
         else
         {
 
-#ifndef SFML_OPENGL_ES
 
             // Create the multisample color buffer
             GLuint color = 0;
@@ -262,7 +256,7 @@ bool RenderTextureImplFBO::create(Vector2u size, unsigned int textureId, const C
             glCheck(GLEXT_glBindRenderbuffer(GLEXT_GL_RENDERBUFFER, m_colorBuffer));
             glCheck(GLEXT_glRenderbufferStorageMultisample(GLEXT_GL_RENDERBUFFER,
                                                            static_cast<GLsizei>(settings.antiAliasingLevel),
-                                                           m_sRgb ? GL_SRGB8_ALPHA8_EXT : GL_RGBA,
+                                                           m_sRgb ? GLEXT_GL_SRGB8_ALPHA8 : GL_RGBA8,
                                                            static_cast<GLsizei>(size.x),
                                                            static_cast<GLsizei>(size.y)));
 
@@ -335,15 +329,6 @@ bool RenderTextureImplFBO::create(Vector2u size, unsigned int textureId, const C
             }
 
             m_multisample = true;
-
-#else
-
-            m_multisample = false;
-
-            err() << "Impossible to create render texture (failed to create the multisample render buffers)" << std::endl;
-            return false;
-
-#endif // SFML_OPENGL_ES
         }
     }
 
@@ -354,7 +339,6 @@ bool RenderTextureImplFBO::create(Vector2u size, unsigned int textureId, const C
     if (!Context::getActiveContextId())
         return true;
 
-#ifndef SFML_OPENGL_ES
 
     // Save the current bindings so we can restore them after we are done
     GLint readFramebuffer = 0;
@@ -372,22 +356,6 @@ bool RenderTextureImplFBO::create(Vector2u size, unsigned int textureId, const C
         return true;
     }
 
-#else
-
-    // Save the current binding so we can restore them after we are done
-    GLint frameBuffer = 0;
-
-    glCheck(glGetIntegerv(GLEXT_GL_FRAMEBUFFER_BINDING, &frameBuffer));
-
-    if (createFrameBuffer())
-    {
-        // Restore previously bound framebuffer
-        glCheck(GLEXT_glBindFramebuffer(GLEXT_GL_FRAMEBUFFER, static_cast<GLuint>(frameBuffer)));
-
-        return true;
-    }
-
-#endif
 
     return false;
 }
@@ -443,7 +411,6 @@ bool RenderTextureImplFBO::createFrameBuffer()
     // Register the object with the current context so it is automatically destroyed
     registerUnsharedGlObject(std::move(frameBuffer));
 
-#ifndef SFML_OPENGL_ES
 
     if (m_multisample)
     {
@@ -500,7 +467,6 @@ bool RenderTextureImplFBO::createFrameBuffer()
         registerUnsharedGlObject(std::move(multisampleFrameBuffer));
     }
 
-#endif
 
     return true;
 }
@@ -594,7 +560,6 @@ void RenderTextureImplFBO::updateTexture(unsigned int)
     // from our FBO with multisample renderbuffer attachments
     // to our FBO to which our target texture is attached
 
-#ifndef SFML_OPENGL_ES
 
     // In case of multisampling, make sure both FBOs
     // are already available within the current context
@@ -640,8 +605,6 @@ void RenderTextureImplFBO::updateTexture(unsigned int)
             }
         }
     }
-
-#endif // SFML_OPENGL_ES
 }
 
 } // namespace sf::priv

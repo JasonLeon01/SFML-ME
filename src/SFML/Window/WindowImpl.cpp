@@ -42,12 +42,14 @@
 
 #include <cmath>
 
-#if defined(SFML_SYSTEM_WINDOWS)
+#ifdef SFML_SYSTEM_EMSCRIPTEN
+#include <SFML/Window/Emscripten/WindowImplWeb.hpp>
+using WindowImplType = sf::priv::WindowImplWeb;
+#elif defined(SFML_SYSTEM_WINDOWS)
 
 #include <SFML/Window/Win32/WindowImplWin32.hpp>
 using WindowImplType = sf::priv::WindowImplWin32;
 
-#include <SFML/Window/VulkanImpl.hpp>
 
 #elif defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_FREEBSD) || defined(SFML_SYSTEM_OPENBSD) || \
     defined(SFML_SYSTEM_NETBSD)
@@ -57,14 +59,14 @@ using WindowImplType = sf::priv::WindowImplWin32;
 #include <SFML/Window/DRM/WindowImplDRM.hpp>
 using WindowImplType = sf::priv::WindowImplDRM;
 
-#define SFML_VULKAN_IMPLEMENTATION_NOT_AVAILABLE
 
 #else
 
+#include <SFML/Window/Unix/Display.hpp>
 #include <SFML/Window/Unix/WindowImplX11.hpp>
+#define SFML_WINDOW_IMPL_X11
 using WindowImplType = sf::priv::WindowImplX11;
 
-#include <SFML/Window/VulkanImpl.hpp>
 
 #endif
 
@@ -73,21 +75,18 @@ using WindowImplType = sf::priv::WindowImplX11;
 #include <SFML/Window/macOS/WindowImplCocoa.hpp>
 using WindowImplType = sf::priv::WindowImplCocoa;
 
-#define SFML_VULKAN_IMPLEMENTATION_NOT_AVAILABLE
 
 #elif defined(SFML_SYSTEM_IOS)
 
 #include <SFML/Window/iOS/WindowImplUIKit.hpp>
 using WindowImplType = sf::priv::WindowImplUIKit;
 
-#define SFML_VULKAN_IMPLEMENTATION_NOT_AVAILABLE
 
 #elif defined(SFML_SYSTEM_ANDROID)
 
 #include <SFML/Window/Android/WindowImplAndroid.hpp>
 using WindowImplType = sf::priv::WindowImplAndroid;
 
-#define SFML_VULKAN_IMPLEMENTATION_NOT_AVAILABLE
 
 #endif
 
@@ -120,6 +119,17 @@ std::unique_ptr<WindowImpl> WindowImpl::create(
     State                  state,
     const ContextSettings& settings)
 {
+#ifdef SFML_WINDOW_IMPL_X11
+    const auto display = tryOpenDisplay();
+    if (!display)
+        return {};
+#endif
+
+#ifdef SFML_SYSTEM_EMSCRIPTEN
+    if (!WindowImplWeb::canCreate())
+        return {};
+#endif
+
     // Fullscreen style requires some tests
     if (state == State::Fullscreen)
     {
@@ -161,6 +171,16 @@ std::unique_ptr<WindowImpl> WindowImpl::create(
 ////////////////////////////////////////////////////////////
 std::unique_ptr<WindowImpl> WindowImpl::create(WindowHandle handle)
 {
+#ifdef SFML_WINDOW_IMPL_X11
+    const auto display = tryOpenDisplay();
+    if (!display)
+        return {};
+#endif
+
+#ifdef SFML_SYSTEM_EMSCRIPTEN
+    if (!WindowImplWeb::canCreate(handle))
+        return {};
+#endif
     return std::make_unique<WindowImplType>(handle);
 }
 
@@ -383,19 +403,6 @@ void WindowImpl::populateEventQueue()
 
 
 ////////////////////////////////////////////////////////////
-bool WindowImpl::createVulkanSurface([[maybe_unused]] const VkInstance&            instance,
-                                     [[maybe_unused]] VkSurfaceKHR&                surface,
-                                     [[maybe_unused]] const VkAllocationCallbacks* allocator) const
-{
-#if defined(SFML_VULKAN_IMPLEMENTATION_NOT_AVAILABLE)
 
-    return false;
-
-#else
-
-    return VulkanImpl::createVulkanSurface(instance, getNativeHandle(), surface, allocator);
-
-#endif
-}
 
 } // namespace sf::priv

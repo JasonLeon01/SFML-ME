@@ -51,14 +51,14 @@ struct LibSsh2Initializer
 {
     LibSsh2Initializer()
     {
-        const std::lock_guard       lock(mutex);
+        const std::scoped_lock      lock(mutex);
         [[maybe_unused]] const auto result = libssh2_init(0);
         assert(result == 0);
     }
 
     ~LibSsh2Initializer()
     {
-        const std::lock_guard lock(mutex);
+        const std::scoped_lock lock(mutex);
         libssh2_exit();
     }
 
@@ -241,7 +241,7 @@ sf::Sftp::Result makeError(LIBSSH2_SESSION* session, LIBSSH2_SFTP* sftp = nullpt
 {
     using Value = sf::Sftp::Result::Value;
 
-    char*      ptr{};
+    char*      ptr{}; // NOLINT(misc-const-correctness) libssh2 writes through char**
     auto       length = 0;
     const auto error  = libssh2_session_last_error(session, &ptr, &length, 0);
     const auto size   = static_cast<std::size_t>(length);

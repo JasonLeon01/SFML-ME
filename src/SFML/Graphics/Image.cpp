@@ -173,8 +173,8 @@ void Image::resize(Vector2u size, Color color)
         std::vector<std::uint8_t> newPixels(std::size_t{size.x} * std::size_t{size.y} * 4);
 
         // Fill it with the specified color
-        std::uint8_t* ptr = newPixels.data();
-        std::uint8_t* end = ptr + newPixels.size();
+        std::uint8_t* ptr = newPixels.data(); // NOLINT(misc-const-correctness): writes through the incremented pointer
+        const std::uint8_t* end = ptr + newPixels.size();
         while (ptr != end)
         {
             *ptr++ = color.r;
@@ -572,8 +572,8 @@ void Image::createMaskFromColor(Color color, std::uint8_t alpha)
     if (!m_pixels.empty())
     {
         // Replace the alpha of the pixels that match the transparent color
-        std::uint8_t* ptr = m_pixels.data();
-        std::uint8_t* end = ptr + m_pixels.size();
+        std::uint8_t*       ptr = m_pixels.data();
+        const std::uint8_t* end = ptr + m_pixels.size();
         while (ptr != end)
         {
             if ((ptr[0] == color.r) && (ptr[1] == color.g) && (ptr[2] == color.b) && (ptr[3] == color.a))
@@ -679,7 +679,7 @@ void Image::setPixel(Vector2u coords, Color color)
     assert(coords.y < m_size.y && "Image::setPixel() y coordinate is out of bounds");
 
     const auto    index = (coords.x + coords.y * m_size.x) * 4;
-    std::uint8_t* pixel = &m_pixels[index];
+    std::uint8_t* pixel = &m_pixels[index]; // NOLINT(misc-const-correctness): writes through the incremented pointer
     *pixel++            = color.r;
     *pixel++            = color.g;
     *pixel++            = color.b;

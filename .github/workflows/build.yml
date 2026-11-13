@@ -16,6 +16,28 @@ defaults:
     shell: bash
 
 jobs:
+  web:
+    name: WebGL 2 (${{ matrix.type }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        type: [Debug, Release]
+    steps:
+    - uses: actions/checkout@v6
+    - uses: lukka/get-cmake@latest
+    - name: Install Emscripten
+      run: |
+        git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+        "$RUNNER_TEMP/emsdk/emsdk" install 7.0.0
+        "$RUNNER_TEMP/emsdk/emsdk" activate 7.0.0
+    - name: Build and install Web libraries and tennis
+      run: |
+        source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+        cmake --preset web -DCMAKE_BUILD_TYPE=${{ matrix.type }}
+        cmake --build build/web --parallel 2
+        cmake --install build/web
+
   build:
     name: ${{ matrix.platform.name }} ${{ matrix.config.name }} ${{ matrix.type.name }}
     runs-on: ${{ matrix.platform.os }}
@@ -29,8 +51,9 @@ jobs:
         platform:
         - { name: Windows VS2022 x86,             os: windows-2025, flags: -DSFML_USE_MESA3D=ON -GNinja }
         - { name: Windows VS2022 x64,             os: windows-2025, flags: -DSFML_USE_MESA3D=ON -GNinja }
+        - { name: Windows VS2022 DirectX only,     os: windows-2025, flags: -DSFML_BUILD_OPENGL_BACKEND=OFF -DSFML_BUILD_VULKAN_BACKEND=OFF -GNinja }
         - { name: Windows VS2022 arm64,           os: windows-2025, flags: -DSFML_USE_MESA3D=OFF -GNinja -DSFML_BUILD_TEST_SUITE=OFF }
-        - { name: Windows VS2022 ClangCL MSBuild, os: windows-2025, flags: -DSFML_USE_MESA3D=ON -T ClangCL } # ninja doesn't support specifying the toolset, so use the ClangCL toolset to test building with MSBuild as well
+        - { name: Windows VS2022 ClangCL MSBuild, os: windows-2022, flags: -DSFML_USE_MESA3D=ON -G "Visual Studio 17 2022" -T ClangCL } # ninja doesn't support specifying the toolset, so use the ClangCL toolset to test building with MSBuild as well
         - { name: Windows VS2022 OpenGL ES,       os: windows-2025, flags: -DSFML_USE_MESA3D=ON -DSFML_OPENGL_ES=ON -GNinja }
         - { name: Windows VS2022 Unity,           os: windows-2025, flags: -DSFML_USE_MESA3D=ON -DCMAKE_UNITY_BUILD=ON -GNinja }
         - { name: Windows LLVM/Clang,             os: windows-2025, flags: -DSFML_USE_MESA3D=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -GNinja }
@@ -42,7 +65,9 @@ jobs:
         - { name: macOS x64,                      os: macos-15, flags: -GNinja -DCMAKE_OSX_ARCHITECTURES=x86_64 }
         - { name: macOS x64 Xcode,                os: macos-15, flags: -GXcode -DCMAKE_OSX_ARCHITECTURES=x86_64 }
         - { name: macOS arm64,                    os: macos-15, flags: -GNinja -DSFML_RUN_AUDIO_DEVICE_TESTS=OFF }
+        - { name: macOS arm64 Metal only,         os: macos-15, flags: -GNinja -DSFML_BUILD_OPENGL_BACKEND=OFF -DSFML_RUN_AUDIO_DEVICE_TESTS=OFF }
         - { name: iOS Xcode,                      os: macos-15, flags: -DCMAKE_SYSTEM_NAME=iOS -GXcode -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO }
+        - { name: iOS Xcode Metal only,           os: macos-15, flags: -DCMAKE_SYSTEM_NAME=iOS -GXcode -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO -DSFML_BUILD_OPENGL_BACKEND=OFF }
         config:
         - { name: Shared, flags: -DBUILD_SHARED_LIBS=ON }
         - { name: Static, flags: -DBUILD_SHARED_LIBS=OFF }
@@ -65,9 +90,9 @@ jobs:
           config: { name: Static Standard Libraries, flags: -GNinja -DSFML_USE_MESA3D=ON -DCMAKE_CXX_COMPILER=g++ -DSFML_USE_STATIC_STD_LIBS=ON }
         - platform: { name: Windows MinGW, os: windows-2025 }
           config: { name: Static with PCH (GCC), flags: -GNinja -DSFML_USE_MESA3D=ON -DCMAKE_CXX_COMPILER=g++ -DBUILD_SHARED_LIBS=OFF -DSFML_ENABLE_PCH=ON -DSFML_ENABLE_STDLIB_ASSERTIONS=OFF } # disabling stdlib assertions due to false positive
-        - platform: { name: macOS, os: macos-14 }
+        - platform: { name: macOS, os: macos-15 }
           config: { name: Frameworks, flags: -GNinja -DSFML_BUILD_FRAMEWORKS=ON -DBUILD_SHARED_LIBS=ON }
-        - platform: { name: macOS , os: macos-14 }
+        - platform: { name: macOS , os: macos-15 }
           config: { name: System Deps, flags: -GNinja -DBUILD_SHARED_LIBS=ON -DSFML_USE_SYSTEM_DEPS=ON }
         - platform: { name: Android, os: ubuntu-24.04 }
           config:
@@ -99,6 +124,8 @@ jobs:
           type: { name: Debug, flags: -DCMAKE_BUILD_TYPE=Debug -DSFML_FATAL_OPENGL_ERRORS=ON }
         exclude: # Shared libraries are not supported on iOS
         - platform: { name: iOS Xcode }
+          config: { name: Shared }
+        - platform: { name: iOS Xcode Metal only }
           config: { name: Shared }
 
 
@@ -194,6 +221,18 @@ jobs:
 
     - name: Configure CMake
       run: cmake --preset dev -DCMAKE_VERBOSE_MAKEFILE=ON -DSFML_RUN_IPV4_LINK_TESTS=ON -DSFML_RUN_IPV4_INTERNET_TESTS=ON -DSFML_RUN_IPV6_LINK_TESTS=ON -DSFML_NETWORK_TESTS_MAX_FDS=1028 ${{matrix.platform.flags}} ${{matrix.config.flags}} ${{matrix.type.flags}}
+
+    - name: Stage the MinGW runtime for test executables
+      if: matrix.platform.name == 'Windows MinGW' && !contains(matrix.config.flags, 'SFML_USE_STATIC_STD_LIBS=ON')
+      shell: pwsh
+      run: |
+        $compiler = Select-String -LiteralPath build/CMakeCache.txt -Pattern '^CMAKE_CXX_COMPILER:[^=]+=(.+)$'
+        $compilerPath = $compiler.Matches[0].Groups[1].Value
+        $mingwBin = Split-Path -Parent (Get-Command -Name $compilerPath -CommandType Application).Source
+        New-Item -ItemType Directory -Force -Path build/bin | Out-Null
+        foreach ($dll in 'libgcc_s_seh-1.dll', 'libstdc++-6.dll', 'libwinpthread-1.dll') {
+          Copy-Item -LiteralPath (Join-Path $mingwBin $dll) -Destination build/bin
+        }
 
     - name: Build
       run: cmake --build build --config ${{ matrix.type.name == 'Debug' && 'Debug' || 'Release' }} --target install

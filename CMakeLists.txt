@@ -22,7 +22,12 @@ endif()
 
 # determine whether to create a debug or release build
 sfml_set_option(CMAKE_BUILD_TYPE Release STRING "Choose the type of build (Debug or Release)")
-sfml_set_option(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" STRING "The minimal iOS version that will be able to run the built binaries. Cannot be lower than 13.0")
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(SFML_MINIMUM_DEPLOYMENT_TARGET "16.0")
+else()
+    set(SFML_MINIMUM_DEPLOYMENT_TARGET "13.0")
+endif()
+sfml_set_option(CMAKE_OSX_DEPLOYMENT_TARGET "${SFML_MINIMUM_DEPLOYMENT_TARGET}" STRING "The minimal macOS/iOS version that will be able to run the built binaries. Cannot be lower than 13.0 on macOS or 16.0 on iOS")
 
 # project name
 project(SFML VERSION 3.1.0)
@@ -43,7 +48,7 @@ sfml_set_option(SFML_BUILD_GRAPHICS ON BOOL "ON to build SFML's Graphics module.
 sfml_set_option(SFML_BUILD_AUDIO ON BOOL "ON to build SFML's Audio module.")
 sfml_set_option(SFML_BUILD_NETWORK ON BOOL "ON to build SFML's Network module.")
 
-if(SFML_BUILD_WINDOW)
+if(SFML_BUILD_WINDOW OR SFML_BUILD_GRAPHICS)
     # add an option for choosing the OpenGL implementation
     sfml_set_option(SFML_OPENGL_ES ${OPENGL_ES} BOOL "ON to use an OpenGL ES implementation, OFF to use a desktop OpenGL implementation")
 
@@ -53,8 +58,67 @@ if(SFML_BUILD_WINDOW)
     endif()
 endif()
 
+if(SFML_BUILD_WINDOW OR SFML_BUILD_GRAPHICS)
+    set(SFML_VULKAN_PLATFORM OFF)
+    if(SFML_OS_WINDOWS OR SFML_OS_ANDROID OR
+       ((SFML_OS_LINUX OR SFML_OS_FREEBSD OR SFML_OS_OPENBSD OR SFML_OS_NETBSD) AND NOT SFML_USE_DRM))
+        set(SFML_VULKAN_PLATFORM ON)
+    endif()
+
+    sfml_set_option(SFML_BUILD_OPENGL_BACKEND ON BOOL "Build the OpenGL or OpenGL ES backend")
+    sfml_set_option(SFML_BUILD_VULKAN_BACKEND ${SFML_VULKAN_PLATFORM} BOOL "Build the Vulkan backend")
+    set(SFML_DIRECTX_PLATFORM OFF)
+    if(SFML_OS_WINDOWS)
+        set(SFML_DIRECTX_PLATFORM ON)
+    endif()
+    sfml_set_option(SFML_BUILD_DIRECTX_BACKEND ${SFML_DIRECTX_PLATFORM} BOOL "Build the Direct3D 11 backend (Windows only)")
+    set(SFML_METAL_PLATFORM OFF)
+    if(SFML_OS_MACOS OR SFML_OS_IOS)
+        set(SFML_METAL_PLATFORM ON)
+    endif()
+    sfml_set_option(SFML_BUILD_METAL_BACKEND ${SFML_METAL_PLATFORM} BOOL "Build the Metal backend (macOS and iOS only)")
+    if(SFML_BUILD_DIRECTX_BACKEND AND NOT SFML_OS_WINDOWS)
+        message(FATAL_ERROR "The DirectX backend is only available on Windows")
+    endif()
+    if(SFML_BUILD_METAL_BACKEND AND NOT SFML_METAL_PLATFORM)
+        message(FATAL_ERROR "The Metal backend is only available on macOS and iOS")
+    endif()
+    if(SFML_BUILD_VULKAN_BACKEND AND NOT SFML_VULKAN_PLATFORM)
+        message(FATAL_ERROR "The Vulkan backend is unavailable on this windowing platform")
+    endif()
+    if(SFML_BUILD_GRAPHICS AND NOT (SFML_BUILD_OPENGL_BACKEND OR SFML_BUILD_VULKAN_BACKEND OR SFML_BUILD_DIRECTX_BACKEND OR
+                                    SFML_BUILD_METAL_BACKEND))
+        message(FATAL_ERROR "SFML Graphics requires at least one rendering backend")
+    endif()
+    if((SFML_OS_MACOS OR SFML_OS_IOS) AND NOT (SFML_BUILD_OPENGL_BACKEND OR SFML_BUILD_METAL_BACKEND))
+        message(FATAL_ERROR "This windowing platform requires the OpenGL or Metal backend")
+    endif()
+    if(SFML_USE_DRM AND NOT SFML_BUILD_OPENGL_BACKEND)
+        message(FATAL_ERROR "This windowing platform requires the OpenGL backend")
+    endif()
+    if(SFML_BUILD_OPENGL_BACKEND AND
+       ((SFML_OS_MACOS AND SFML_OPENGL_ES) OR ((SFML_OS_IOS OR SFML_OS_ANDROID) AND NOT SFML_OPENGL_ES)))
+        message(FATAL_ERROR "The selected OpenGL profile is unavailable on this platform")
+    endif()
+endif()
+
+if(SFML_OS_EMSCRIPTEN)
+    if(BUILD_SHARED_LIBS)
+        message(FATAL_ERROR "Web supports static libraries only")
+    endif()
+    if((SFML_BUILD_WINDOW OR SFML_BUILD_GRAPHICS) AND
+       (NOT SFML_BUILD_OPENGL_BACKEND OR NOT SFML_OPENGL_ES))
+        message(FATAL_ERROR "Web requires the OpenGL ES backend (WebGL 2)")
+    endif()
+endif()
+
 # macOS specific options
 if(SFML_OS_MACOS OR SFML_OS_IOS)
+    if(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS SFML_MINIMUM_DEPLOYMENT_TARGET)
+        message(FATAL_ERROR "CMAKE_OSX_DEPLOYMENT_TARGET must be at least ${SFML_MINIMUM_DEPLOYMENT_TARGET} on this platform")
+    endif()
+    set(SFML_IOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+
     # add an option to build frameworks instead of dylibs (release only)
     sfml_set_option(SFML_BUILD_FRAMEWORKS OFF BOOL "ON to build SFML as frameworks libraries (release only), OFF to build according to BUILD_SHARED_LIBS")
 endif()
@@ -78,7 +142,9 @@ endif()
 
 # Install directories
 # For miscellaneous files
-if(SFML_OS_WINDOWS OR SFML_OS_IOS)
+if(SFML_OS_EMSCRIPTEN)
+    set(DEFAULT_INSTALL_MISC_DIR share/SFML)
+elseif(SFML_OS_WINDOWS OR SFML_OS_IOS)
     set(DEFAULT_INSTALL_MISC_DIR .)
 elseif(SFML_OS_LINUX OR SFML_OS_FREEBSD OR SFML_OS_OPENBSD OR SFML_OS_NETBSD)
     set(DEFAULT_INSTALL_MISC_DIR share/SFML)
@@ -95,7 +161,7 @@ if(SFML_BUILD_GRAPHICS AND NOT SFML_BUILD_WINDOW)
 endif()
 
 # use bundled dependencies by default on these systems and system dependencies by default on all others (maintains old behavior)
-if(SFML_OS_WINDOWS OR SFML_OS_MACOS OR SFML_OS_IOS OR SFML_OS_ANDROID)
+if(SFML_OS_WINDOWS OR SFML_OS_MACOS OR SFML_OS_IOS OR SFML_OS_ANDROID OR SFML_OS_EMSCRIPTEN)
     set(SFML_USE_SYSTEM_DEPS_DEFAULT OFF)
 else()
     set(SFML_USE_SYSTEM_DEPS_DEFAULT ON)
@@ -111,12 +177,6 @@ if(SFML_COMPILER_MSVC)
     if(CMAKE_CXX_COMPILER_LAUNCHER)
         set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
     endif()
-endif()
-
-# define SFML_OPENGL_ES if needed
-if(SFML_OPENGL_ES)
-    add_definitions(-DSFML_OPENGL_ES)
-    add_definitions(-DGL_GLEXT_PROTOTYPES)
 endif()
 
 # define an option for choosing between static and dynamic C runtime (Windows only)
@@ -401,6 +461,9 @@ if(SFML_BUILD_TEST_SUITE)
     else()
         message(WARNING "Cannot build unit testing unless all modules are enabled")
     endif()
+elseif(SFML_OS_EMSCRIPTEN AND SFML_BUILD_NETWORK)
+    enable_testing()
+    add_subdirectory(test)
 endif()
 
 # add an option for making OpenGL errors fatal
@@ -412,6 +475,9 @@ add_custom_target(format
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} VERBATIM)
 
 sfml_set_option(CLANG_TIDY_EXECUTABLE clang-tidy STRING "Override clang-tidy executable, requires minimum version 14")
+sfml_set_option(CLANG_TIDY_CHECKS "" STRING "Additional clang-tidy check filters (empty uses .clang-tidy unchanged)")
 add_custom_target(tidy
-    COMMAND ${CMAKE_COMMAND} -DCLANG_TIDY_EXECUTABLE=${CLANG_TIDY_EXECUTABLE} -DPROJECT_BINARY_DIR=${PROJECT_BINARY_DIR} -P ./cmake/Tidy.cmake
+    COMMAND ${CMAKE_COMMAND} -DCLANG_TIDY_EXECUTABLE=${CLANG_TIDY_EXECUTABLE} -DPROJECT_BINARY_DIR=${PROJECT_BINARY_DIR}
+            "-DCLANG_TIDY_CHECKS=${CLANG_TIDY_CHECKS}"
+            -DSFML_OS_EMSCRIPTEN=${SFML_OS_EMSCRIPTEN} -DSFML_CXX_COMPILER=${CMAKE_CXX_COMPILER} -P ./cmake/Tidy.cmake
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} VERBATIM)

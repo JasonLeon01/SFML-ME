@@ -37,6 +37,7 @@
 #include <ostream>
 #include <poll.h>
 #include <unistd.h>
+#include <vector>
 #include <xf86drm.h>
 
 #include <cerrno>
@@ -551,7 +552,10 @@ DRMContext::DRMContext(DRMContext* shared, const ContextSettings& settings, cons
     m_display = getInitializedDisplay();
 
     // Get the best EGL config matching the requested video settings
-    m_config = getBestConfig(m_display, settings);
+    m_settings = GlSettings(settings);
+    m_config   = getBestConfig(m_display, settings);
+    if (!m_config)
+        return;
     updateSettings();
 
     // Create EGL context
@@ -574,7 +578,10 @@ DRMContext::DRMContext(DRMContext* shared, const ContextSettings& settings, Vect
     m_display = getInitializedDisplay();
 
     // Get the best EGL config matching the requested video settings
-    m_config = getBestConfig(m_display, settings);
+    m_settings = GlSettings(settings);
+    m_config   = getBestConfig(m_display, settings);
+    if (!m_config)
+        return;
     updateSettings();
 
     // Create EGL context
@@ -700,14 +707,41 @@ void DRMContext::setVerticalSyncEnabled(bool enabled)
 ////////////////////////////////////////////////////////////
 void DRMContext::createContext(DRMContext* shared)
 {
-    static constexpr std::array contextVersion = {EGL_CONTEXT_CLIENT_VERSION, 1, EGL_NONE};
-
     const EGLContext toShared = shared ? shared->m_context : EGL_NO_CONTEXT;
     if (toShared != EGL_NO_CONTEXT)
         eglCheck(eglMakeCurrent(m_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));
 
-    // Create EGL context
-    m_context = eglCheck(eglCreateContext(m_display, m_config, toShared, contextVersion.data()));
+    const auto major = static_cast<EGLint>(m_settings.majorVersion);
+    const auto minor = static_cast<EGLint>(m_settings.minorVersion);
+    if (SF_GLAD_EGL_VERSION_1_5 || SF_GLAD_EGL_KHR_create_context)
+    {
+        std::vector<EGLint> attributes{EGL_CONTEXT_MAJOR_VERSION, major, EGL_CONTEXT_MINOR_VERSION, minor};
+#ifndef SFML_OPENGL_ES
+        if (major > 3 || (major == 3 && minor >= 2))
+        {
+            attributes.push_back(EGL_CONTEXT_OPENGL_PROFILE_MASK);
+            attributes.push_back((m_settings.attributeFlags & GlSettings::Core)
+                                     ? EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT
+                                     : EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT);
+        }
+        if (m_settings.attributeFlags & GlSettings::Debug)
+        {
+            attributes.push_back(EGL_CONTEXT_FLAGS_KHR);
+            attributes.push_back(EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR);
+        }
+#endif
+        attributes.push_back(EGL_NONE);
+        m_context = eglCheck(eglCreateContext(m_display, m_config, toShared, attributes.data()));
+    }
+    else
+    {
+#ifdef SFML_OPENGL_ES
+        const std::array attributes{EGL_CONTEXT_CLIENT_VERSION, major, EGL_NONE};
+#else
+        const std::array attributes{EGL_NONE};
+#endif
+        m_context = eglCheck(eglCreateContext(m_display, m_config, toShared, attributes.data()));
+    }
     if (m_context == EGL_NO_CONTEXT)
         err() << "Failed to create EGL context" << std::endl;
 }
@@ -781,7 +815,7 @@ EGLConfig DRMContext::getBestConfig(EGLDisplay display, const ContextSettings& s
       EGL_WINDOW_BIT,
 #if defined(SFML_OPENGL_ES)
       EGL_RENDERABLE_TYPE,
-      EGL_OPENGL_ES_BIT,
+      EGL_OPENGL_ES3_BIT_KHR,
 #else
       EGL_RENDERABLE_TYPE,
       EGL_OPENGL_BIT,
@@ -812,10 +846,6 @@ void DRMContext::updateSettings()
 
     eglCheck(eglGetConfigAttrib(m_display, m_config, EGL_SAMPLES, &tmp));
     m_settings.antiAliasingLevel = static_cast<unsigned int>(tmp);
-
-    m_settings.majorVersion   = 1;
-    m_settings.minorVersion   = 1;
-    m_settings.attributeFlags = ContextSettings::Default;
 }
 
 
