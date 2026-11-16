@@ -127,7 +127,7 @@ bool makeConstants(DirectXDevice& device, UINT size, ComPtr<ID3D11Buffer>& buffe
     return device.check(device.device()->CreateBuffer(&description, nullptr, buffer.put()), "create shader constants");
 }
 
-bool reflect(DirectXDevice& device, std::string_view bytecode, Stage& stage)
+bool reflect(DirectXDevice& device, std::string_view bytecode, Stage& stage, const rhi::ShaderOptions& options)
 {
     if (!compiler().reflect)
     {
@@ -180,7 +180,8 @@ bool reflect(DirectXDevice& device, std::string_view bytecode, Stage& stage)
             if (resource.BindPoint == 0)
             {
                 if (std::strcmp(resource.Name, "SFMLDraw") != 0 ||
-                    (buffer.Size != sizeof(DirectXDrawParameters) && buffer.Size != directXDrawPrefixSize))
+                    (buffer.Size != sizeof(DirectXDrawParameters) &&
+                     buffer.Size != offsetof(DirectXDrawParameters, targetSize) && buffer.Size != directXDrawPrefixSize))
                 {
                     err() << "HLSL register b0 is reserved for the SFMLDraw block; place user constants at b1 or higher"
                           << std::endl;
@@ -191,21 +192,27 @@ bool reflect(DirectXDevice& device, std::string_view bytecode, Stage& stage)
                     const char* name;
                     UINT        offset;
                 };
-                const std::array<Member, 4> members{
+                const std::array<Member, 5> members{
                     {{"sf_ModelViewProjectionMatrix", offsetof(DirectXDrawParameters, transform)},
                      {"sf_TextureTransform", offsetof(DirectXDrawParameters, textureTransform)},
                      {"sf_ModelViewMatrix", offsetof(DirectXDrawParameters, modelView)},
-                     {"sf_ProjectionMatrix", offsetof(DirectXDrawParameters, projection)}}};
-                const std::size_t declared = buffer.Size == directXDrawPrefixSize ? 2 : members.size();
+                     {"sf_ProjectionMatrix", offsetof(DirectXDrawParameters, projection)},
+                     {"sf_TargetSize", offsetof(DirectXDrawParameters, targetSize)}}};
+                const std::size_t declared = buffer.Size == directXDrawPrefixSize ? 2
+                                             : buffer.Size == offsetof(DirectXDrawParameters, targetSize)
+                                                 ? 4
+                                                 : members.size();
                 for (std::size_t member = 0; member < declared; ++member)
                 {
-                    const bool                 isVector = member == 1;
+                    const bool                 isVector = member == 1 || member == 4;
                     auto*                      variable = reflected->GetVariableByName(members[member].name);
                     D3D11_SHADER_VARIABLE_DESC info{};
                     D3D11_SHADER_TYPE_DESC     type{};
                     if (FAILED(variable->GetDesc(&info)) || FAILED(variable->GetType()->GetDesc(&type)) ||
                         info.StartOffset != members[member].offset || type.Type != D3D_SVT_FLOAT ||
-                        type.Class != (isVector ? D3D_SVC_VECTOR : D3D_SVC_MATRIX_COLUMNS) ||
+                        (isVector ? type.Class != D3D_SVC_VECTOR
+                                  : type.Class != D3D_SVC_MATRIX_COLUMNS &&
+                                        (!options.glslMatrixLayout || type.Class != D3D_SVC_MATRIX_ROWS)) ||
                         type.Rows != (isVector ? 1u : 4u) || type.Columns != 4 || type.Elements)
                     {
                         err() << "Invalid HLSL SFMLDraw layout" << std::endl;
@@ -308,7 +315,12 @@ bool compile(DirectXDevice& device, std::string_view source, const char* prefix,
     return device.check(result, "compile HLSL shader");
 }
 
-bool loadBytecode(DirectXDevice& device, std::string_view& code, const char* prefix, ComPtr<ID3DBlob>& compiled, Stage& stage)
+bool loadBytecode(DirectXDevice&            device,
+                  std::string_view&         code,
+                  const char*               prefix,
+                  ComPtr<ID3DBlob>&         compiled,
+                  Stage&                    stage,
+                  const rhi::ShaderOptions& options)
 {
     if (code.substr(0, 4) != "DXBC")
     {
@@ -316,7 +328,7 @@ bool loadBytecode(DirectXDevice& device, std::string_view& code, const char* pre
             return false;
         code = {static_cast<const char*>(compiled->GetBufferPointer()), compiled->GetBufferSize()};
     }
-    return reflect(device, code, stage);
+    return reflect(device, code, stage, options);
 }
 
 struct UniformShape
@@ -367,7 +379,9 @@ bool uploadConstants(DirectXDevice& device, ID3D11Buffer* buffer, const void* da
 
 struct DirectXProgram::Impl
 {
-    std::mutex                               mutex;
+    mutable std::mutex                       mutex;
+    rhi::ShaderOptions                       options;
+    ComPtr<ID3D11GeometryShader>             streamOutput;
     ComPtr<ID3D11VertexShader>               vertex;
     ComPtr<ID3D11GeometryShader>             geometry;
     ComPtr<ID3D11PixelShader>                fragment;
@@ -385,17 +399,20 @@ bool DirectXProgram::compilerAvailable()
     return DirectXProgramImpl::compiler().compile && DirectXProgramImpl::compiler().reflect;
 }
 
-std::shared_ptr<DirectXProgram> DirectXProgram::create(DirectXDevice&   device,
-                                                       std::string_view vertex,
-                                                       std::string_view geometry,
-                                                       std::string_view fragment)
+std::shared_ptr<DirectXProgram> DirectXProgram::create(
+    DirectXDevice&            device,
+    std::string_view          vertex,
+    std::string_view          geometry,
+    std::string_view          fragment,
+    const rhi::ShaderOptions& options)
 {
     using namespace DirectXProgramImpl;
     const auto guard = device.lock();
-    if (device.isLost())
+    if (device.isLost() || !validateShaderOptions(options))
         return {};
-    auto             program = std::shared_ptr<DirectXProgram>(new DirectXProgram);
-    auto&            impl    = *program->m_impl;
+    auto  program = std::shared_ptr<DirectXProgram>(new DirectXProgram);
+    auto& impl    = *program->m_impl;
+    impl.options  = options;
     ComPtr<ID3DBlob> vertexCode;
     ComPtr<ID3DBlob> geometryCode;
     ComPtr<ID3DBlob> fragmentCode;
@@ -403,7 +420,7 @@ std::shared_ptr<DirectXProgram> DirectXProgram::create(DirectXDevice&   device,
     std::size_t      vertexSize = DirectXBuiltIn::vertex.size();
     if (!vertex.empty())
     {
-        if (!loadBytecode(device, vertex, "vs", vertexCode, impl.stages[0]))
+        if (!loadBytecode(device, vertex, "vs", vertexCode, impl.stages[0], options))
             return {};
         vertexData = vertex.data();
         vertexSize = vertex.size();
@@ -417,20 +434,77 @@ std::shared_ptr<DirectXProgram> DirectXProgram::create(DirectXDevice&   device,
     if (!device.check(device.device()->CreateVertexShader(vertexData, vertexSize, nullptr, impl.vertex.put()),
                       "create vertex shader"))
         return {};
-    const std::array<D3D11_INPUT_ELEMENT_DESC, 3> layout{
-        {{"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, static_cast<UINT>(offsetof(Vertex, position)), D3D11_INPUT_PER_VERTEX_DATA, 0},
-         {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, static_cast<UINT>(offsetof(Vertex, color)), D3D11_INPUT_PER_VERTEX_DATA, 0},
-         {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, static_cast<UINT>(offsetof(Vertex, texCoords)), D3D11_INPUT_PER_VERTEX_DATA, 0}}};
-    if (!device.check(device.device()->CreateInputLayout(layout.data(),
+    std::vector<D3D11_INPUT_ELEMENT_DESC> layout;
+    if (options.vertexBindings.empty())
+        layout =
+            {{"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, static_cast<UINT>(offsetof(Vertex, position)), D3D11_INPUT_PER_VERTEX_DATA, 0},
+             {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, static_cast<UINT>(offsetof(Vertex, color)), D3D11_INPUT_PER_VERTEX_DATA, 0},
+             {"TEXCOORD",
+              0,
+              DXGI_FORMAT_R32G32_FLOAT,
+              0,
+              static_cast<UINT>(offsetof(Vertex, texCoords)),
+              D3D11_INPUT_PER_VERTEX_DATA,
+              0}};
+    else
+        for (const auto& attribute : options.vertexAttributes)
+        {
+            if (attribute.binding >= options.vertexBindings.size() || attribute.components < 1 || attribute.components > 4 ||
+                attribute.offset + attribute.components * sizeof(float) > options.vertexBindings[attribute.binding].stride)
+                return {};
+            static constexpr std::array formats{DXGI_FORMAT_R32_FLOAT,
+                                                DXGI_FORMAT_R32G32_FLOAT,
+                                                DXGI_FORMAT_R32G32B32_FLOAT,
+                                                DXGI_FORMAT_R32G32B32A32_FLOAT};
+            const auto                  rate = options.vertexBindings[attribute.binding].stepRate;
+            layout.push_back({attribute.semantic.c_str(),
+                              attribute.semanticIndex,
+                              formats[attribute.components - 1],
+                              attribute.binding,
+                              static_cast<UINT>(attribute.offset),
+                              rate ? D3D11_INPUT_PER_INSTANCE_DATA : D3D11_INPUT_PER_VERTEX_DATA,
+                              rate});
+        }
+    if (!layout.empty() &&
+        !device.check(device.device()->CreateInputLayout(layout.data(),
                                                          static_cast<UINT>(layout.size()),
                                                          vertexData,
                                                          vertexSize,
                                                          impl.layout.put()),
                       "create vertex layout"))
         return {};
+    if (!options.transformOutputs.empty())
+    {
+        std::vector<D3D11_SO_DECLARATION_ENTRY> outputs;
+        std::size_t                             bytes = 0;
+        for (const auto& output : options.transformOutputs)
+        {
+            if (!output.components || output.components > 4)
+                return {};
+            outputs.push_back(
+                {0, output.semantic.c_str(), output.semanticIndex, 0, static_cast<BYTE>(output.components), 0});
+            bytes += output.components * sizeof(float);
+        }
+        if (bytes != options.transformStride || options.transformStride > D3D11_SO_BUFFER_MAX_STRIDE_IN_BYTES)
+            return {};
+        const auto stride = static_cast<UINT>(options.transformStride);
+        if (!device.check(device.device()->CreateGeometryShaderWithStreamOutput(vertexData,
+                                                                                vertexSize,
+                                                                                outputs.data(),
+                                                                                static_cast<UINT>(outputs.size()),
+                                                                                &stride,
+                                                                                1,
+                                                                                D3D11_SO_NO_RASTERIZED_STREAM,
+                                                                                nullptr,
+                                                                                impl.streamOutput.put()),
+                          "create vertex stream output") ||
+            !makeConstants(device, sizeof(DirectXDrawParameters), impl.draw))
+            return {};
+        return program;
+    }
     if (!geometry.empty())
     {
-        if (!loadBytecode(device, geometry, "gs", geometryCode, impl.stages[1]) ||
+        if (!loadBytecode(device, geometry, "gs", geometryCode, impl.stages[1], options) ||
             !device.check(device.device()->CreateGeometryShader(geometry.data(), geometry.size(), nullptr, impl.geometry.put()),
                           "create geometry shader"))
             return {};
@@ -439,7 +513,7 @@ std::shared_ptr<DirectXProgram> DirectXProgram::create(DirectXDevice&   device,
     std::size_t fragmentSize = DirectXBuiltIn::fragment.size();
     if (!fragment.empty())
     {
-        if (!loadBytecode(device, fragment, "ps", fragmentCode, impl.stages[2]))
+        if (!loadBytecode(device, fragment, "ps", fragmentCode, impl.stages[2], options))
             return {};
         fragmentData = fragment.data();
         fragmentSize = fragment.size();
@@ -460,23 +534,132 @@ std::shared_ptr<DirectXProgram> DirectXProgram::create(DirectXDevice&   device,
     return program;
 }
 
+
+const rhi::ShaderOptions& DirectXProgram::getOptions() const
+{
+    return m_impl->options;
+}
+std::vector<rhi::UniformInfo> DirectXProgram::getActiveUniforms() const
+{
+    const std::lock_guard         guard(m_impl->mutex);
+    std::vector<rhi::UniformInfo> result;
+    const auto                    append = [&](rhi::UniformInfo value)
+    {
+        for (const auto& alias : m_impl->options.uniformAliases)
+            if (alias.translatedName == value.name)
+            {
+                value.name = alias.name;
+                break;
+            }
+        for (const auto& transform : m_impl->options.samplerCoordinateTransforms)
+            if (transform.uniformName == value.name)
+                return;
+        if (std::none_of(result.begin(), result.end(), [&](const auto& item) { return item.name == value.name; }))
+            result.push_back(std::move(value));
+    };
+    for (const auto& stage : m_impl->stages)
+    {
+        for (const auto& buffer : stage.constants)
+            for (const auto& uniform : buffer.uniforms)
+            {
+                const auto&      type = uniform.type;
+                rhi::UniformType kind = rhi::UniformType::Float;
+                if (type.Rows > 1)
+                    kind = type.Columns == 3 ? rhi::UniformType::Mat3 : rhi::UniformType::Mat4;
+                else
+                {
+                    const bool integer = type.Type == D3D_SVT_INT || type.Type == D3D_SVT_UINT || type.Type == D3D_SVT_BOOL;
+                    const auto base = integer ? rhi::UniformType::Int : rhi::UniformType::Float;
+                    kind            = static_cast<rhi::UniformType>(static_cast<unsigned int>(base) + type.Columns - 1);
+                }
+                append({uniform.name, kind, std::max(type.Elements, 1u), false});
+            }
+        for (const auto& sampler : stage.samplers)
+            append({sampler.name, rhi::UniformType::Int, 1, true});
+    }
+    return result;
+}
+bool DirectXProgram::bindVertexBuffers(DirectXDevice&                               device,
+                                       const std::vector<rhi::VertexBufferBinding>& bindings,
+                                       std::size_t                                  first,
+                                       std::size_t                                  count,
+                                       std::size_t                                  instances)
+{
+    const auto& layout = m_impl->options.vertexBindings;
+    if (!validateVertexBindings(m_impl->options, bindings, first, count, instances) ||
+        layout.size() > D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT)
+        return false;
+    std::vector<ID3D11Buffer*> buffers;
+    std::vector<UINT>          strides;
+    std::vector<UINT>          offsets;
+    for (std::size_t index = 0; index < layout.size(); ++index)
+    {
+        const auto& binding = bindings[index];
+        const auto* buffer = binding.buffer ? resourceCast<const DirectXBufferResource>(binding.buffer.get()) : nullptr;
+        const auto  stride = layout[index].stride;
+        if (!buffer || buffer->device.get() != &device || !stride || binding.offset > buffer->getSize() ||
+            stride > UINT_MAX || binding.offset > UINT_MAX)
+            return false;
+        buffers.push_back(buffer->buffer->buffer.get());
+        strides.push_back(static_cast<UINT>(stride));
+        offsets.push_back(static_cast<UINT>(binding.offset));
+    }
+    device.context()->IASetVertexBuffers(0, static_cast<UINT>(buffers.size()), buffers.data(), strides.data(), offsets.data());
+    return true;
+}
+bool DirectXProgram::transformVertices(DirectXDevice&                               device,
+                                       const std::vector<rhi::VertexBufferBinding>& bindings,
+                                       std::size_t                                  count,
+                                       const rhi::Buffer&                           output)
+{
+    const auto  guard  = device.lock();
+    const auto* target = resourceCast<const DirectXBufferResource>(&output);
+    if (!m_impl->streamOutput || !target || target->device.get() != &device || count > UINT_MAX ||
+        !m_impl->options.transformStride || count > target->getSize() / m_impl->options.transformStride)
+        return false;
+    for (const auto& binding : bindings)
+        if (binding.buffer.get() == &output)
+            return false;
+    device.unbindTextures();
+    if (!bind(device, {}, nullptr, {}) || !bindVertexBuffers(device, bindings, 0, count, 1))
+        return false;
+    auto*      context = device.context();
+    auto*      buffer  = target->buffer->buffer.get();
+    const UINT offset  = 0;
+    context->GSSetShader(m_impl->streamOutput.get(), nullptr, 0);
+    context->PSSetShader(nullptr, nullptr, 0);
+    context->SOSetTargets(1, &buffer, &offset);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
+    context->Draw(static_cast<UINT>(count), 0);
+    context->SOSetTargets(0, nullptr, nullptr);
+    context->GSSetShader(nullptr, nullptr, 0);
+    return device.check(device.device()->GetDeviceRemovedReason(), "transform vertices");
+}
+
 void DirectXProgram::setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count)
 {
     if (!values || !count)
         return;
     using namespace DirectXProgramImpl;
     const std::lock_guard guard(m_impl->mutex);
-    const auto            input = shape(type);
-    bool                  found = false;
+    const auto            input  = shape(type);
+    std::string           lookup = name;
+    for (const auto& alias : m_impl->options.uniformAliases)
+        if (alias.name == name)
+        {
+            lookup = alias.translatedName;
+            break;
+        }
+    bool found = false;
     for (auto& stage : m_impl->stages)
         for (auto& buffer : stage.constants)
             for (const auto& uniform : buffer.uniforms)
             {
-                if (uniform.name != name)
+                if (uniform.name != lookup)
                     continue;
-                found               = true;
-                const auto& output  = uniform.type;
-                const bool  integer = output.Type == D3D_SVT_INT || output.Type == D3D_SVT_BOOL;
+                found              = true;
+                const auto& output = uniform.type;
+                const bool integer = output.Type == D3D_SVT_INT || output.Type == D3D_SVT_UINT || output.Type == D3D_SVT_BOOL;
                 if (output.Rows != input.rows || output.Columns != input.columns || integer != input.integer ||
                     (!integer && output.Type != D3D_SVT_FLOAT) || count > std::max(output.Elements, 1u))
                 {
@@ -499,8 +682,9 @@ void DirectXProgram::setUniform(const std::string& name, ShaderUniformType type,
                         for (unsigned int column = 0; column < input.columns; ++column)
                             for (unsigned int row = 0; row < input.rows; ++row)
                             {
-                                const auto offset = output.Class == D3D_SVC_MATRIX_ROWS ? row * 16 + column * 4
-                                                                                        : column * 16 + row * 4;
+                                const auto offset = output.Class == D3D_SVC_MATRIX_ROWS && !m_impl->options.glslMatrixLayout
+                                                        ? row * 16 + column * 4
+                                                        : column * 16 + row * 4;
                                 std::memcpy(destination + offset, source + (column * input.rows + row) * 4, 4);
                             }
                 }
@@ -512,10 +696,17 @@ void DirectXProgram::setUniform(const std::string& name, ShaderUniformType type,
 void DirectXProgram::setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current)
 {
     const std::lock_guard guard(m_impl->mutex);
-    bool                  found = false;
+    std::string           lookup = name;
+    for (const auto& alias : m_impl->options.uniformAliases)
+        if (alias.name == name)
+        {
+            lookup = alias.translatedName;
+            break;
+        }
+    bool found = false;
     for (auto& stage : m_impl->stages)
         for (auto& sampler : stage.samplers)
-            if (sampler.name == name)
+            if (sampler.name == lookup)
             {
                 sampler.texture = texture;
                 sampler.current = current;
@@ -542,6 +733,40 @@ bool DirectXProgram::bind(DirectXDevice&               device,
     const auto& white = device.whiteTexture();
     if (!white)
         return false;
+    const auto translatedName = [&](const std::string& name)
+    {
+        for (const auto& alias : m_impl->options.uniformAliases)
+            if (alias.name == name)
+                return alias.translatedName;
+        return name;
+    };
+    const auto writeDrawUniform = [&](const std::string& name, const void* values, std::size_t bytes)
+    {
+        const auto uniformName = translatedName(name);
+        for (auto& stage : m_impl->stages)
+            for (auto& buffer : stage.constants)
+                for (const auto& uniform : buffer.uniforms)
+                    if (uniform.name == uniformName && uniform.offset <= buffer.data.size() &&
+                        bytes <= buffer.data.size() - uniform.offset)
+                        std::memcpy(buffer.data.data() + uniform.offset, values, bytes);
+    };
+    const auto currentTextureName = translatedName("sf_Texture");
+    const auto selectedTexture    = [&](const Sampler& sampler)
+    { return sampler.current || sampler.name == currentTextureName ? texture : sampler.texture.get(); };
+    const std::uint32_t textureEnabled = texture ? 1u : 0u;
+    writeDrawUniform("sf_TextureEnabled", &textureEnabled, sizeof(textureEnabled));
+    for (const auto& transform : m_impl->options.samplerCoordinateTransforms)
+    {
+        const auto          samplerName = translatedName(transform.name);
+        const rhi::Texture* selected    = nullptr;
+        for (const auto& stage : m_impl->stages)
+            for (const auto& sampler : stage.samplers)
+                if (sampler.name == samplerName)
+                    selected = selectedTexture(sampler);
+        const bool       flipped = selected && selected->glslFlipped();
+        const std::array values{1.f, flipped ? -1.f : 1.f, 0.f, flipped ? 1.f : 0.f};
+        writeDrawUniform(transform.uniformName, values.data(), sizeof(values));
+    }
     for (std::size_t index = 0; index < m_impl->stages.size(); ++index)
     {
         const auto&                                                                  stage = m_impl->stages[index];
@@ -557,7 +782,7 @@ bool DirectXProgram::bind(DirectXDevice&               device,
         std::array<ID3D11SamplerState*, D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT>       samplers{};
         for (const auto& sampler : stage.samplers)
         {
-            const auto* selected = sampler.current ? texture : sampler.texture.get();
+            const auto* selected = selectedTexture(sampler);
             const auto& image    = selected && nativeDirectXImage(selected) ? nativeDirectXImage(selected) : white;
             if (image->texture.get() == attachment.texture.get())
             {

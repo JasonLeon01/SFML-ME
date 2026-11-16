@@ -24,12 +24,15 @@
 
 #include <SFML/Graphics/DirectX/DirectXProgram.hpp>
 #include <SFML/Graphics/DirectX/DirectXRHI.hpp>
+#include <SFML/Graphics/DirectX/DirectXReadback.hpp>
+#include <SFML/Graphics/DirectX/DirectXTimer.hpp>
 #include <SFML/Graphics/DirectX/DirectXWindowSurface.hpp>
 #include <SFML/Graphics/GraphicsDevice.hpp>
 
 #include <SFML/Window/WindowImpl.hpp>
 
 #include <limits>
+#include <sstream>
 #include <thread>
 
 #include <cstring>
@@ -53,7 +56,7 @@ bool DirectXBufferResource::upload(const void* data, std::size_t size, std::size
 template <>
 bool DirectXBufferResource::copy(const rhi::Buffer& source)
 {
-    const auto* other = dynamic_cast<const DirectXBufferResource*>(&source);
+    const auto* other = resourceCast<const DirectXBufferResource>(&source);
     if (!other || other->device != device || other->bytes != bytes)
         return false;
     const auto lock = device->lock();
@@ -97,6 +100,8 @@ class DirectXRhi final :
     public NativeDeviceResource<DirectXDevice, DirectXImage, DirectXBuffer, DirectXProgram, DirectXRenderTarget>
 {
 public:
+    using NativeDeviceResource::createShader;
+
     explicit DirectXRhi(const std::shared_ptr<DirectXDevice>& value) :
         NativeDeviceResource(value, GraphicsBackend::DirectX, value->settings())
     {
@@ -106,7 +111,62 @@ public:
         return {m_native->maximumTextureSize(),
                 DirectXRenderTarget::getMaximumAntiAliasingLevel(*m_native),
                 DirectXProgram::compilerAvailable(),
-                DirectXProgram::compilerAvailable()};
+                DirectXProgram::compilerAvailable(),
+                true,
+                true,
+                true,
+                true,
+                true};
+    }
+    [[nodiscard]] rhi::CacheIdentity getCacheIdentity() const override
+    {
+        const auto           guard = m_native->lock();
+        ComPtr<IDXGIDevice>  device;
+        ComPtr<IDXGIAdapter> adapter;
+        if (FAILED(m_native->device()->QueryInterface(IID_IDXGIDevice, reinterpret_cast<void**>(device.put()))) ||
+            FAILED(device->GetAdapter(adapter.put())))
+            return {};
+        DXGI_ADAPTER_DESC desc{};
+        LARGE_INTEGER     version{};
+        if (FAILED(adapter->GetDesc(&desc)))
+            return {};
+        std::ostringstream identity;
+        std::ostringstream driver;
+        identity << std::hex << desc.VendorId << ':' << desc.DeviceId << ':' << desc.SubSysId << ':' << desc.Revision;
+        if (FAILED(adapter->CheckInterfaceSupport(IID_IDXGIDevice, &version)))
+            return {identity.str(), {}};
+        driver << std::hex << version.QuadPart;
+        driver << ':' << m_native->settings().majorVersion << '.' << m_native->settings().minorVersion;
+        return {identity.str(), driver.str()};
+    }
+    std::shared_ptr<rhi::Texture> createFloatTexture(Vector2u size, const float* data) override
+    {
+        auto image = m_native->makeFloatTexture(size, data);
+        return image ? std::make_shared<DirectXTextureResource>(m_native, std::move(image), size, false) : nullptr;
+    }
+    std::shared_ptr<rhi::ShaderProgram> createShader(std::string_view          vertex,
+                                                     std::string_view          geometry,
+                                                     std::string_view          fragment,
+                                                     const rhi::ShaderOptions& options) override
+    {
+        return DirectXProgram::create(*m_native, vertex, geometry, fragment, options);
+    }
+    bool transformVertices(const std::shared_ptr<rhi::ShaderProgram>&   shader,
+                           const std::vector<rhi::VertexBufferBinding>& bindings,
+                           std::size_t                                  count,
+                           const std::shared_ptr<rhi::Buffer>&          output) override
+    {
+        const auto program = resourcePointerCast<DirectXProgram>(shader);
+        return program && output && program->transformVertices(*m_native, bindings, count, *output);
+    }
+    std::shared_ptr<rhi::Readback> readTextureAsync(const std::shared_ptr<rhi::Texture>& texture, IntRect area) override
+    {
+        const auto value = resourcePointerCast<DirectXTextureResource>(texture);
+        return value && value->device == m_native ? DirectXReadback::create(m_native, *value->image, area) : nullptr;
+    }
+    std::shared_ptr<rhi::Timer> beginTimer() override
+    {
+        return DirectXTimer::create(m_native);
     }
     std::unique_ptr<rhi::WindowSurface> createSurface(const WindowImpl& owner, unsigned int, const ContextSettings& settings) override
     {

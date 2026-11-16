@@ -93,7 +93,7 @@ bool OpenGLBuffer::read(void* data, std::size_t bytes, std::size_t offset) const
 }
 bool OpenGLBuffer::copy(const rhi::Buffer& source)
 {
-    const auto* other = dynamic_cast<const OpenGLBuffer*>(&source);
+    const auto* other = resourceCast<const OpenGLBuffer>(&source);
     if (!other || other->m_size != m_size)
         return false;
     if (other == this || !m_size)
@@ -117,7 +117,7 @@ void OpenGLBuffer::bind(const rhi::Buffer* value)
 {
     const OpenGLResource::TransientContextLock lock;
     ensureExtensionsInit();
-    const auto* buffer = dynamic_cast<const OpenGLBuffer*>(value);
+    const auto* buffer = resourceCast<const OpenGLBuffer>(value);
     glCheck(GLEXT_glBindBuffer(GLEXT_GL_ARRAY_BUFFER, buffer ? buffer->m_buffer : 0));
 }
 } // namespace sf::priv

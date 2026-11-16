@@ -381,14 +381,40 @@ void DirectXRenderTarget::draw(const rhi::TargetState&  target,
         drawBuffer(target, nativeDirectXBuffer(buffer)->buffer.get(), first, count, type, states);
 }
 
+bool DirectXRenderTarget::drawVertices(
+    const rhi::TargetState&                      target,
+    const std::vector<rhi::VertexBufferBinding>& buffers,
+    std::size_t                                  first,
+    std::size_t                                  count,
+    std::size_t                                  instances,
+    PrimitiveType                                type,
+    const rhi::DrawSettings&                     states)
+{
+    if (!states.shader || !instances || instances > UINT_MAX)
+        return false;
+    auto shader = resourcePointerCast<DirectXProgram>(states.shader);
+    if (!shader || !shader->bindVertexBuffers(*m_impl->device, buffers, first, count, instances))
+        return false;
+    drawBuffer(target, nullptr, first, count, type, states, false, &buffers, instances);
+    return !m_impl->device->isLost();
+}
+bool DirectXRenderTarget::prewarm(const rhi::TargetState& target, const rhi::DrawSettings& states)
+{
+    drawBuffer(target, nullptr, 0, 1, PrimitiveType::Triangles, states, false, nullptr, 1, true);
+    return !m_impl->device->isLost();
+}
+
 void DirectXRenderTarget::drawBuffer(
-    const rhi::TargetState&  target,
-    ID3D11Buffer*            buffer,
-    std::size_t              first,
-    std::size_t              count,
-    PrimitiveType            type,
-    const rhi::DrawSettings& states,
-    bool                     clearing)
+    const rhi::TargetState&                      target,
+    ID3D11Buffer*                                buffer,
+    std::size_t                                  first,
+    std::size_t                                  count,
+    PrimitiveType                                type,
+    const rhi::DrawSettings&                     states,
+    bool                                         clearing,
+    const std::vector<rhi::VertexBufferBinding>* bindings,
+    std::size_t                                  instances,
+    bool                                         prewarmOnly)
 {
     using namespace DirectXTargetImpl;
     auto&      impl   = *m_impl;
@@ -402,7 +428,7 @@ void DirectXRenderTarget::drawBuffer(
     const auto scissor  = target.scissor.findIntersection(IntRect({0, 0}, size));
     if (!scissor || viewport.size.x <= 0 || viewport.size.y <= 0)
         return;
-    auto program = states.shader ? std::dynamic_pointer_cast<DirectXProgram>(states.shader) : device.defaultProgram();
+    auto program = states.shader ? resourcePointerCast<DirectXProgram>(states.shader) : device.defaultProgram();
     if (!program)
         return;
     auto parameters = prepareDraw(target, states, clearing);
@@ -471,9 +497,14 @@ void DirectXRenderTarget::drawBuffer(
                           scissor->position.y + scissor->size.y};
     context->RSSetViewports(1, &rectangle);
     context->RSSetScissorRects(1, &clip);
+    if (prewarmOnly)
+        return;
+    if (bindings && !program->bindVertexBuffers(device, *bindings, first, count, instances))
+        return;
     constexpr UINT stride = sizeof(Vertex);
     constexpr UINT offset = 0;
-    context->IASetVertexBuffers(0, 1, &buffer, &stride, &offset);
+    if (!bindings)
+        context->IASetVertexBuffers(0, 1, &buffer, &stride, &offset);
     context->IASetPrimitiveTopology(topology(type));
     if (type == PrimitiveType::TriangleFan)
     {
@@ -499,12 +530,12 @@ void DirectXRenderTarget::drawBuffer(
             impl.fanIndexCapacity = indexCount;
         }
         context->IASetIndexBuffer(impl.fanIndices.get(), DXGI_FORMAT_R32_UINT, 0);
-        context->DrawIndexed(indexCount, 0, static_cast<INT>(first));
+        context->DrawIndexedInstanced(indexCount, static_cast<UINT>(instances), 0, static_cast<INT>(first), 0);
     }
     else
     {
         context->IASetIndexBuffer(nullptr, DXGI_FORMAT_UNKNOWN, 0);
-        context->Draw(static_cast<UINT>(count), static_cast<UINT>(first));
+        context->DrawInstanced(static_cast<UINT>(count), static_cast<UINT>(instances), static_cast<UINT>(first), 0);
     }
     impl.dirty = true;
 }

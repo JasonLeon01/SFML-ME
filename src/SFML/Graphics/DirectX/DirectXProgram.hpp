@@ -43,16 +43,32 @@ inline constexpr std::size_t directXDrawPrefixSize = offsetof(DirectXDrawParamet
 class DirectXProgram : public ProgramResource
 {
 public:
+    [[nodiscard]] const void* implementationType() const override
+    {
+        return resourceType<DirectXProgram>();
+    }
     [[nodiscard]] static std::shared_ptr<DirectXProgram> create(
-        DirectXDevice&   device,
-        std::string_view vertex   = {},
-        std::string_view geometry = {},
-        std::string_view fragment = {});
+        DirectXDevice&            device,
+        std::string_view          vertex   = {},
+        std::string_view          geometry = {},
+        std::string_view          fragment = {},
+        const rhi::ShaderOptions& options  = {});
     [[nodiscard]] static bool compilerAvailable();
     ~DirectXProgram() override;
     DirectXProgram(const DirectXProgram&)            = delete;
     DirectXProgram& operator=(const DirectXProgram&) = delete;
 
+    [[nodiscard]] const rhi::ShaderOptions&     getOptions() const override;
+    [[nodiscard]] std::vector<rhi::UniformInfo> getActiveUniforms() const override;
+    [[nodiscard]] bool                          bindVertexBuffers(DirectXDevice&                               device,
+                                                                  const std::vector<rhi::VertexBufferBinding>& bindings,
+                                                                  std::size_t                                  first,
+                                                                  std::size_t                                  count,
+                                                                  std::size_t                                  instances);
+    [[nodiscard]] bool                          transformVertices(DirectXDevice&                               device,
+                                                                  const std::vector<rhi::VertexBufferBinding>& bindings,
+                                                                  std::size_t                                  count,
+                                                                  const rhi::Buffer&                           output);
     void setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count) override;
     void setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current) override;
     [[nodiscard]] bool bind(DirectXDevice&               device,

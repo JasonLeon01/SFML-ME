@@ -440,8 +440,8 @@ void VulkanRenderTarget::draw(const rhi::TargetState&  target,
     if (rect.size.x <= 0 || rect.size.y <= 0 || !scissor.extent.width || !scissor.extent.height)
         return;
 
-    const auto program = states.shader && std::dynamic_pointer_cast<VulkanProgram>(states.shader)
-                             ? std::dynamic_pointer_cast<VulkanProgram>(states.shader)
+    const auto program = states.shader && resourcePointerCast<VulkanProgram>(states.shader)
+                             ? resourcePointerCast<VulkanProgram>(states.shader)
                              : m_device->defaultProgram();
     if (!program)
         return;

@@ -40,6 +40,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <limits>
 #include <mutex>
 #include <ostream>
 #include <unordered_map>
@@ -1014,14 +1015,48 @@ void OpenGLRenderTarget::cleanupDraw(const rhi::DrawSettings& states)
 }
 
 
+bool OpenGLRenderTarget::drawVertices(
+    const rhi::TargetState&                      target,
+    const std::vector<rhi::VertexBufferBinding>& buffers,
+    std::size_t                                  first,
+    std::size_t                                  count,
+    std::size_t                                  instances,
+    PrimitiveType                                type,
+    const rhi::DrawSettings&                     states)
+{
+    if (!m_modern || !states.shader || !instances || !setActive(true) || !glDrawArraysInstanced ||
+        count > static_cast<std::size_t>(std::numeric_limits<GLsizei>::max()) ||
+        first > static_cast<std::size_t>(std::numeric_limits<GLint>::max()) ||
+        instances > static_cast<std::size_t>(std::numeric_limits<GLsizei>::max()))
+        return false;
+    const auto* program = resourceCast<const OpenGLProgram>(states.shader.get());
+    if (!program || !validateVertexBindings(program->getOptions(), buffers, first, count, instances))
+        return false;
+    for (const auto& binding : buffers)
+        if (!resourceCast<const OpenGLBuffer>(binding.buffer.get()))
+            return false;
+    drawProgrammable(target, nullptr, 0, first, count, type, states, &buffers, instances);
+    colorWritten();
+    return true;
+}
+bool OpenGLRenderTarget::prewarm(const rhi::TargetState& target, const rhi::DrawSettings& states)
+{
+    if (!m_modern || !setActive(true))
+        return false;
+    drawProgrammable(target, nullptr, 0, 0, 0, PrimitiveType::Triangles, states);
+    return m_modern->defaultShader != nullptr;
+}
+
 void OpenGLRenderTarget::drawProgrammable(
-    const rhi::TargetState&  target,
-    const Vertex*            vertices,
-    unsigned int             buffer,
-    std::size_t              first,
-    std::size_t              count,
-    PrimitiveType            type,
-    const rhi::DrawSettings& states)
+    const rhi::TargetState&                      target,
+    const Vertex*                                vertices,
+    unsigned int                                 buffer,
+    std::size_t                                  first,
+    std::size_t                                  count,
+    PrimitiveType                                type,
+    const rhi::DrawSettings&                     states,
+    const std::vector<rhi::VertexBufferBinding>* bindings,
+    std::size_t                                  instances)
 {
     struct VertexObjects
     {
@@ -1076,21 +1111,39 @@ void OpenGLRenderTarget::drawProgrammable(
     if (vertices)
         glCheck(glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(sizeof(Vertex) * count), vertices, GL_STREAM_DRAW));
 
-    glCheck(
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<const void*>(offsetof(Vertex, position))));
-    glCheck(glVertexAttribPointer(1,
-                                  4,
-                                  GL_UNSIGNED_BYTE,
-                                  GL_TRUE,
-                                  sizeof(Vertex),
-                                  reinterpret_cast<const void*>(offsetof(Vertex, color))));
-    glCheck(
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<const void*>(offsetof(Vertex, texCoords))));
-    for (GLuint index = 0; index < 3; ++index)
-        glCheck(glEnableVertexAttribArray(index));
-
-    const auto* shader = states.shader ? dynamic_cast<const OpenGLProgram*>(states.shader.get())
+    const auto* shader = states.shader ? resourceCast<const OpenGLProgram>(states.shader.get())
                                        : m_modern->defaultShader.get();
+    if (bindings)
+    {
+        if (!shader || !shader->bindVertexBuffers(*bindings, first, count, instances))
+        {
+            cleanupDraw(states);
+            return;
+        }
+    }
+    else
+    {
+        glCheck(glVertexAttribPointer(0,
+                                      2,
+                                      GL_FLOAT,
+                                      GL_FALSE,
+                                      sizeof(Vertex),
+                                      reinterpret_cast<const void*>(offsetof(Vertex, position))));
+        glCheck(glVertexAttribPointer(1,
+                                      4,
+                                      GL_UNSIGNED_BYTE,
+                                      GL_TRUE,
+                                      sizeof(Vertex),
+                                      reinterpret_cast<const void*>(offsetof(Vertex, color))));
+        glCheck(glVertexAttribPointer(2,
+                                      2,
+                                      GL_FLOAT,
+                                      GL_FALSE,
+                                      sizeof(Vertex),
+                                      reinterpret_cast<const void*>(offsetof(Vertex, texCoords))));
+        for (GLuint index = 0; index < 3; ++index)
+            glCheck(glEnableVertexAttribArray(index));
+    }
     OpenGLProgram::bind(shader);
     const auto program = shader ? shader->nativeHandle() : 0;
     if (program)
@@ -1109,9 +1162,32 @@ void OpenGLRenderTarget::drawProgrammable(
         glCheck(glUniformMatrix4fv(glGetUniformLocation(program, "sf_TextureMatrix"), 1, GL_FALSE, textureMatrix.data()));
         glCheck(glUniform1i(glGetUniformLocation(program, "sf_TextureEnabled"), states.texture ? GL_TRUE : GL_FALSE));
         glCheck(glUniform1i(glGetUniformLocation(program, "sf_Texture"), 0));
-        drawPrimitives(type, first, count);
+        glUniform4fv(glGetUniformLocation(program, "sf_TargetSize"), 1, parameters.targetSize.data());
+        if (count)
+        {
+            if (bindings)
+            {
+                static constexpr std::array<GLenum, 6>
+                    modes{GL_POINTS, GL_LINES, GL_LINE_STRIP, GL_TRIANGLES, GL_TRIANGLE_STRIP, GL_TRIANGLE_FAN};
+                glDrawArraysInstanced(modes[static_cast<std::size_t>(type)],
+                                      static_cast<GLint>(first),
+                                      static_cast<GLsizei>(count),
+                                      static_cast<GLsizei>(instances));
+            }
+            else
+                drawPrimitives(type, first, count);
+        }
     }
 
+    if (bindings && shader)
+    {
+        const auto divisor = glVertexAttribDivisor ? glVertexAttribDivisor : glVertexAttribDivisorARB;
+        for (const auto& attribute : shader->getOptions().vertexAttributes)
+        {
+            glDisableVertexAttribArray(attribute.location);
+            divisor(attribute.location, 0);
+        }
+    }
     cleanupDraw(states);
 }
 

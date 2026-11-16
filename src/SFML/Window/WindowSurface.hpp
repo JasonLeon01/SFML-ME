@@ -33,6 +33,10 @@ namespace sf::priv
 class WindowSurface
 {
 public:
+    [[nodiscard]] virtual const void* implementationType() const
+    {
+        return nullptr;
+    }
     virtual ~WindowSurface()                                                          = default;
     [[nodiscard]] virtual const ContextSettings& getSettings() const                  = 0;
     [[nodiscard]] virtual bool                   setActive(bool active)               = 0;

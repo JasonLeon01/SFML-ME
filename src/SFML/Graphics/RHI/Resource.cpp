@@ -33,6 +33,7 @@
 #include <SFML/System/Err.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <ostream>
 #ifdef SFML_SYSTEM_ANDROID
 #include <SFML/System/Android/Activity.hpp>
@@ -165,6 +166,57 @@ void RenderTargetBackend::resetGLStates(const rhi::TargetState& state)
     pushGLStates(state);
 }
 
+bool validateShaderOptions(const rhi::ShaderOptions& options)
+{
+    if (options.vertexBindings.empty() && !options.vertexAttributes.empty())
+        return false;
+    for (const auto& binding : options.vertexBindings)
+        if (!binding.stride || binding.stride > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+            return false;
+    for (std::size_t index = 0; index < options.vertexAttributes.size(); ++index)
+    {
+        const auto& attribute = options.vertexAttributes[index];
+        if (attribute.name.empty() || attribute.semantic.empty() ||
+            attribute.binding >= options.vertexBindings.size() || !attribute.components || attribute.components > 4)
+            return false;
+        const auto stride = options.vertexBindings[attribute.binding].stride;
+        if (attribute.offset > stride || attribute.components * sizeof(float) > stride - attribute.offset)
+            return false;
+        for (std::size_t previous = 0; previous < index; ++previous)
+            if (options.vertexAttributes[previous].location == attribute.location)
+                return false;
+    }
+    std::size_t stride = 0;
+    for (const auto& output : options.transformOutputs)
+    {
+        if (output.name.empty() || output.semantic.empty() || !output.components || output.components > 4 || stride > 2048)
+            return false;
+        stride += output.components * sizeof(float);
+    }
+    return options.transformOutputs.empty() ||
+           (!options.vertexBindings.empty() && stride == options.transformStride && stride <= 2048);
+}
+bool validateVertexBindings(const rhi::ShaderOptions&                    options,
+                            const std::vector<rhi::VertexBufferBinding>& bindings,
+                            std::size_t                                  first,
+                            std::size_t                                  count,
+                            std::size_t                                  instances)
+{
+    if (bindings.size() != options.vertexBindings.size() || first > std::numeric_limits<std::size_t>::max() - count)
+        return false;
+    for (std::size_t index = 0; index < bindings.size(); ++index)
+    {
+        const auto& binding = bindings[index];
+        const auto& layout  = options.vertexBindings[index];
+        if (!binding.buffer || !layout.stride || binding.offset > binding.buffer->getSize())
+            return false;
+        const auto elements = layout.stepRate ? (instances ? 1 + (instances - 1) / layout.stepRate : 0) : first + count;
+        if (elements > (binding.buffer->getSize() - binding.offset) / layout.stride)
+            return false;
+    }
+    return true;
+}
+
 ClearDraw prepareClear(std::optional<Color> color, std::optional<StencilValue> stencil)
 {
     const auto value = color.value_or(Color::White);
@@ -194,10 +246,19 @@ DrawParameters prepareDraw(const rhi::TargetState& target, const rhi::DrawSettin
     std::copy_n(model.getMatrix(), 16, result.modelView.begin());
     std::copy_n(projection.getMatrix(), 16, result.projection.begin());
     result.textureTransform = {1.f, 1.f, 0.f, 0.f};
+    result.targetSize       = {static_cast<float>(target.size.x),
+                               static_cast<float>(target.size.y),
+                         target.size.x ? 1.f / static_cast<float>(target.size.x) : 0.f,
+                         target.size.y ? 1.f / static_cast<float>(target.size.y) : 0.f};
     if (state.texture)
     {
         const auto matrix       = state.texture->coordinateMatrix(state.coordinateType);
         result.textureTransform = {matrix[0], matrix[5], matrix[12], matrix[13]};
+        if (state.shader && state.shader->getOptions().glslMatrixLayout && state.texture->glslFlipped())
+        {
+            result.textureTransform[1] = -result.textureTransform[1];
+            result.textureTransform[3] = 1.f - result.textureTransform[3];
+        }
     }
     return result;
 }
@@ -222,7 +283,7 @@ rhi::TargetState prepareTarget(const RenderTarget& target)
 }
 bool RhiAccess::copyWindow(const Window& window, rhi::Texture& texture, Vector2u offset)
 {
-    if (const auto* adapter = dynamic_cast<const GraphicsWindowSurface*>(window.getSurface()))
+    if (const auto* adapter = resourceCast<const GraphicsWindowSurface>(window.getSurface()))
         return adapter->surface->copyTo(texture, offset);
     // Plain sf::Window exposes an OpenGL context rather than an RHI surface.
     if (const auto device = rhi::getDevice())

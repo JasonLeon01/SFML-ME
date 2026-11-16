@@ -31,14 +31,34 @@ namespace sf::priv
 class OpenGLProgram final : public ProgramResource
 {
 public:
+    [[nodiscard]] const void* implementationType() const override
+    {
+        return resourceType<OpenGLProgram>();
+    }
     OpenGLProgram(std::shared_ptr<void> context, bool programmable) :
         m_context(std::move(context)),
         m_programmable(programmable)
     {
     }
     ~OpenGLProgram() override;
-    bool compile(std::string_view vertex, std::string_view geometry, std::string_view fragment);
-    bool loadDefault();
+    bool                                    compile(std::string_view          vertex,
+                                                    std::string_view          geometry,
+                                                    std::string_view          fragment,
+                                                    const rhi::ShaderOptions& options = {});
+    bool                                    loadDefault();
+    [[nodiscard]] const rhi::ShaderOptions& getOptions() const override
+    {
+        return m_options;
+    }
+    [[nodiscard]] std::vector<rhi::UniformInfo> getActiveUniforms() const override;
+    [[nodiscard]] bool                          bindVertexBuffers(const std::vector<rhi::VertexBufferBinding>& buffers,
+                                                                  std::size_t                                  first,
+                                                                  std::size_t                                  count,
+                                                                  std::size_t                                  instances) const;
+    [[nodiscard]] bool                          transformVertices(const std::vector<rhi::VertexBufferBinding>& buffers,
+                                                                  std::size_t                                  count,
+                                                                  const rhi::Buffer&                           output);
+
     void setUniform(const std::string& name, rhi::UniformType type, const void* values, std::size_t count) override;
     void setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current) override;
     [[nodiscard]] unsigned int nativeHandle() const override
@@ -49,6 +69,7 @@ public:
     static bool geometryAvailable();
 
 private:
+    rhi::ShaderOptions m_options;
     struct UniformBinder;
     int                                                    getUniformLocation(const std::string& name);
     void                                                   bindTextures() const;

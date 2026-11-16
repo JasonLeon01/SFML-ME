@@ -62,6 +62,10 @@ struct VulkanPipelineState
 class VulkanProgram : public ProgramResource
 {
 public:
+    [[nodiscard]] const void* implementationType() const override
+    {
+        return resourceType<VulkanProgram>();
+    }
     struct Descriptors
     {
         std::array<VkDescriptorSet, 2> sets{};

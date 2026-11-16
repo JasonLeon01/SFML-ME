@@ -37,12 +37,12 @@ template <>
 bool                               MetalBufferResource::read(void*, std::size_t, std::size_t) const;
 inline std::shared_ptr<MetalImage> nativeMetalImage(const rhi::Texture* texture)
 {
-    const auto* resource = dynamic_cast<const MetalTextureResource*>(texture);
+    const auto* resource = resourceCast<const MetalTextureResource>(texture);
     return resource ? resource->image : nullptr;
 }
 inline std::shared_ptr<MetalBuffer> nativeMetalBuffer(const rhi::Buffer& buffer)
 {
-    const auto* resource = dynamic_cast<const MetalBufferResource*>(&buffer);
+    const auto* resource = resourceCast<const MetalBufferResource>(&buffer);
     return resource ? resource->buffer : nullptr;
 }
 } // namespace sf::priv

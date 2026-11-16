@@ -29,6 +29,7 @@
 #include <SFML/Window/WindowSurface.hpp>
 
 #include <atomic>
+#include <type_traits>
 
 namespace sf
 {
@@ -37,6 +38,26 @@ class Window;
 
 namespace sf::priv
 {
+template <typename Type>
+const void* resourceType()
+{
+    static char tag{};
+    return &tag;
+}
+template <typename Target, typename Source>
+Target* resourceCast(Source* value)
+{
+    return value && value->implementationType() == resourceType<std::remove_cv_t<Target>>()
+               ? static_cast<Target*>(value)
+               : nullptr;
+}
+template <typename Target, typename Source>
+std::shared_ptr<Target> resourcePointerCast(const std::shared_ptr<Source>& value)
+{
+    auto* pointer = resourceCast<Target>(value.get());
+    return pointer ? std::shared_ptr<Target>(value, pointer) : nullptr;
+}
+
 class WindowImpl;
 
 
@@ -92,6 +113,14 @@ public:
         return m_fboAttachment;
     }
     void changed();
+    void setGlslFlipped(bool value)
+    {
+        m_glslFlipped = value;
+    }
+    [[nodiscard]] bool glslFlipped() const override
+    {
+        return m_glslFlipped;
+    }
 
 protected:
     Vector2u      m_size;
@@ -101,6 +130,7 @@ protected:
     bool          m_isRepeated{};
     mutable bool  m_pixelsFlipped{};
     bool          m_fboAttachment{};
+    bool          m_glslFlipped{};
     bool          m_hasMipmap{};
     std::uint64_t m_cacheId{};
 };
@@ -157,6 +187,10 @@ public:
 class GraphicsWindowSurface final : public WindowSurface
 {
 public:
+    [[nodiscard]] const void* implementationType() const override
+    {
+        return resourceType<GraphicsWindowSurface>();
+    }
     explicit GraphicsWindowSurface(std::unique_ptr<rhi::WindowSurface> value) : surface(std::move(value))
     {
     }
@@ -188,6 +222,7 @@ struct DrawParameters
     std::array<float, 4>  textureTransform;
     std::array<float, 16> modelView;
     std::array<float, 16> projection;
+    std::array<float, 4>  targetSize;
 };
 
 struct ClearDraw
@@ -195,6 +230,13 @@ struct ClearDraw
     std::array<Vertex, 6> vertices;
     rhi::DrawSettings     settings;
 };
+
+[[nodiscard]] bool validateShaderOptions(const rhi::ShaderOptions& options);
+[[nodiscard]] bool validateVertexBindings(const rhi::ShaderOptions&                    options,
+                                          const std::vector<rhi::VertexBufferBinding>& bindings,
+                                          std::size_t                                  first,
+                                          std::size_t                                  count,
+                                          std::size_t                                  instances);
 
 [[nodiscard]] ClearDraw prepareClear(std::optional<Color> color, std::optional<StencilValue> stencil);
 

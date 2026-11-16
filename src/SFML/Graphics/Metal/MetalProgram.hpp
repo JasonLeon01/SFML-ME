@@ -56,6 +56,23 @@ public:
     {
         return geometry.empty() ? create(device, vertex, fragment) : nullptr;
     }
+    [[nodiscard]] static std::shared_ptr<MetalProgram> create(
+        MetalDevice&              device,
+        std::string_view          vertex,
+        std::string_view          geometry,
+        std::string_view          fragment,
+        const rhi::ShaderOptions& options);
+    [[nodiscard]] const void* implementationType() const override
+    {
+        return resourceType<MetalProgram>();
+    }
+    [[nodiscard]] std::shared_ptr<rhi::ShaderProgram> clone() const override;
+    [[nodiscard]] const rhi::ShaderOptions&           getOptions() const override;
+    [[nodiscard]] std::vector<rhi::UniformInfo>       getActiveUniforms() const override;
+    [[nodiscard]] bool                                transformVertices(MetalDevice&                                 device,
+                                                                        const std::vector<rhi::VertexBufferBinding>& bindings,
+                                                                        std::size_t                                  count,
+                                                                        const rhi::Buffer&                           output);
     ~MetalProgram() override;
     MetalProgram(const MetalProgram&)            = delete;
     MetalProgram& operator=(const MetalProgram&) = delete;

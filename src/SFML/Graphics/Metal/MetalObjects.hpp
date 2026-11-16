@@ -65,11 +65,23 @@ struct MetalTransientPool
     std::vector<id<MTLBuffer>> free;
 };
 
+struct MetalTimingRange
+{
+    std::vector<id<MTLCommandBuffer>> buffers;
+    bool                              capturing{true};
+};
+
 // Color format, depth format, stencil format, sample count, 6 blend factors/equations, color write mask
 using MetalPipelineKey = std::array<NSUInteger, 11>;
 
 struct MetalDevice::Impl
 {
+    struct ImportedArchive
+    {
+        std::shared_ptr<const std::vector<std::uint8_t>> data;
+        std::string                                      path;
+    };
+
     id<MTLDevice>                                        device;
     id<MTLCommandQueue>                                  queue;
     id<MTLLibrary>                                       library;
@@ -83,13 +95,17 @@ struct MetalDevice::Impl
     std::map<NSUInteger, id<MTLDepthStencilState>>       depthStencilStates;
     id<MTLBinaryArchive>                                 archive;
     NSMutableArray<id<MTLBinaryArchive>>*                archives;
-    std::vector<std::string>                             temporaryFiles;
+    std::vector<ImportedArchive>                         importedArchives;
+    std::shared_ptr<const std::vector<std::uint8_t>>     archiveData;
+    bool                                                 archiveDirty{};
+    bool                                                 archiveHasEntries{};
     std::shared_ptr<MetalTransientPool>                  pool;
     std::vector<id<MTLBuffer>>                           used;
     id<MTLBuffer>                                        chunk;
     NSUInteger                                           chunkOffset{};
     std::shared_ptr<MetalImage>                          white;
     std::shared_ptr<MetalProgram>                        program;
+    std::vector<std::weak_ptr<MetalTimingRange>>         timingRanges;
 
     [[nodiscard]] id<MTLCommandBuffer>        commandBuffer();
     [[nodiscard]] id<MTLBlitCommandEncoder>   blit();
@@ -115,39 +131,75 @@ struct MetalUniform
     NSUInteger  stride{};
 };
 
-struct MetalUniformBuffer
+struct MetalUniformBufferLayout
 {
     NSUInteger                index{};
-    std::vector<std::byte>    data;
+    NSUInteger                size{};
     std::vector<MetalUniform> uniforms;
+};
+
+struct MetalSamplerLayout
+{
+    std::string name;
+    NSUInteger  index{};
+};
+
+struct MetalStageReflection
+{
+    bool                                  draw{};
+    std::vector<MetalUniformBufferLayout> buffers;
+    std::vector<MetalSamplerLayout>       textures;
+    std::vector<NSUInteger>               samplers;
+};
+
+struct MetalProgramPipelines
+{
+    std::mutex                                             mutex;
+    std::map<MetalPipelineKey, id<MTLRenderPipelineState>> values;
+};
+
+struct MetalProgramData
+{
+    rhi::ShaderOptions                     options;
+    id<MTLLibrary>                         vertexLibrary;
+    id<MTLLibrary>                         fragmentLibrary;
+    id<MTLFunction>                        vertex;
+    id<MTLFunction>                        fragment;
+    MTLVertexDescriptor*                   layout;
+    id<MTLRenderPipelineState>             capturePipeline;
+    std::array<MetalStageReflection, 2>    stages;
+    std::shared_ptr<MetalProgramPipelines> pipelines{std::make_shared<MetalProgramPipelines>()};
+};
+
+struct MetalUniformBuffer
+{
+    const MetalUniformBufferLayout* layout{};
+    std::vector<std::byte>          data;
 };
 
 struct MetalSampler
 {
-    std::string                   name;
-    NSUInteger                    index{};
+    const MetalSamplerLayout*     layout{};
     std::shared_ptr<rhi::Texture> texture;
-    bool                          current{};
+    bool                          current{true};
 };
 
 struct MetalStage
 {
-    bool                            draw{};
+    const MetalStageReflection*     reflection{};
     std::vector<MetalUniformBuffer> buffers;
     std::vector<MetalSampler>       textures;
-    std::vector<NSUInteger>         samplers;
 };
 
 struct MetalProgram::Impl
 {
-    std::mutex                                             mutex;
-    id<MTLFunction>                                        vertex;
-    id<MTLFunction>                                        fragment;
-    MTLVertexDescriptor*                                   layout;
-    std::array<MetalStage, 2>                              stages;
-    std::map<MetalPipelineKey, id<MTLRenderPipelineState>> pipelines;
+    std::mutex                              mutex;
+    std::shared_ptr<const MetalProgramData> data;
+    std::array<MetalStage, 2>               stages;
 
-    [[nodiscard]] id<MTLRenderPipelineState> pipeline(MetalDevice::Impl& device, const MetalPipelineKey& key);
+    void initialize();
+    [[nodiscard]] bool writeUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count);
+    [[nodiscard]] id<MTLRenderPipelineState> pipeline(MetalDevice::Impl& device, const MetalPipelineKey& key) const;
     [[nodiscard]] bool                       bind(MetalDevice::Impl&          device,
                                                   id<MTLRenderCommandEncoder> encoder,
                                                   const MetalDrawParameters&  parameters,
@@ -155,8 +207,9 @@ struct MetalProgram::Impl
                                                   id<MTLTexture>              attachment);
 };
 
-inline constexpr NSUInteger metalVertexBufferIndex = 30;
-inline constexpr NSUInteger metalInlineDataLimit   = 4096;
+inline constexpr NSUInteger metalVertexBufferIndex       = 30;
+inline constexpr NSUInteger metalCustomVertexBufferIndex = 16;
+inline constexpr NSUInteger metalInlineDataLimit         = 4096;
 
 [[nodiscard]] std::string describe(NSError* error);
 } // namespace sf::priv

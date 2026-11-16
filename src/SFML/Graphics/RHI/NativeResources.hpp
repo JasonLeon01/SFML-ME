@@ -71,9 +71,29 @@ auto copyImage(DeviceType&                       device,
 }
 
 template <typename DeviceType, typename ImageType>
+auto uploadFloatImage(DeviceType&                       device,
+                      const std::shared_ptr<ImageType>& image,
+                      const float*                      pixels,
+                      Vector2u                          size,
+                      Vector2u                          offset,
+                      int) -> decltype(device.uploadFloats(*image, pixels, size, offset))
+{
+    return device.uploadFloats(*image, pixels, size, offset);
+}
+template <typename DeviceType, typename ImageType>
+bool uploadFloatImage(DeviceType&, const std::shared_ptr<ImageType>&, const float*, Vector2u, Vector2u, long)
+{
+    return false;
+}
+
+template <typename DeviceType, typename ImageType>
 class NativeTexture final : public TextureResource
 {
 public:
+    [[nodiscard]] const void* implementationType() const override
+    {
+        return resourceType<NativeTexture>();
+    }
     NativeTexture(std::shared_ptr<DeviceType> owner, std::shared_ptr<ImageType> value, Vector2u size, bool srgb) :
         device(std::move(owner)),
         image(std::move(value))
@@ -88,17 +108,30 @@ public:
         const auto lock = device->lock();
         if (!uploadImage(*device, image, 0, pixels, size, offset))
             return false;
+        setGlslFlipped(false);
+        changed();
+        return true;
+    }
+    bool uploadFloats(const float* pixels, Vector2u size, Vector2u offset) override
+    {
+        if (!pixels || !fits(size, offset))
+            return false;
+        const auto lock = device->lock();
+        if (!uploadFloatImage(*device, image, pixels, size, offset, 0))
+            return false;
+        setGlslFlipped(false);
         changed();
         return true;
     }
     bool copy(const rhi::Texture& source, Vector2u offset) override
     {
-        const auto* other = dynamic_cast<const NativeTexture*>(&source);
+        const auto* other = resourceCast<const NativeTexture>(&source);
         if (!other || other->device != device || !fits(other->getSize(), offset))
             return false;
         const auto lock = device->lock();
         if (!copyImage(*device, other->image, image, offset, 0))
             return false;
+        setGlslFlipped(false);
         changed();
         return true;
     }
@@ -128,6 +161,10 @@ template <typename DeviceType, typename BufferType>
 class NativeBuffer final : public BufferResource
 {
 public:
+    [[nodiscard]] const void* implementationType() const override
+    {
+        return resourceType<NativeBuffer>();
+    }
     NativeBuffer(std::shared_ptr<DeviceType> owner, std::shared_ptr<BufferType> value, std::size_t size) :
         device(std::move(owner)),
         buffer(std::move(value)),
@@ -179,9 +216,10 @@ public:
     }
     bool copyTo(rhi::Texture& target, Vector2u offset) const override
     {
-        auto* texture = dynamic_cast<Texture*>(&target);
+        auto* texture = resourceCast<Texture>(&target);
         if (!texture || !surface->copyTo(texture->image, offset))
             return false;
+        texture->setGlslFlipped(true);
         texture->changed();
         return true;
     }
@@ -198,6 +236,8 @@ template <typename DeviceType, typename ImageType, typename BufferType, typename
 class NativeDeviceResource : public DeviceResource
 {
 public:
+    using DeviceResource::createShader;
+
     NativeDeviceResource(std::shared_ptr<DeviceType> value, GraphicsBackend backend, ContextSettings::BackendSettings settings) :
         m_native(std::move(value)),
         m_backend(backend),
@@ -241,7 +281,7 @@ public:
     std::shared_ptr<rhi::RenderTarget> createRenderTarget(std::shared_ptr<rhi::Texture> color,
                                                           const ContextSettings&        settings) override
     {
-        const auto texture = std::dynamic_pointer_cast<NativeTexture<DeviceType, ImageType>>(color);
+        const auto texture = resourcePointerCast<NativeTexture<DeviceType, ImageType>>(color);
         if (!texture || texture->device != m_native || !acceptsSettings(settings))
             return {};
         auto target = TargetType::create(m_native, texture->image, settings);

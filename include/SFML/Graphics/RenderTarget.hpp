@@ -58,7 +58,8 @@ class VertexBuffer;
 namespace priv
 {
 class RenderTargetBackend;
-}
+class RhiAccess;
+} // namespace priv
 
 ////////////////////////////////////////////////////////////
 /// \brief Base class for all render targets (window, texture, ...)
@@ -473,6 +474,7 @@ protected:
 
 private:
     friend class RenderWindow;
+    friend class priv::RhiAccess;
     friend class RenderTexture;
 
     View                                       m_defaultView;
