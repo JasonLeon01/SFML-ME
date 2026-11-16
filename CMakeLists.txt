@@ -461,9 +461,6 @@ if(SFML_BUILD_TEST_SUITE)
     else()
         message(WARNING "Cannot build unit testing unless all modules are enabled")
     endif()
-elseif(SFML_OS_EMSCRIPTEN AND SFML_BUILD_NETWORK)
-    enable_testing()
-    add_subdirectory(test)
 endif()
 
 # add an option for making OpenGL errors fatal

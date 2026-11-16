@@ -185,12 +185,14 @@ if(SFML_OS_EMSCRIPTEN)
         message(FATAL_ERROR "TcpListener removal probe failed unexpectedly:\n${SFML_WEB_TCP_LISTENER_OUTPUT}")
     endif()
 
-    add_executable(sfml-network-node-test "${PROJECT_SOURCE_DIR}/test/Network/emscripten/main.cpp")
-    target_link_libraries(sfml-network-node-test PRIVATE SFML::Network)
-    set_target_properties(sfml-network-node-test PROPERTIES SUFFIX ".js")
-    target_link_options(sfml-network-node-test PRIVATE
-                        -sEXIT_RUNTIME=1
-                        -sENVIRONMENT=node
-                        -sNODE_HOST_ENV=1
-                        "SHELL:--pre-js ${PROJECT_SOURCE_DIR}/test/Network/emscripten/webrtc-preload.js")
+    if(SFML_BUILD_TEST_SUITE)
+        add_executable(sfml-network-node-test "${PROJECT_SOURCE_DIR}/test/Network/emscripten/main.cpp")
+        target_link_libraries(sfml-network-node-test PRIVATE SFML::Network)
+        set_target_properties(sfml-network-node-test PROPERTIES SUFFIX ".js")
+        target_link_options(sfml-network-node-test PRIVATE
+                            -sEXIT_RUNTIME=1
+                            -sENVIRONMENT=node
+                            -sNODE_HOST_ENV=1
+                            "SHELL:--pre-js ${PROJECT_SOURCE_DIR}/test/Network/emscripten/webrtc-preload.js")
+    endif()
 endif()

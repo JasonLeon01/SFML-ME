@@ -75,13 +75,33 @@ origin rules still apply. Host resource downloads are independent of SFML Networ
 - Window sizes and mouse coordinates use drawing-buffer pixels. CSS size and
   device-pixel ratio changes update the buffer and produce resize events.
   Keyboard/scancode mappings cover common desktop keys; layout discovery and IME
-  composition are not provided. Focus loss clears pressed-key/button state.
+  composition are not provided. Focus requires the visible, active browser tab
+  and its focused canvas. Leaving or returning to the tab updates focus events;
+  focus loss clears pressed-key/button state.
 - Fullscreen and pointer lock are browser-controlled and may be deferred until a
   user gesture. Pointer locking does not provide desktop cursor warping. Native
-  window positioning, icons, custom pixel cursors, touch, sensors and joysticks
-  are not implemented in this first desktop Web version. Clipboard access uses
+  window positioning, icons, custom pixel cursors and sensors are not implemented.
+  Clipboard access uses
   browser permissions; denial returns an empty string or leaves the clipboard
   unchanged.
+- Touch events and `sf::Touch` queries use stable finger slots while each touch
+  remains active. Coordinates use the same canvas drawing-buffer pixels as the
+  mouse. The canvas disables browser touch gestures and compatibility mouse events
+  so one touch is not also reported as a mouse click. A browser cancellation,
+  hidden page, lost focus, hidden window or lost graphics context releases active
+  touches through the existing `sf::Event::TouchEnded` event. Applications that
+  distinguish cancellation from release can observe the canvas `touchcancel`
+  event in their host page. Cancelling a touch alone does not produce a focus event.
+- Gamepads with the browser's `standard` mapping are exposed through the existing
+  joystick API. The browser index is the SFML joystick index, up to
+  `sf::Joystick::Count`; unsupported mappings are not reported as connected.
+  Button numbers retain the standard browser numbering: 0–3 are A/B/X/Y, 4–5
+  are shoulders, 8–9 are View/Menu, 10–11 are stick clicks and 16 is Home.
+  Browser axes 0–3 map to X/Y/Z/R in the range −100 to 100. Trigger buttons 6–7
+  also map to U/V from 0 to 100. The directional pad maps to PovX (right minus
+  left) and PovY (up minus down), each from −100 to 100. No additional dead zone
+  is applied. Browser permissions and user-interaction requirements determine
+  when a connected gamepad first becomes visible.
 - WebGL 1 and geometry shaders are not supported. GLSL shaders must target GLES3 /
   WebGL 2. Actual depth, stencil and antialiasing settings are reported by the
   context; the browser controls the default framebuffer. A lost context stops
@@ -196,10 +216,11 @@ return the existing failure value:
 
 Build the web preset from the repository root, then run the programs with Node. The `.js` file and its `.wasm` stay side by side in `build/web/bin`.
 
-The Catch2 network suite is `test-sfml-network.js`. Cases that need `sf::TcpListener` are left out of the web build. Internet cases stay off unless the corresponding CMake options are enabled.
+Enable `SFML_BUILD_TEST_SUITE` to build the network test programs from a checkout that includes `test/`. The Catch2 network suite is `test-sfml-network.js`. Cases that need `sf::TcpListener` are left out of the web build. Internet cases stay off unless the corresponding CMake options are enabled.
 
 ```sh
-cd /Users/jasonleon/Development/SFML-ME
+cmake --preset web -DSFML_BUILD_TEST_SUITE=ON
+cmake --build build/web --target test-sfml-network sfml-network-node-test --parallel
 node build/web/bin/test-sfml-network.js
 ```
 

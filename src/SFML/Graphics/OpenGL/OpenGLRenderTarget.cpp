@@ -1107,7 +1107,7 @@ void OpenGLRenderTarget::drawProgrammable(
 
     const auto vertexObjects = objects();
     glCheck(glBindVertexArray(vertexObjects->array));
-    glCheck(glBindBuffer(GL_ARRAY_BUFFER, vertices ? vertexObjects->stream : buffer));
+    glCheck(glBindBuffer(GL_ARRAY_BUFFER, vertices || !buffer ? vertexObjects->stream : buffer));
     if (vertices)
         glCheck(glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(sizeof(Vertex) * count), vertices, GL_STREAM_DRAW));
 

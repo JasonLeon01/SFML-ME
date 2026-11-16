@@ -34,6 +34,7 @@ std::array<bool, Keyboard::KeyCount>      keys{};
 std::array<bool, Keyboard::ScancodeCount> scans{};
 std::array<bool, Mouse::ButtonCount>      buttons{};
 Vector2i                                  mouse;
+std::array<TouchPoint, 32>                touches{};
 constexpr std::array                      mappings{
     KeyMapping{"KeyA", Keyboard::Key::A, Keyboard::Scancode::A},
     KeyMapping{"KeyB", Keyboard::Key::B, Keyboard::Scancode::B},
@@ -206,16 +207,16 @@ void setMousePosition(Vector2i)
 void setMousePosition(Vector2i, const WindowBase&)
 {
 }
-bool isTouchDown(unsigned int)
+bool isTouchDown(unsigned int finger)
 {
-    return false;
+    return finger < WebInput::touches.size() && WebInput::touches[finger].identifier.has_value();
 }
-Vector2i getTouchPosition(unsigned int)
+Vector2i getTouchPosition(unsigned int finger)
 {
-    return {};
+    return finger < WebInput::touches.size() ? WebInput::touches[finger].position : Vector2i{};
 }
-Vector2i getTouchPosition(unsigned int, const WindowBase&)
+Vector2i getTouchPosition(unsigned int finger, const WindowBase&)
 {
-    return {};
+    return getTouchPosition(finger);
 }
 } // namespace sf::priv::InputImpl

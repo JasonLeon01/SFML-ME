@@ -33,9 +33,30 @@
 EM_ASYNC_JS(void, sfmlWaitForBrowserFrame, (), {
     await new Promise((resolve) => {
         if (document.hidden)
+        {
             setTimeout(resolve, 16);
-        else
-            requestAnimationFrame(resolve);
+            return;
+        }
+
+        let frame = null;
+        let settled = false;
+        const finish = () => {
+            if (settled)
+                return;
+            settled = true;
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+            if (frame !== null)
+                cancelAnimationFrame(frame);
+            resolve();
+        };
+        const onVisibilityChange = () => {
+            if (document.hidden)
+                finish();
+        };
+
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        frame = requestAnimationFrame(finish);
+        onVisibilityChange();
     });
 });
 // clang-format on

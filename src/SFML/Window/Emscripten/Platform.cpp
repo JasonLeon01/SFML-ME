@@ -24,7 +24,6 @@
 
 #include <SFML/Window/ClipboardImpl.hpp>
 #include <SFML/Window/CursorImpl.hpp>
-#include <SFML/Window/JoystickImpl.hpp>
 #include <SFML/Window/SensorImpl.hpp>
 #include <SFML/Window/VideoModeImpl.hpp>
 
@@ -67,35 +66,6 @@ EM_JS(int, sfmlScreenHeight, (), { return Math.round(screen.height * devicePixel
 
 namespace sf::priv
 {
-void JoystickImpl::initialize()
-{
-}
-void JoystickImpl::cleanup()
-{
-}
-bool JoystickImpl::isConnected(unsigned int)
-{
-    return false;
-}
-bool JoystickImpl::open(unsigned int)
-{
-    return false;
-}
-void JoystickImpl::close()
-{
-}
-JoystickCaps JoystickImpl::getCapabilities() const
-{
-    return {};
-}
-Joystick::Identification JoystickImpl::getIdentification() const
-{
-    return {};
-}
-JoystickState JoystickImpl::update()
-{
-    return {};
-}
 void SensorImpl::initialize()
 {
 }

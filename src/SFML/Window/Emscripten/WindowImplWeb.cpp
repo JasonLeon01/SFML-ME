@@ -61,7 +61,8 @@ EM_JS(void, sfmlFocusCanvas, (const char* selector), {
 // JavaScript bodies must not be formatted as C++.
 // clang-format off
 EM_JS(int, sfmlHasFocus, (const char* selector), {
-    return document.activeElement === document.querySelector(UTF8ToString(selector));
+    return document.hasFocus() && !document.hidden &&
+        document.activeElement === document.querySelector(UTF8ToString(selector));
 });
 // clang-format on
 // JavaScript bodies must not be formatted as C++.
@@ -74,6 +75,33 @@ EM_JS(double, sfmlCanvasLeft, (const char* selector), {
 // clang-format off
 EM_JS(double, sfmlCanvasTop, (const char* selector), {
     return document.querySelector(UTF8ToString(selector)).getBoundingClientRect().top;
+});
+// clang-format on
+// JavaScript bodies must not be formatted as C++.
+// clang-format off
+EM_JS(void, sfmlInstallTouchInput, (const char* selector, bool enabled), {
+    var canvas = document.querySelector(UTF8ToString(selector));
+    if (enabled) {
+        var state = {
+            touchAction: canvas.style.touchAction,
+            suppressMouse: (event) => {
+                if (event.sourceCapabilities?.firesTouchEvents) {
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                }
+            }
+        };
+        canvas.sfmlTouchInput = state;
+        canvas.style.touchAction = 'none';
+        for (var name of ['mousedown', 'mouseup', 'mousemove', 'click'])
+            canvas.addEventListener(name, state.suppressMouse, true);
+    } else if (canvas.sfmlTouchInput) {
+        var state = canvas.sfmlTouchInput;
+        canvas.style.touchAction = state.touchAction;
+        for (var name of ['mousedown', 'mouseup', 'mousemove', 'click'])
+            canvas.removeEventListener(name, state.suppressMouse, true);
+        delete canvas.sfmlTouchInput;
+    }
 });
 // clang-format on
 
@@ -119,6 +147,7 @@ WindowImplWeb::WindowImplWeb(WindowHandle)
 }
 WindowImplWeb::~WindowImplWeb()
 {
+    cancelTouches();
     installCallbacks(false);
     setVisible(false);
     emscripten_exit_pointerlock();
@@ -160,6 +189,8 @@ void WindowImplWeb::setIcon(Vector2u, const std::uint8_t*)
 }
 void WindowImplWeb::setVisible(bool visible)
 {
+    if (!visible)
+        cancelTouches();
     sfmlSetVisibility(getNativeHandle(), visible);
 }
 void WindowImplWeb::setMouseCursorVisible(bool visible)
@@ -194,6 +225,7 @@ bool WindowImplWeb::hasFocus() const
 void WindowImplWeb::installCallbacks(bool enabled)
 {
     const auto* canvas = getNativeHandle();
+    sfmlInstallTouchInput(canvas, enabled);
     emscripten_set_keydown_callback(canvas, this, false, enabled ? keyboardCallback : nullptr);
     emscripten_set_keyup_callback(canvas, this, false, enabled ? keyboardCallback : nullptr);
     emscripten_set_mousedown_callback(canvas, this, false, enabled ? mouseCallback : nullptr);
@@ -204,7 +236,15 @@ void WindowImplWeb::installCallbacks(bool enabled)
     emscripten_set_wheel_callback(canvas, this, false, enabled ? wheelCallback : nullptr);
     emscripten_set_focus_callback(canvas, this, false, enabled ? focusCallback : nullptr);
     emscripten_set_blur_callback(canvas, this, false, enabled ? focusCallback : nullptr);
+    emscripten_set_focus_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, this, false, enabled ? focusCallback : nullptr);
     emscripten_set_blur_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, this, false, enabled ? focusCallback : nullptr);
+    emscripten_set_touchstart_callback(canvas, this, false, enabled ? touchCallback : nullptr);
+    emscripten_set_touchmove_callback(canvas, this, false, enabled ? touchCallback : nullptr);
+    emscripten_set_touchend_callback(canvas, this, false, enabled ? touchCallback : nullptr);
+    emscripten_set_touchcancel_callback(canvas, this, false, enabled ? touchCallback : nullptr);
+    emscripten_set_visibilitychange_callback(this, false, enabled ? visibilityCallback : nullptr);
+    if (enabled)
+        updateFocus();
 }
 bool WindowImplWeb::keyboardCallback(int type, const EmscriptenKeyboardEvent* event, void* user)
 {
@@ -234,13 +274,17 @@ bool WindowImplWeb::keyboardCallback(int type, const EmscriptenKeyboardEvent* ev
 }
 Vector2i WindowImplWeb::mousePosition(const EmscriptenMouseEvent& event) const
 {
+    return canvasPosition(event.clientX, event.clientY);
+}
+Vector2i WindowImplWeb::canvasPosition(int clientX, int clientY) const
+{
     double width  = 1;
     double height = 1;
     emscripten_get_element_css_size(getNativeHandle(), &width, &height);
     const double left = sfmlCanvasLeft(getNativeHandle());
     const double top  = sfmlCanvasTop(getNativeHandle());
-    return {static_cast<int>((event.clientX - left) * m_size.x / std::max(width, 1.0)),
-            static_cast<int>((event.clientY - top) * m_size.y / std::max(height, 1.0))};
+    return {static_cast<int>((clientX - left) * m_size.x / std::max(width, 1.0)),
+            static_cast<int>((clientY - top) * m_size.y / std::max(height, 1.0))};
 }
 bool WindowImplWeb::mouseCallback(int type, const EmscriptenMouseEvent* event, void* user)
 {
@@ -283,25 +327,92 @@ bool WindowImplWeb::wheelCallback(int, const EmscriptenWheelEvent* event, void* 
             Event::MouseWheelScrolled{Mouse::Wheel::Horizontal, static_cast<float>(-event->deltaX / divisor), position});
     return true;
 }
-bool WindowImplWeb::focusCallback(int type, const EmscriptenFocusEvent*, void* user)
+bool WindowImplWeb::focusCallback(int, const EmscriptenFocusEvent*, void* user)
 {
-    auto& self = *static_cast<WindowImplWeb*>(user);
-    if (type == EMSCRIPTEN_EVENT_FOCUS)
-        self.pushEvent(Event::FocusGained{});
+    static_cast<WindowImplWeb*>(user)->updateFocus();
+    return false;
+}
+void WindowImplWeb::updateFocus()
+{
+    const bool focused = hasFocus();
+    if (focused == m_focused)
+        return;
+    m_focused = focused;
+    if (focused)
+        pushEvent(Event::FocusGained{});
     else
     {
         WebInput::keys.fill(false);
         WebInput::scans.fill(false);
         WebInput::buttons.fill(false);
-        self.pushEvent(Event::FocusLost{});
+        cancelTouches();
+        pushEvent(Event::FocusLost{});
     }
+}
+bool WindowImplWeb::touchCallback(int type, const EmscriptenTouchEvent* event, void* user)
+{
+    auto& self = *static_cast<WindowImplWeb*>(user);
+    if (type == EMSCRIPTEN_EVENT_TOUCHSTART)
+        self.requestFocus();
+    for (int index = 0; index < event->numTouches; ++index)
+    {
+        const auto& touch = event->touches[index];
+        if (!touch.isChanged)
+            continue;
+        auto slot = std::find_if(WebInput::touches.begin(),
+                                 WebInput::touches.end(),
+                                 [&touch](const auto& point) { return point.identifier == touch.identifier; });
+        if (type == EMSCRIPTEN_EVENT_TOUCHSTART)
+        {
+            if (slot != WebInput::touches.end())
+                continue;
+            slot = std::find_if(WebInput::touches.begin(),
+                                WebInput::touches.end(),
+                                [](const auto& point) { return !point.identifier; });
+            if (slot == WebInput::touches.end())
+                continue;
+            slot->identifier = touch.identifier;
+        }
+        else if (slot == WebInput::touches.end())
+            continue;
+        slot->position    = self.canvasPosition(touch.clientX, touch.clientY);
+        const auto finger = static_cast<unsigned int>(slot - WebInput::touches.begin());
+        if (type == EMSCRIPTEN_EVENT_TOUCHSTART)
+            self.pushEvent(Event::TouchBegan{finger, slot->position});
+        else if (type == EMSCRIPTEN_EVENT_TOUCHMOVE)
+            self.pushEvent(Event::TouchMoved{finger, slot->position});
+        else
+        {
+            slot->identifier.reset();
+            self.pushEvent(Event::TouchEnded{finger, slot->position});
+        }
+    }
+    return true;
+}
+void WindowImplWeb::cancelTouches()
+{
+    for (unsigned int finger = 0; finger < WebInput::touches.size(); ++finger)
+    {
+        auto& touch = WebInput::touches[finger];
+        if (touch.identifier)
+        {
+            touch.identifier.reset();
+            pushEvent(Event::TouchEnded{finger, touch.position});
+        }
+    }
+}
+bool WindowImplWeb::visibilityCallback(int, const EmscriptenVisibilityChangeEvent*, void* user)
+{
+    static_cast<WindowImplWeb*>(user)->updateFocus();
     return false;
 }
 void WindowImplWeb::processEvents()
 {
+    updateFocus();
     if (!m_lost && WebContext::isLost())
     {
         m_lost = true;
+        cancelTouches();
         err() << "WebGL context lost; reload the page to restore graphics" << std::endl;
         pushEvent(Event::Closed{});
     }

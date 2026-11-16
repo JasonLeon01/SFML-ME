@@ -53,7 +53,12 @@ public:
     [[nodiscard]] Joystick::Identification getIdentification() const;
 
     ////////////////////////////////////////////////////////////
-    [[nodiscard]] JoystickState update();
+    [[nodiscard]] JoystickState update() const;
+
+private:
+    unsigned int             m_index{};
+    JoystickCaps             m_capabilities;
+    Joystick::Identification m_identification;
 };
 
 } // namespace sf::priv
