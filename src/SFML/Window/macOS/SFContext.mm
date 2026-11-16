@@ -23,10 +23,13 @@
 //
 ////////////////////////////////////////////////////////////
 
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 ////////////////////////////////////////////////////////////
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Window/macOS/AutoreleasePoolWrapper.hpp>
+#include <SFML/Window/macOS/SFApplication.h>
 #include <SFML/Window/macOS/SFContext.hpp>
 #include <SFML/Window/macOS/WindowImplCocoa.hpp>
 
@@ -34,8 +37,6 @@
 
 #include <dlfcn.h>
 #include <ostream>
-
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 namespace sf::priv
 {
@@ -68,8 +69,10 @@ SFContext::SFContext(SFContext* shared, const ContextSettings& settings, const W
 SFContext::SFContext(SFContext* shared, const ContextSettings& settings, Vector2u size)
 {
     const AutoreleasePool pool;
-    // Ensure the process is setup in order to create a valid window.
-    WindowImplCocoa::setUpProcess();
+    // Allow an unbundled process to create the hidden window without activating it.
+    NSApplication* const application = [SFApplication sharedApplication];
+    if ([application activationPolicy] == NSApplicationActivationPolicyProhibited)
+        [application setActivationPolicy:NSApplicationActivationPolicyAccessory];
 
     // Create the context.
     createContext(shared, VideoMode::getDesktopMode().bitsPerPixel, settings);

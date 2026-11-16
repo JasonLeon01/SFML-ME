@@ -42,7 +42,8 @@ namespace
 {
 namespace MetalProgramImpl
 {
-constexpr NSUInteger maximumTextures = 16;
+constexpr NSUInteger maximumTextures    = 16;
+constexpr NSUInteger captureSampleCount = 1;
 
 id<MTLLibrary> loadLibrary(id<MTLDevice> device, std::string_view code)
 {
@@ -145,7 +146,7 @@ MTLRenderPipelineDescriptor* describePipeline(const MetalProgramData& program, c
     {
         descriptor.vertexDescriptor     = program.layout;
         descriptor.rasterizationEnabled = NO;
-        descriptor.rasterSampleCount    = 1;
+        descriptor.rasterSampleCount    = captureSampleCount;
         return descriptor;
     }
     descriptor.fragmentFunction             = program.fragment;
@@ -771,10 +772,17 @@ bool MetalProgram::transformVertices(MetalDevice&                               
     }
     @autoreleasepool
     {
-        auto&       context                       = device.impl();
+        auto&      context  = device.impl();
+        const auto vertices = static_cast<std::uint32_t>(count);
+        const auto indirect = context.allocate(sizeof(vertices), alignof(std::uint32_t));
+        if (!indirect.buffer)
+            return false;
+        std::memcpy(indirect.contents, &vertices, sizeof(vertices));
+
         auto* const pass                          = [MTLRenderPassDescriptor renderPassDescriptor];
         pass.renderTargetWidth                    = 1;
         pass.renderTargetHeight                   = 1;
+        pass.defaultRasterSampleCount             = MetalProgramImpl::captureSampleCount;
         const id<MTLRenderCommandEncoder> encoder = context.render(this, pass);
         if (!encoder)
             return false;
@@ -787,9 +795,8 @@ bool MetalProgram::transformVertices(MetalDevice&                               
             [encoder setVertexBuffer:nativeMetalBuffer(*bindings[index].buffer)->buffer
                               offset:bindings[index].offset
                              atIndex:metalCustomVertexBufferIndex + index];
-        const auto vertices = static_cast<std::uint32_t>(count);
         [encoder setVertexBuffer:destination->buffer->buffer offset:0 atIndex:options.metalOutputBufferIndex];
-        [encoder setVertexBytes:&vertices length:sizeof(vertices) atIndex:options.metalIndirectBufferIndex];
+        [encoder setVertexBuffer:indirect.buffer offset:indirect.offset atIndex:options.metalIndirectBufferIndex];
         [encoder drawPrimitives:MTLPrimitiveTypePoint vertexStart:0 vertexCount:count];
         context.endEncoding();
         return true;
