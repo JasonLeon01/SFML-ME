@@ -7,6 +7,8 @@
 #include <SFML/Network/TcpSocket.hpp>
 #include <SFML/Network/UdpSocket.hpp>
 
+#include <SFML/System/Clock.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <NetworkUtil.hpp>
@@ -35,6 +37,17 @@ TEST_CASE("[Network] sf::SocketSelector")
         const sf::SocketSelector socketSelector;
         CHECK(!socketSelector.isReady(socket));
     }
+
+#if defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY) || \
+    defined(SFML_SYSTEM_WINDOWS)
+    SECTION("An empty selector honors a finite timeout")
+    {
+        sf::SocketSelector selector;
+        const sf::Clock    clock;
+        CHECK_FALSE(selector.wait(sf::milliseconds(40)));
+        CHECK(clock.getElapsedTime() >= sf::milliseconds(30));
+    }
+#endif
 }
 
 #if !defined(SFML_SYSTEM_EMSCRIPTEN)

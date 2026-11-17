@@ -81,7 +81,7 @@ struct SocketSelector::SocketSelectorImpl
 #if defined(SFML_USE_EPOLL)
     SocketSelectorImpl() : epollHandle(epoll_create1(EPOLL_CLOEXEC))
     {
-#if defined(SFML_SYSTEM_WINDOWS)
+#ifdef SFML_SYSTEM_WINDOWS
         if (!epollHandle)
 #else
         if (epollHandle < 0)
@@ -94,7 +94,7 @@ struct SocketSelector::SocketSelectorImpl
 
     ~SocketSelectorImpl()
     {
-#if defined(SFML_SYSTEM_WINDOWS)
+#ifdef SFML_SYSTEM_WINDOWS
         if (epollHandle)
 #else
         if (epollHandle >= 0)
@@ -201,9 +201,7 @@ struct SocketSelector::SocketSelectorImpl
 
     bool wait(Time timeout)
     {
-        // epoll requires maxevents > 0 even when no descriptors are
-        // registered. A one-element output buffer lets an empty selector
-        // honour finite timeouts and Time::Zero's infinite wait semantics.
+        // epoll_wait requires at least one output slot, even with no sockets registered.
         events.resize(std::max<std::size_t>(sockets.size(), 1));
         const auto result = epoll_wait(epollHandle,
                                        events.data(),
