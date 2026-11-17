@@ -134,7 +134,18 @@ bool MetalDevice::Impl::submit(bool wait, bool paced)
     endEncoding();
     if (!commands)
         return true;
-    const id<MTLCommandBuffer> buffer                       = commands;
+    const id<MTLCommandBuffer> buffer = commands;
+    timingRanges.erase(std::remove_if(timingRanges.begin(),
+                                      timingRanges.end(),
+                                      [&](const auto& weak)
+                                      {
+                                          const auto range = weak.lock();
+                                          if (!range || !range->capturing)
+                                              return true;
+                                          range->buffers.push_back(buffer);
+                                          return false;
+                                      }),
+                       timingRanges.end());
     commands                                                = nil;
     chunk                                                   = nil;
     chunkOffset                                             = 0;
@@ -206,20 +217,53 @@ id<MTLRenderPipelineState> MetalDevice::Impl::makePipeline(MTLRenderPipelineDesc
                                                            MTLPipelineOption                        options,
                                                            MTLAutoreleasedRenderPipelineReflection* reflection)
 {
-    descriptor.binaryArchives              = archives;
-    NSError*                         error = nil;
-    const id<MTLRenderPipelineState> state = [device
+    const auto archiveOptions = static_cast<MTLPipelineOption>(options | MTLPipelineOptionFailOnBinaryArchiveMiss);
+    descriptor.binaryArchives = @[archive];
+    NSError*                   archiveError = nil;
+    id<MTLRenderPipelineState> state        = [device
         newRenderPipelineStateWithDescriptor:descriptor
-                                     options:options
+                                     options:archiveOptions
                                   reflection:reflection
-                                       error:&error];
+                                       error:&archiveError];
+    if (state)
+        return state;
+
+    descriptor.binaryArchives = archives;
+    if (archives.count > 1)
+    {
+        NSError* secondaryError = nil;
+        state                   = [device newRenderPipelineStateWithDescriptor:descriptor
+                                                     options:archiveOptions
+                                                  reflection:reflection
+                                                       error:&secondaryError];
+        if (secondaryError)
+            archiveError = secondaryError;
+    }
     if (!state)
     {
-        err() << "Failed to create Metal render pipeline: " << describe(error) << std::endl;
+        // Keep the archive-only error separate. Ordinary creation must validate the descriptor
+        // before treating the archive-only failure as a cache miss.
+        NSError* creationError = nil;
+        state                  = [device newRenderPipelineStateWithDescriptor:descriptor
+                                                     options:options
+                                                  reflection:reflection
+                                                       error:&creationError];
+        if (!state)
+        {
+            err() << "Failed to create Metal render pipeline: " << describe(creationError)
+                  << "; binary archive lookup failed: " << describe(archiveError) << std::endl;
+            return nil;
+        }
+    }
+
+    archiveDirty      = true;
+    archiveHasEntries = true;
+    NSError* error    = nil;
+    if (![archive addRenderPipelineFunctionsWithDescriptor:descriptor error:&error])
+    {
+        err() << "Failed to record Metal render pipeline in the pipeline cache: " << describe(error) << std::endl;
         return nil;
     }
-    if (![archive addRenderPipelineFunctionsWithDescriptor:descriptor error:&error])
-        err() << "Failed to record Metal render pipeline in the pipeline cache: " << describe(error) << std::endl;
     return state;
 }
 
@@ -283,8 +327,10 @@ MetalDevice::~MetalDevice()
     (void)m_impl->submit(true);
     m_impl->archives = nil;
     m_impl->archive  = nil;
-    for (const auto& path : m_impl->temporaryFiles)
-        MetalDeviceImpl::removeFile(path);
+    for (const auto& imported : m_impl->importedArchives)
+        MetalDeviceImpl::removeFile(imported.path);
+    m_impl->importedArchives.clear();
+    m_impl->archiveData.reset();
 }
 
 std::shared_ptr<MetalDevice> MetalDevice::create()
@@ -367,7 +413,7 @@ unsigned int MetalDevice::maximumSamples() const
     return 1;
 }
 
-std::shared_ptr<MetalImage> MetalDevice::makeTexture(Vector2u size, bool sRgb, bool mipmapped)
+std::shared_ptr<MetalImage> MetalDevice::makeTexture(Vector2u size, bool sRgb, bool mipmapped, bool floating)
 {
     const auto guard = lock();
     if (!size.x || !size.y || size.x > maximumTextureSize() || size.y > maximumTextureSize())
@@ -376,7 +422,9 @@ std::shared_ptr<MetalImage> MetalDevice::makeTexture(Vector2u size, bool sRgb, b
     {
         auto&       impl       = *m_impl;
         auto* const descriptor = [MTLTextureDescriptor
-            texture2DDescriptorWithPixelFormat:sRgb ? MTLPixelFormatRGBA8Unorm_sRGB : MTLPixelFormatRGBA8Unorm
+            texture2DDescriptorWithPixelFormat:floating ? MTLPixelFormatRGBA32Float
+                                               : sRgb   ? MTLPixelFormatRGBA8Unorm_sRGB
+                                                        : MTLPixelFormatRGBA8Unorm
                                          width:size.x
                                         height:size.y
                                      mipmapped:mipmapped ? YES : NO];
@@ -420,6 +468,17 @@ std::shared_ptr<MetalBuffer> MetalDevice::makeBuffer(std::size_t bytes)
 
 bool MetalDevice::upload(const MetalImage& image, const std::uint8_t* pixels, Vector2u size, Vector2u offset)
 {
+    return image.texture.pixelFormat != MTLPixelFormatRGBA32Float && uploadPixels(image, pixels, size, offset, 4);
+}
+
+bool MetalDevice::uploadFloats(const MetalImage& image, const float* pixels, Vector2u size, Vector2u offset)
+{
+    return image.texture.pixelFormat == MTLPixelFormatRGBA32Float &&
+           uploadPixels(image, pixels, size, offset, 4 * sizeof(float));
+}
+
+bool MetalDevice::uploadPixels(const MetalImage& image, const void* pixels, Vector2u size, Vector2u offset, std::size_t pixelSize)
+{
     const auto guard = lock();
     if (!pixels || offset.x > image.size.x || offset.y > image.size.y || size.x > image.size.x - offset.x ||
         size.y > image.size.y - offset.y)
@@ -428,14 +487,20 @@ bool MetalDevice::upload(const MetalImage& image, const std::uint8_t* pixels, Ve
         return true;
     @autoreleasepool
     {
-        const std::size_t rowBytes = static_cast<std::size_t>(size.x) * 4;
-        const std::size_t bytes    = rowBytes * size.y;
-        const auto        staging  = m_impl->allocate(bytes, 256);
+        const std::size_t sourceRowBytes = static_cast<std::size_t>(size.x) * pixelSize;
+        const std::size_t rowBytes       = (sourceRowBytes + 255) & ~std::size_t{255};
+        const std::size_t bytes          = rowBytes * size.y;
+        const auto        staging        = m_impl->allocate(bytes, 256);
         if (!staging.buffer)
             return false;
-        std::memcpy(staging.contents, pixels, bytes);
-        [m_impl->blit()
-                 copyFromBuffer:staging.buffer
+        for (unsigned int row = 0; row < size.y; ++row)
+            std::memcpy(static_cast<std::byte*>(staging.contents) + row * rowBytes,
+                        static_cast<const std::byte*>(pixels) + row * sourceRowBytes,
+                        sourceRowBytes);
+        const id<MTLBlitCommandEncoder> encoder = m_impl->blit();
+        if (!encoder)
+            return false;
+        [encoder copyFromBuffer:staging.buffer
                    sourceOffset:staging.offset
               sourceBytesPerRow:rowBytes
             sourceBytesPerImage:bytes
@@ -477,6 +542,8 @@ bool MetalDevice::copy(const MetalImage& source, const MetalImage& destination, 
 
 Image MetalDevice::readImage(const MetalImage& image)
 {
+    if (image.texture.pixelFormat == MTLPixelFormatRGBA32Float)
+        return {};
     const auto guard = lock();
     @autoreleasepool
     {
@@ -591,12 +658,24 @@ bool MetalDevice::loadPipelineCache(const void* data, std::size_t size)
     const auto guard = lock();
     if (!data || !size)
         return false;
+    const auto* bytes   = static_cast<const std::uint8_t*>(data);
+    const auto  matches = [&](const std::shared_ptr<const std::vector<std::uint8_t>>& existing)
+    { return existing && existing->size() == size && std::equal(existing->begin(), existing->end(), bytes); };
+    if (matches(m_impl->archiveData) ||
+        std::any_of(m_impl->importedArchives.begin(),
+                    m_impl->importedArchives.end(),
+                    [&](const Impl::ImportedArchive& imported) { return matches(imported.data); }))
+        return true;
     @autoreleasepool
     {
-        const auto path = temporaryPath();
+        Impl::ImportedArchive imported{std::make_shared<const std::vector<std::uint8_t>>(bytes, bytes + size),
+                                       temporaryPath()};
+        m_impl->importedArchives.reserve(m_impl->importedArchives.size() + 1);
+        const auto& path = imported.path;
         if (![[NSData dataWithBytes:data length:size] writeToURL:fileUrl(path) atomically:NO])
         {
             err() << "Failed to stage the Metal pipeline cache in " << path << std::endl;
+            removeFile(path);
             return false;
         }
         auto* const descriptor             = [MTLBinaryArchiveDescriptor new];
@@ -609,9 +688,19 @@ bool MetalDevice::loadPipelineCache(const void* data, std::size_t size)
             removeFile(path);
             return false;
         }
-        // The archive may keep reading from its file, so it stays on disk until the device is destroyed
-        m_impl->temporaryFiles.push_back(path);
-        [m_impl->archives insertObject:archive atIndex:0];
+        // Adopt the first import while the initial archive is empty; later imports remain lookup sources.
+        // Pipelines found only in those sources are added incrementally to the primary archive when used.
+        if (m_impl->importedArchives.empty() && !m_impl->archiveHasEntries)
+        {
+            [m_impl->archives removeObjectIdenticalTo:m_impl->archive];
+            m_impl->archive           = archive;
+            m_impl->archiveData       = imported.data;
+            m_impl->archiveDirty      = false;
+            m_impl->archiveHasEntries = true;
+        }
+        [m_impl->archives addObject:archive];
+        // Imported archives may read their files lazily, so retain both the source bytes and file until teardown.
+        m_impl->importedArchives.push_back(std::move(imported));
         return true;
     }
 }
@@ -620,6 +709,8 @@ std::optional<std::vector<std::uint8_t>> MetalDevice::getPipelineCacheData()
 {
     using namespace MetalDeviceImpl;
     const auto guard = lock();
+    if (!m_impl->archiveDirty && m_impl->archiveData)
+        return *m_impl->archiveData;
     @autoreleasepool
     {
         const auto path  = temporaryPath();
@@ -632,13 +723,15 @@ std::optional<std::vector<std::uint8_t>> MetalDevice::getPipelineCacheData()
         }
         NSData* const contents = [NSData dataWithContentsOfURL:fileUrl(path)];
         removeFile(path);
-        if (!contents)
+        if (!contents || !contents.length)
         {
             err() << "Failed to read the serialized Metal pipeline cache" << std::endl;
             return std::nullopt;
         }
-        const auto* bytes = static_cast<const std::uint8_t*>(contents.bytes);
-        return std::vector<std::uint8_t>(bytes, bytes + contents.length);
+        const auto* bytes    = static_cast<const std::uint8_t*>(contents.bytes);
+        m_impl->archiveData  = std::make_shared<const std::vector<std::uint8_t>>(bytes, bytes + contents.length);
+        m_impl->archiveDirty = false;
+        return *m_impl->archiveData;
     }
 }
 

@@ -214,6 +214,43 @@ std::shared_ptr<DirectXImage> DirectXDevice::makeTexture(Vector2u size, bool sRg
     return image;
 }
 
+std::shared_ptr<DirectXImage> DirectXDevice::makeFloatTexture(Vector2u size, const float* pixels)
+{
+    const auto guard = lock();
+    if (m_lost || !size.x || !size.y || size.x > maximumTextureSize() || size.y > maximumTextureSize())
+        return {};
+    auto image    = std::make_shared<DirectXImage>();
+    image->size   = size;
+    image->format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width            = size.x;
+    desc.Height           = size.y;
+    desc.MipLevels        = 1;
+    desc.ArraySize        = 1;
+    desc.Format           = image->format;
+    desc.SampleDesc.Count = 1;
+    desc.BindFlags        = D3D11_BIND_SHADER_RESOURCE;
+    const D3D11_SUBRESOURCE_DATA data{pixels, static_cast<UINT>(size.x * 4u * sizeof(float)), 0};
+    if (!check(m_device->CreateTexture2D(&desc, pixels ? &data : nullptr, image->texture.put()),
+               "create float texture") ||
+        !check(m_device->CreateShaderResourceView(image->texture.get(), nullptr, image->view.put()),
+               "create float texture view"))
+        return {};
+    return image;
+}
+bool DirectXDevice::uploadFloats(const DirectXImage& image, const float* pixels, Vector2u size, Vector2u offset)
+{
+    const auto guard = lock();
+    if (m_lost || image.format != DXGI_FORMAT_R32G32B32A32_FLOAT || !pixels || !size.x || !size.y ||
+        offset.x > image.size.x || offset.y > image.size.y || size.x > image.size.x - offset.x ||
+        size.y > image.size.y - offset.y)
+        return false;
+    unbindTextures();
+    const D3D11_BOX box{offset.x, offset.y, 0, offset.x + size.x, offset.y + size.y, 1};
+    m_context->UpdateSubresource(image.texture.get(), 0, &box, pixels, static_cast<UINT>(size.x * 4u * sizeof(float)), 0);
+    return check(m_device->GetDeviceRemovedReason(), "upload float texture");
+}
+
 std::shared_ptr<DirectXBuffer> DirectXDevice::makeBuffer(std::size_t bytes)
 {
     const auto guard = lock();
@@ -223,7 +260,7 @@ std::shared_ptr<DirectXBuffer> DirectXDevice::makeBuffer(std::size_t bytes)
     buffer->capacity = bytes;
     D3D11_BUFFER_DESC description{};
     description.ByteWidth = static_cast<UINT>(std::max(bytes, std::size_t{1}));
-    description.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    description.BindFlags = D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_STREAM_OUTPUT;
     if (!check(m_device->CreateBuffer(&description, nullptr, buffer->buffer.put()), "create vertex buffer"))
         return {};
     return buffer;

@@ -81,7 +81,9 @@ public:
     [[nodiscard]] unsigned int                           maximumTextureSize() const;
     [[nodiscard]] unsigned int samples(DXGI_FORMAT color, DXGI_FORMAT depth, unsigned int requested) const;
 
-    [[nodiscard]] std::shared_ptr<DirectXImage>  makeTexture(Vector2u size, bool sRgb);
+    [[nodiscard]] std::shared_ptr<DirectXImage> makeTexture(Vector2u size, bool sRgb);
+    [[nodiscard]] std::shared_ptr<DirectXImage> makeFloatTexture(Vector2u size, const float* pixels);
+    [[nodiscard]] bool uploadFloats(const DirectXImage& image, const float* pixels, Vector2u size, Vector2u offset);
     [[nodiscard]] std::shared_ptr<DirectXBuffer> makeBuffer(std::size_t bytes);
     [[nodiscard]] bool  upload(const DirectXImage& image, const std::uint8_t* pixels, Vector2u size, Vector2u offset);
     [[nodiscard]] bool  copy(const DirectXImage& source, const DirectXImage& destination, Vector2u offset);

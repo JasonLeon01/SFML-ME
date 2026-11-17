@@ -57,6 +57,49 @@ OpenGLTexture::~OpenGLTexture()
 #endif
 }
 
+bool OpenGLTexture::resizeFloat(Vector2u size, const float* pixels)
+{
+    if (!size.x || !size.y || size.x > maximumSize() || size.y > maximumSize())
+        return false;
+    const TextureContextLock lock;
+    ensureExtensionsInit();
+    const TextureSaver save;
+    if (!m_texture)
+        glGenTextures(1, &m_texture);
+    glBindTexture(GL_TEXTURE_2D, m_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, static_cast<GLsizei>(size.x), static_cast<GLsizei>(size.y), 0, GL_RGBA, GL_FLOAT, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    m_size = m_actualSize = size;
+    m_float               = true;
+    m_sRgb                = false;
+    m_pixelsFlipped       = false;
+    changed();
+    return true;
+}
+bool OpenGLTexture::uploadFloats(const float* pixels, Vector2u size, Vector2u offset)
+{
+    if (!m_float || !pixels || offset.x > m_size.x || offset.y > m_size.y || size.x > m_size.x - offset.x ||
+        size.y > m_size.y - offset.y)
+        return false;
+    const TextureContextLock lock;
+    const TextureSaver       save;
+    glBindTexture(GL_TEXTURE_2D, m_texture);
+    glTexSubImage2D(GL_TEXTURE_2D,
+                    0,
+                    static_cast<GLint>(offset.x),
+                    static_cast<GLint>(offset.y),
+                    static_cast<GLsizei>(size.x),
+                    static_cast<GLsizei>(size.y),
+                    GL_RGBA,
+                    GL_FLOAT,
+                    pixels);
+    changed();
+    return true;
+}
+
 bool OpenGLTexture::resize(Vector2u size, bool sRgb)
 {
     // Check if texture parameters are valid before creating it
@@ -86,6 +129,7 @@ bool OpenGLTexture::resize(Vector2u size, bool sRgb)
     }
 
     // All the validity checks passed, we can store the new texture settings
+    m_float         = false;
     m_size          = size;
     m_actualSize    = actualSize;
     m_pixelsFlipped = false;
@@ -307,7 +351,7 @@ bool OpenGLTexture::upload(const std::uint8_t* pixels, Vector2u size, Vector2u d
 
 bool OpenGLTexture::copy(const rhi::Texture& source, Vector2u dest)
 {
-    const auto* resource = dynamic_cast<const OpenGLTexture*>(&source);
+    const auto* resource = resourceCast<const OpenGLTexture>(&source);
     if (!resource || dest.x > m_size.x || dest.y > m_size.y || resource->m_size.x > m_size.x - dest.x ||
         resource->m_size.y > m_size.y - dest.y)
         return false;

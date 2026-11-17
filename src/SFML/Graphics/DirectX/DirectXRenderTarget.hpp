@@ -39,21 +39,30 @@ public:
 
     [[nodiscard]] Vector2u getSize() const override;
     void clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
-    void                                               draw(const rhi::TargetState&  target,
-                                                            const Vertex*            vertices,
-                                                            std::size_t              count,
-                                                            PrimitiveType            type,
-                                                            const rhi::DrawSettings& states) override;
-    void                                               draw(const rhi::TargetState&  target,
-                                                            const rhi::Buffer&       buffer,
-                                                            std::size_t              first,
-                                                            std::size_t              count,
-                                                            PrimitiveType            type,
-                                                            const rhi::DrawSettings& states) override;
-    bool                                               setActive(bool active) override;
-    void                                               viewChanged() override;
-    [[nodiscard]] bool                                 resize(Vector2u size);
-    void                                               finish() override;
+    void               draw(const rhi::TargetState&  target,
+                            const Vertex*            vertices,
+                            std::size_t              count,
+                            PrimitiveType            type,
+                            const rhi::DrawSettings& states) override;
+    void               draw(const rhi::TargetState&  target,
+                            const rhi::Buffer&       buffer,
+                            std::size_t              first,
+                            std::size_t              count,
+                            PrimitiveType            type,
+                            const rhi::DrawSettings& states) override;
+    [[nodiscard]] bool drawVertices(
+        const rhi::TargetState&                      target,
+        const std::vector<rhi::VertexBufferBinding>& buffers,
+        std::size_t                                  first,
+        std::size_t                                  count,
+        std::size_t                                  instances,
+        PrimitiveType                                type,
+        const rhi::DrawSettings&                     states) override;
+    [[nodiscard]] bool prewarm(const rhi::TargetState& target, const rhi::DrawSettings& states) override;
+    bool               setActive(bool active) override;
+    void               viewChanged() override;
+    [[nodiscard]] bool resize(Vector2u size);
+    void               finish() override;
     [[nodiscard]] const ContextSettings&               settings() const override;
     [[nodiscard]] const std::shared_ptr<DirectXImage>& image() const;
     [[nodiscard]] static unsigned int                  getMaximumAntiAliasingLevel(const DirectXDevice& device);
@@ -67,13 +76,16 @@ private:
                                     PrimitiveType            type,
                                     const rhi::DrawSettings& states,
                                     bool                     clearing);
-    void               drawBuffer(const rhi::TargetState&  target,
-                                  ID3D11Buffer*            buffer,
-                                  std::size_t              first,
-                                  std::size_t              count,
-                                  PrimitiveType            type,
-                                  const rhi::DrawSettings& states,
-                                  bool                     clearing = false);
+    void               drawBuffer(const rhi::TargetState&                      target,
+                                  ID3D11Buffer*                                buffer,
+                                  std::size_t                                  first,
+                                  std::size_t                                  count,
+                                  PrimitiveType                                type,
+                                  const rhi::DrawSettings&                     states,
+                                  bool                                         clearing    = false,
+                                  const std::vector<rhi::VertexBufferBinding>* bindings    = nullptr,
+                                  std::size_t                                  instances   = 1,
+                                  bool                                         prewarmOnly = false);
     struct Impl;
     std::unique_ptr<Impl> m_impl;
 };

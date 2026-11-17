@@ -30,10 +30,16 @@ class OpenGLRenderTarget;
 class OpenGLTexture final : public TextureResource
 {
 public:
+    [[nodiscard]] const void* implementationType() const override
+    {
+        return resourceType<OpenGLTexture>();
+    }
     explicit OpenGLTexture(std::shared_ptr<void> context) : m_context(std::move(context))
     {
     }
     ~OpenGLTexture() override;
+    bool                       resizeFloat(Vector2u size, const float* pixels);
+    bool                       uploadFloats(const float* pixels, Vector2u size, Vector2u offset) override;
     bool                       resize(Vector2u size, bool srgb);
     bool                       upload(const std::uint8_t* pixels, Vector2u size, Vector2u dest) override;
     bool                       copy(const rhi::Texture& source, Vector2u dest) override;
@@ -54,5 +60,6 @@ private:
     static unsigned int   getValidSize(unsigned int size);
     std::shared_ptr<void> m_context;
     unsigned int          m_texture{};
+    bool                  m_float{};
 };
 } // namespace sf::priv

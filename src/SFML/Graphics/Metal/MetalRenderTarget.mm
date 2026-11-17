@@ -150,6 +150,26 @@ MTLPrimitiveType primitive(PrimitiveType value)
     return MTLPrimitiveTypeTriangle;
 }
 
+MetalPipelineKey pipelineKey(MTLPixelFormat           color,
+                             MTLPixelFormat           depth,
+                             MTLPixelFormat           stencil,
+                             NSUInteger               samples,
+                             const rhi::DrawSettings& states)
+{
+    const auto& blend = states.blendMode;
+    return {color,
+            depth,
+            stencil,
+            samples,
+            factor(blend.colorSrcFactor),
+            factor(blend.colorDstFactor),
+            equation(blend.colorEquation),
+            factor(blend.alphaSrcFactor),
+            factor(blend.alphaDstFactor),
+            equation(blend.alphaEquation),
+            states.stencilMode.stencilOnly ? MTLColorWriteMaskNone : MTLColorWriteMaskAll};
+}
+
 NSUInteger samples(id<MTLDevice> device, unsigned int requested)
 {
     for (const NSUInteger count : {8u, 4u, 2u})
@@ -350,7 +370,7 @@ void MetalRenderTarget::clear(const rhi::TargetState& target, std::optional<Colo
         return;
     const auto clear = prepareClear(color, stencil);
     // A draw rather than a load action, so that clearing honors the scissor like the other backends
-    drawVertices(target, clear.vertices.data(), nullptr, 0, clear.vertices.size(), PrimitiveType::Triangles, clear.settings, true);
+    (void)drawVertices(target, clear.vertices.data(), nullptr, 0, clear.vertices.size(), PrimitiveType::Triangles, clear.settings, true);
 }
 
 void MetalRenderTarget::draw(const rhi::TargetState&  target,
@@ -361,7 +381,7 @@ void MetalRenderTarget::draw(const rhi::TargetState&  target,
 {
     if (!vertices || !count)
         return;
-    drawVertices(target, vertices, nullptr, 0, count, type, states, false);
+    (void)drawVertices(target, vertices, nullptr, 0, count, type, states, false);
 }
 
 void MetalRenderTarget::draw(const rhi::TargetState&  target,
@@ -374,25 +394,68 @@ void MetalRenderTarget::draw(const rhi::TargetState&  target,
     if (first > buffer.getSize() / sizeof(Vertex) || count > buffer.getSize() / sizeof(Vertex) - first)
         return;
     if (nativeMetalBuffer(buffer))
-        drawVertices(target, nullptr, &buffer, first, count, type, states, false);
+        (void)drawVertices(target, nullptr, &buffer, first, count, type, states, false);
 }
 
-void MetalRenderTarget::drawVertices(
-    const rhi::TargetState&  target,
-    const Vertex*            vertices,
-    const rhi::Buffer*       buffer,
-    std::size_t              first,
-    std::size_t              count,
-    PrimitiveType            type,
-    const rhi::DrawSettings& states,
-    bool                     clearing)
+bool MetalRenderTarget::drawVertices(
+    const rhi::TargetState&                      target,
+    const std::vector<rhi::VertexBufferBinding>& bindings,
+    std::size_t                                  first,
+    std::size_t                                  count,
+    std::size_t                                  instances,
+    PrimitiveType                                type,
+    const rhi::DrawSettings&                     states)
+{
+    const auto program = states.shader ? resourcePointerCast<MetalProgram>(states.shader) : m_impl->device->defaultProgram();
+    if (!program || !instances || !program->getOptions().transformOutputs.empty())
+        return false;
+    const auto&        options = program->getOptions();
+    rhi::ShaderOptions standard;
+    if (options.vertexBindings.empty())
+        standard.vertexBindings = {{sizeof(Vertex), 0}};
+    if (!validateVertexBindings(options.vertexBindings.empty() ? standard : options, bindings, first, count, instances))
+        return false;
+    for (const auto& binding : bindings)
+    {
+        const auto resource = resourcePointerCast<MetalBufferResource>(binding.buffer);
+        if (!resource || resource->device != m_impl->device)
+            return false;
+    }
+    return drawVertices(target, nullptr, nullptr, first, count, type, states, false, &bindings, instances);
+}
+
+bool MetalRenderTarget::prewarm(const rhi::TargetState&, const rhi::DrawSettings& states)
+{
+    const auto guard = m_impl->device->lock();
+    const auto program = states.shader ? resourcePointerCast<MetalProgram>(states.shader) : m_impl->device->defaultProgram();
+    if (!program || !program->getOptions().transformOutputs.empty())
+        return false;
+    const auto key = MetalTargetImpl::pipelineKey(m_impl->image->texture.pixelFormat,
+                                                  m_impl->depthFormat,
+                                                  m_impl->stencilFormat,
+                                                  m_impl->sampleCount,
+                                                  states);
+    return program->impl().pipeline(m_impl->device->impl(), key) != nil;
+}
+
+bool MetalRenderTarget::drawVertices(
+    const rhi::TargetState&                      target,
+    const Vertex*                                vertices,
+    const rhi::Buffer*                           buffer,
+    std::size_t                                  first,
+    std::size_t                                  count,
+    PrimitiveType                                type,
+    const rhi::DrawSettings&                     states,
+    bool                                         clearing,
+    const std::vector<rhi::VertexBufferBinding>* bindings,
+    std::size_t                                  instances)
 {
     using namespace MetalTargetImpl;
     auto&      impl  = *m_impl;
     const auto guard = impl.device->lock();
     if (!count || count > std::numeric_limits<std::uint32_t>::max() / sizeof(Vertex) ||
         first > std::numeric_limits<std::uint32_t>::max() - count)
-        return;
+        return false;
     @autoreleasepool
     {
         auto&      device   = impl.device->impl();
@@ -400,27 +463,20 @@ void MetalRenderTarget::drawVertices(
         const auto viewport = clearing ? IntRect({0, 0}, size) : target.viewport;
         const auto scissor  = target.scissor.findIntersection(IntRect({0, 0}, size));
         if (!scissor || viewport.size.x <= 0 || viewport.size.y <= 0)
-            return;
-        const auto program = states.shader ? std::dynamic_pointer_cast<MetalProgram>(states.shader)
+            return false;
+        const auto program = states.shader ? resourcePointerCast<MetalProgram>(states.shader)
                                            : impl.device->defaultProgram();
         if (!program)
-            return;
+            return false;
         auto                             parameters = prepareDraw(target, states, clearing);
-        const auto&                      blend      = states.blendMode;
-        const MetalPipelineKey           key{impl.image->texture.pixelFormat,
-                                   impl.depthFormat,
-                                   impl.stencilFormat,
-                                   impl.sampleCount,
-                                   factor(blend.colorSrcFactor),
-                                   factor(blend.colorDstFactor),
-                                   equation(blend.colorEquation),
-                                   factor(blend.alphaSrcFactor),
-                                   factor(blend.alphaDstFactor),
-                                   equation(blend.alphaEquation),
-                                   states.stencilMode.stencilOnly ? MTLColorWriteMaskNone : MTLColorWriteMaskAll};
-        const id<MTLRenderPipelineState> pipeline = program->impl().pipeline(device, key);
+        const MetalPipelineKey           key        = MetalTargetImpl::pipelineKey(impl.image->texture.pixelFormat,
+                                                                  impl.depthFormat,
+                                                                  impl.stencilFormat,
+                                                                  impl.sampleCount,
+                                                                  states);
+        const id<MTLRenderPipelineState> pipeline   = program->impl().pipeline(device, key);
         if (!pipeline)
-            return;
+            return false;
         const auto&                    stencil      = states.stencilMode;
         const auto                     stencilKey   = impl.settings.stencilBits
                                                           ? NSUInteger{1} | (NSUInteger{comparison(stencil.stencilComparison)} << 1) |
@@ -429,11 +485,11 @@ void MetalRenderTarget::drawVertices(
                                                           : NSUInteger{0};
         const id<MTLDepthStencilState> depthStencil = device.depthStencil(stencilKey);
         if (!depthStencil)
-            return;
+            return false;
         if (!device.rendering(this) && !device.render(this, impl.pass()))
         {
             err() << "Failed to begin a Metal render pass" << std::endl;
-            return;
+            return false;
         }
         const id<MTLRenderCommandEncoder> encoder = device.renderEncoder;
         [encoder setRenderPipelineState:pipeline];
@@ -450,8 +506,20 @@ void MetalRenderTarget::drawVertices(
                                                static_cast<NSUInteger>(scissor->size.x),
                                                static_cast<NSUInteger>(scissor->size.y)}];
         if (!program->impl().bind(device, encoder, parameters, states.texture.get(), impl.image->texture))
-            return;
-        if (buffer)
+            return false;
+        if (bindings)
+        {
+            const auto& options = program->getOptions();
+            for (std::size_t index = 0; index < bindings->size(); ++index)
+            {
+                const auto native = nativeMetalBuffer(*(*bindings)[index].buffer);
+                [encoder setVertexBuffer:native->buffer
+                                  offset:(*bindings)[index].offset
+                                 atIndex:options.vertexBindings.empty() ? metalVertexBufferIndex
+                                                                        : metalCustomVertexBufferIndex + index];
+            }
+        }
+        else if (buffer)
         {
             [encoder setVertexBuffer:nativeMetalBuffer(*buffer)->buffer offset:0 atIndex:metalVertexBufferIndex];
         }
@@ -466,7 +534,7 @@ void MetalRenderTarget::drawVertices(
             {
                 const auto stream = device.allocate(bytes, 16);
                 if (!stream.buffer)
-                    return;
+                    return false;
                 std::memcpy(stream.contents, vertices, bytes);
                 [encoder setVertexBuffer:stream.buffer offset:stream.offset atIndex:metalVertexBufferIndex];
             }
@@ -474,11 +542,11 @@ void MetalRenderTarget::drawVertices(
         if (type == PrimitiveType::TriangleFan)
         {
             if (count < 3)
-                return;
+                return false;
             const auto indexCount = (count - 2) * 3;
             const auto indices    = device.allocate(indexCount * sizeof(std::uint32_t), 4);
             if (!indices.buffer)
-                return;
+                return false;
             auto*      output = static_cast<std::uint32_t*>(indices.contents);
             const auto base   = static_cast<std::uint32_t>(first);
             for (std::uint32_t index = 1; index + 1 < count; ++index)
@@ -491,14 +559,18 @@ void MetalRenderTarget::drawVertices(
                                 indexCount:indexCount
                                  indexType:MTLIndexTypeUInt32
                                indexBuffer:indices.buffer
-                         indexBufferOffset:indices.offset];
+                         indexBufferOffset:indices.offset
+                             instanceCount:instances];
         }
         else
         {
-            [encoder drawPrimitives:primitive(type) vertexStart:first vertexCount:count];
+            [encoder drawPrimitives:primitive(type) vertexStart:first vertexCount:count instanceCount:instances];
         }
     }
+    colorWritten();
+    return true;
 }
+
 Vector2u MetalRenderTarget::getSize() const
 {
     return image()->size;

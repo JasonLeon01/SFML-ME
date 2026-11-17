@@ -132,7 +132,7 @@ bool RenderWindow::setActive(bool active)
 ////////////////////////////////////////////////////////////
 void RenderWindow::onCreate()
 {
-    if (auto* surface = dynamic_cast<priv::GraphicsWindowSurface*>(getSurface()))
+    if (auto* surface = priv::resourceCast<priv::GraphicsWindowSurface>(getSurface()))
         m_backend = std::static_pointer_cast<priv::RenderTargetBackend>(surface->surface->getRenderTarget());
     RenderTarget::initialize();
 }
@@ -141,7 +141,7 @@ void RenderWindow::onCreate()
 ////////////////////////////////////////////////////////////
 void RenderWindow::onResize()
 {
-    if (auto* surface = dynamic_cast<priv::GraphicsWindowSurface*>(getSurface()))
+    if (auto* surface = priv::resourceCast<priv::GraphicsWindowSurface>(getSurface()))
         surface->surface->resize(getSize());
     setView(getView());
 }

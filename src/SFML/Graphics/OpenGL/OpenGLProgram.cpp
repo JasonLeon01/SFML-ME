@@ -24,8 +24,10 @@
 
 #include <SFML/Graphics/GLCheck.hpp>
 #include <SFML/Graphics/GLExtensions.hpp>
+#include <SFML/Graphics/OpenGL/OpenGLBuffer.hpp>
 #include <SFML/Graphics/OpenGL/OpenGLProgram.hpp>
 #include <SFML/Graphics/OpenGL/OpenGLResource.hpp>
+#include <SFML/Graphics/OpenGL/OpenGLVertexArray.hpp>
 #include <SFML/Graphics/ShaderUniformType.hpp>
 
 #include <SFML/System/Err.hpp>
@@ -186,9 +188,12 @@ void OpenGLProgram::setUniform(const std::string& name, ShaderUniformType type, 
     }
 }
 
-bool OpenGLProgram::compile(std::string_view vertex, std::string_view geometry, std::string_view fragment)
+bool OpenGLProgram::compile(std::string_view          vertex,
+                            std::string_view          geometry,
+                            std::string_view          fragment,
+                            const rhi::ShaderOptions& options)
 {
-    if (vertex.empty() && geometry.empty() && fragment.empty())
+    if (!validateShaderOptions(options) || (vertex.empty() && geometry.empty() && fragment.empty()))
         return false;
 
     if (!geometry.empty() && !geometryAvailable())
@@ -202,7 +207,15 @@ bool OpenGLProgram::compile(std::string_view vertex, std::string_view geometry, 
 
     const bool programmable     = m_programmable;
     const auto fallbackVertex   = programmable && vertex.empty() ? builtIn(defaultVertex) : std::string{};
-    const auto fallbackFragment = programmable && fragment.empty() ? builtIn(defaultFragment) : std::string{};
+    const auto fallbackFragment = programmable && fragment.empty()
+                                      ? builtIn(options.transformOutputs.empty()
+                                                    ? defaultFragment
+                                                    : std::string_view("out vec4 "
+                                                                       "sf_FragColor; "
+                                                                       "void main() { "
+                                                                       "sf_FragColor = "
+                                                                       "vec4(0.0); }"))
+                                      : std::string{};
     if (!fallbackVertex.empty())
         vertex = fallbackVertex;
     if (!fallbackFragment.empty())
@@ -251,11 +264,35 @@ bool OpenGLProgram::compile(std::string_view vertex, std::string_view geometry, 
         return false;
     }
 
-    if (programmable)
+    if (programmable && options.vertexBindings.empty())
     {
         glCheck(glBindAttribLocation(program, 0, "sf_Vertex"));
         glCheck(glBindAttribLocation(program, 1, "sf_Color"));
         glCheck(glBindAttribLocation(program, 2, "sf_MultiTexCoord0"));
+    }
+    for (const auto& attribute : options.vertexAttributes)
+        glCheck(glBindAttribLocation(program, attribute.location, attribute.name.c_str()));
+    if (!options.transformOutputs.empty())
+    {
+        if (!glTransformFeedbackVaryings)
+        {
+            glDeleteProgram(program);
+            return false;
+        }
+        std::vector<const char*> outputs;
+        std::size_t              bytes = 0;
+        for (const auto& output : options.transformOutputs)
+        {
+            outputs.push_back(output.name.c_str());
+            bytes += output.components * sizeof(float);
+        }
+        if (bytes != options.transformStride)
+        {
+            glDeleteProgram(program);
+            return false;
+        }
+        glCheck(
+            glTransformFeedbackVaryings(program, static_cast<GLsizei>(outputs.size()), outputs.data(), GL_INTERLEAVED_ATTRIBS));
     }
     glCheck(glLinkProgram(program));
     GLint linked{};
@@ -274,12 +311,174 @@ bool OpenGLProgram::compile(std::string_view vertex, std::string_view geometry, 
     if (m_shaderProgram)
         glCheck(glDeleteProgram(m_shaderProgram));
 
+    m_options        = options;
     m_shaderProgram  = program;
     m_currentTexture = -1;
     m_textures.clear();
     m_uniforms.clear();
     glCheck(glFlush());
     return true;
+}
+
+std::vector<rhi::UniformInfo> OpenGLProgram::getActiveUniforms() const
+{
+    const TransientContextLock    lock;
+    std::vector<rhi::UniformInfo> result;
+    GLint                         count{};
+    GLint                         length{};
+    glGetProgramiv(m_shaderProgram, GL_ACTIVE_UNIFORMS, &count);
+    glGetProgramiv(m_shaderProgram, GL_ACTIVE_UNIFORM_MAX_LENGTH, &length);
+    std::vector<char> name(static_cast<std::size_t>(std::max(length, 1)));
+    for (GLint index = 0; index < count; ++index)
+    {
+        GLenum  type{};
+        GLint   size{};
+        GLsizei used{};
+        glGetActiveUniform(m_shaderProgram, static_cast<GLuint>(index), length, &used, &size, &type, name.data());
+        rhi::UniformInfo info{std::string(name.data(), static_cast<std::size_t>(used)),
+                              rhi::UniformType::Float,
+                              static_cast<std::size_t>(size),
+                              false};
+        if (info.name.size() > 3 && info.name.substr(info.name.size() - 3) == "[0]")
+            info.name.resize(info.name.size() - 3);
+        switch (type)
+        {
+            case GL_FLOAT:
+                break;
+            case GL_FLOAT_VEC2:
+                info.type = rhi::UniformType::Vec2;
+                break;
+            case GL_FLOAT_VEC3:
+                info.type = rhi::UniformType::Vec3;
+                break;
+            case GL_FLOAT_VEC4:
+                info.type = rhi::UniformType::Vec4;
+                break;
+            case GL_INT:
+            case GL_BOOL:
+                info.type = rhi::UniformType::Int;
+                break;
+            case GL_INT_VEC2:
+            case GL_BOOL_VEC2:
+                info.type = rhi::UniformType::IVec2;
+                break;
+            case GL_INT_VEC3:
+            case GL_BOOL_VEC3:
+                info.type = rhi::UniformType::IVec3;
+                break;
+            case GL_INT_VEC4:
+            case GL_BOOL_VEC4:
+                info.type = rhi::UniformType::IVec4;
+                break;
+            case GL_FLOAT_MAT3:
+                info.type = rhi::UniformType::Mat3;
+                break;
+            case GL_FLOAT_MAT4:
+                info.type = rhi::UniformType::Mat4;
+                break;
+            case GL_SAMPLER_2D:
+                info.type    = rhi::UniformType::Int;
+                info.sampler = true;
+                break;
+            default:
+                continue;
+        }
+        for (const auto& alias : m_options.uniformAliases)
+            if (alias.translatedName == info.name)
+            {
+                info.name = alias.name;
+                break;
+            }
+        result.push_back(std::move(info));
+    }
+    return result;
+}
+bool OpenGLProgram::bindVertexBuffers(const std::vector<rhi::VertexBufferBinding>& buffers,
+                                      std::size_t                                  first,
+                                      std::size_t                                  count,
+                                      std::size_t                                  instances) const
+{
+    const auto divisor = glVertexAttribDivisor ? glVertexAttribDivisor : glVertexAttribDivisorARB;
+    if (!validateVertexBindings(m_options, buffers, first, count, instances) || !divisor)
+        return false;
+    GLint maximum{};
+    glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &maximum);
+    return std::all_of(m_options.vertexAttributes.begin(),
+                       m_options.vertexAttributes.end(),
+                       [&](const auto& attribute)
+                       {
+                           if (attribute.binding >= buffers.size() ||
+                               attribute.location >= static_cast<unsigned int>(maximum) || !attribute.components ||
+                               attribute.components > 4)
+                               return false;
+                           const auto& input  = buffers[attribute.binding];
+                           const auto& layout = m_options.vertexBindings[attribute.binding];
+                           const auto* buffer = input.buffer ? resourceCast<const OpenGLBuffer>(input.buffer.get()) : nullptr;
+                           if (!buffer || !layout.stride ||
+                               layout.stride > static_cast<std::size_t>(std::numeric_limits<GLsizei>::max()) ||
+                               attribute.offset + attribute.components * sizeof(float) > layout.stride)
+                               return false;
+                           glBindBuffer(GL_ARRAY_BUFFER, buffer->nativeHandle());
+                           glEnableVertexAttribArray(attribute.location);
+                           glVertexAttribPointer(attribute.location,
+                                                 static_cast<GLint>(attribute.components),
+                                                 GL_FLOAT,
+                                                 GL_FALSE,
+                                                 static_cast<GLsizei>(layout.stride),
+                                                 reinterpret_cast<const void*>(input.offset + attribute.offset));
+                           divisor(attribute.location, layout.stepRate);
+                           return true;
+                       });
+}
+bool OpenGLProgram::transformVertices(const std::vector<rhi::VertexBufferBinding>& buffers,
+                                      std::size_t                                  count,
+                                      const rhi::Buffer&                           output)
+{
+    const TransientContextLock lock;
+    const auto*                buffer = resourceCast<const OpenGLBuffer>(&output);
+    if (!buffer || m_options.transformOutputs.empty() || !m_options.transformStride ||
+        count > output.getSize() / m_options.transformStride ||
+        count > static_cast<std::size_t>(std::numeric_limits<GLsizei>::max()) || !glBeginTransformFeedback ||
+        !glGenVertexArrays)
+        return false;
+    for (const auto& input : buffers)
+        if (input.buffer.get() == &output)
+            return false;
+    GLint oldArray{};
+    GLint oldBuffer{};
+    GLint oldProgram{};
+    GLint oldFeedback{};
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &oldArray);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &oldBuffer);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &oldProgram);
+    glGetIntegeri_v(GL_TRANSFORM_FEEDBACK_BUFFER_BINDING, 0, &oldFeedback);
+    const bool discard = glIsEnabled(GL_RASTERIZER_DISCARD) != GL_FALSE;
+    const auto array   = OpenGLVertexArray::acquire();
+    glBindVertexArray(array->handle);
+    const bool valid = bindVertexBuffers(buffers, 0, count, 1);
+    if (valid)
+    {
+        bind(this);
+        glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, buffer->nativeHandle());
+        glEnable(GL_RASTERIZER_DISCARD);
+        glBeginTransformFeedback(GL_POINTS);
+        glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(count));
+        glEndTransformFeedback();
+    }
+    if (!discard)
+        glDisable(GL_RASTERIZER_DISCARD);
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, static_cast<GLuint>(oldFeedback));
+    const auto divisor = glVertexAttribDivisor ? glVertexAttribDivisor : glVertexAttribDivisorARB;
+    for (const auto& attribute : m_options.vertexAttributes)
+    {
+        glDisableVertexAttribArray(attribute.location);
+        if (divisor)
+            divisor(attribute.location, 0);
+    }
+    glBindVertexArray(static_cast<GLuint>(oldArray));
+    glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(oldBuffer));
+    glUseProgram(static_cast<GLuint>(oldProgram));
+    return valid;
 }
 
 void OpenGLProgram::bindTextures() const
@@ -300,6 +499,13 @@ void OpenGLProgram::bindTextures() const
 
 int OpenGLProgram::getUniformLocation(const std::string& name)
 {
+    std::string lookup = name;
+    for (const auto& alias : m_options.uniformAliases)
+        if (alias.name == name)
+        {
+            lookup = alias.translatedName;
+            break;
+        }
     // Check the cache
     if (const auto it = m_uniforms.find(name); it != m_uniforms.end())
     {
@@ -308,7 +514,7 @@ int OpenGLProgram::getUniformLocation(const std::string& name)
     }
 
     // Not in cache, request the location from OpenGL
-    const int location = glGetUniformLocation(m_shaderProgram, name.c_str());
+    const int location = glGetUniformLocation(m_shaderProgram, lookup.c_str());
     m_uniforms.try_emplace(name, location);
 
     if (location == -1)
@@ -358,7 +564,7 @@ void OpenGLProgram::bind(const rhi::ShaderProgram* value)
 {
     const TransientContextLock lock;
     ensureExtensionsInit();
-    const auto* shader = dynamic_cast<const OpenGLProgram*>(value);
+    const auto* shader = resourceCast<const OpenGLProgram>(value);
     glCheck(glUseProgram(shader ? shader->m_shaderProgram : 0));
     if (shader)
     {

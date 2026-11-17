@@ -23,6 +23,7 @@
 ////////////////////////////////////////////////////////////
 
 #include <SFML/Graphics/GraphicsDevice.hpp>
+#include <SFML/Graphics/RHI/NativeResources.hpp>
 #include <SFML/Graphics/Vulkan/VulkanProgram.hpp>
 #include <SFML/Graphics/Vulkan/VulkanRHI.hpp>
 #include <SFML/Graphics/Vulkan/VulkanRenderTarget.hpp>
@@ -34,6 +35,15 @@
 
 namespace sf::priv
 {
+using VulkanTextureResource = NativeTexture<VulkanDevice, VulkanImage>;
+using VulkanBufferResource  = NativeBuffer<VulkanDevice, VulkanBuffer>;
+template <>
+bool VulkanBufferResource::upload(const void*, std::size_t, std::size_t);
+template <>
+bool VulkanBufferResource::copy(const rhi::Buffer&);
+template <>
+bool VulkanBufferResource::read(void*, std::size_t, std::size_t) const;
+
 template <>
 bool VulkanBufferResource::upload(const void* data, std::size_t size, std::size_t offset)
 {
@@ -62,7 +72,7 @@ bool VulkanBufferResource::read(void* data, std::size_t size, std::size_t offset
 template <>
 bool VulkanBufferResource::copy(const rhi::Buffer& source)
 {
-    const auto* other = dynamic_cast<const VulkanBufferResource*>(&source);
+    const auto* other = resourceCast<const VulkanBufferResource>(&source);
     if (!other || other->device != device || other->bytes != bytes)
         return false;
     const auto lock = device->lock();
@@ -75,6 +85,21 @@ bool VulkanBufferResource::copy(const rhi::Buffer& source)
     }
     return true;
 }
+template class NativeTexture<VulkanDevice, VulkanImage>;
+template class NativeBuffer<VulkanDevice, VulkanBuffer>;
+
+std::shared_ptr<VulkanImage> nativeVulkanImage(const rhi::Texture* texture)
+{
+    const auto* resource = resourceCast<const VulkanTextureResource>(texture);
+    return resource ? resource->image : nullptr;
+}
+
+std::shared_ptr<VulkanBuffer> nativeVulkanBuffer(const rhi::Buffer& buffer)
+{
+    const auto* resource = resourceCast<const VulkanBufferResource>(&buffer);
+    return resource ? resource->buffer : nullptr;
+}
+
 namespace
 {
 class VulkanRhi final :

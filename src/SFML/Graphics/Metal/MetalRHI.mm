@@ -24,7 +24,9 @@
 
 #include <SFML/Graphics/GraphicsDevice.hpp>
 #include <SFML/Graphics/Metal/MetalRHI.hpp>
+#include <SFML/Graphics/Metal/MetalReadback.hpp>
 #include <SFML/Graphics/Metal/MetalRenderTarget.hpp>
+#include <SFML/Graphics/Metal/MetalTimer.hpp>
 #include <SFML/Graphics/Metal/MetalWindowSurface.hpp>
 
 #include <SFML/Window/WindowImpl.hpp>
@@ -44,7 +46,7 @@ bool MetalBufferResource::upload(const void* data, std::size_t size, std::size_t
 template <>
 bool MetalBufferResource::copy(const rhi::Buffer& source)
 {
-    const auto* other = dynamic_cast<const MetalBufferResource*>(&source);
+    const auto* other = resourceCast<const MetalBufferResource>(&source);
     if (!other || other->device != device || other->bytes != bytes)
         return false;
     const auto lock = device->lock();
@@ -56,24 +58,80 @@ bool MetalBufferResource::read(void* data, std::size_t size, std::size_t offset)
     if (!data || !fits(size, offset))
         return false;
     const auto lock = device->lock();
-    if (!device->submit(true))
-        return false;
-    if (size)
-        std::memcpy(data, static_cast<const std::byte*>(buffer->buffer.contents) + offset, size);
-    return true;
+    if (!size)
+        return true;
+    @autoreleasepool
+    {
+        const id<MTLBuffer> staging = [device->impl().device
+            newBufferWithLength:size
+                        options:MTLResourceStorageModeShared];
+        if (!staging)
+            return false;
+        const id<MTLBlitCommandEncoder> encoder = device->impl().blit();
+        if (!encoder)
+            return false;
+        [encoder copyFromBuffer:buffer->buffer sourceOffset:offset toBuffer:staging destinationOffset:0 size:size];
+        if (!device->submit(true))
+            return false;
+        std::memcpy(data, staging.contents, size);
+        return true;
+    }
 }
 namespace
 {
 class MetalRhi final : public NativeDeviceResource<MetalDevice, MetalImage, MetalBuffer, MetalProgram, MetalRenderTarget>
 {
 public:
+    using NativeDeviceResource::createShader;
+
     explicit MetalRhi(std::shared_ptr<MetalDevice> value) :
         NativeDeviceResource(std::move(value), GraphicsBackend::Metal, MetalSettings{})
     {
     }
     [[nodiscard]] rhi::Capabilities capabilities() const override
     {
-        return {m_native->maximumTextureSize(), m_native->maximumSamples(), true, false};
+        return {m_native->maximumTextureSize(), m_native->maximumSamples(), true, false, true, true, true, true, true};
+    }
+    [[nodiscard]] rhi::CacheIdentity getCacheIdentity() const override
+    {
+        const auto guard = m_native->lock();
+        @autoreleasepool
+        {
+            const auto device = m_native->impl().device;
+            return {std::string(device.name.UTF8String) + ":" + std::to_string(device.registryID),
+                    NSProcessInfo.processInfo.operatingSystemVersionString.UTF8String};
+        }
+    }
+    std::shared_ptr<rhi::Texture> createFloatTexture(Vector2u size, const float* data) override
+    {
+        auto image = m_native->makeTexture(size, false, false, true);
+        if (!image || (data && !m_native->uploadFloats(*image, data, size, {})))
+            return {};
+        return std::make_shared<MetalTextureResource>(m_native, std::move(image), size, false);
+    }
+    std::shared_ptr<rhi::ShaderProgram> createShader(std::string_view          vertex,
+                                                     std::string_view          geometry,
+                                                     std::string_view          fragment,
+                                                     const rhi::ShaderOptions& options) override
+    {
+        return MetalProgram::create(*m_native, vertex, geometry, fragment, options);
+    }
+    bool transformVertices(const std::shared_ptr<rhi::ShaderProgram>&   shader,
+                           const std::vector<rhi::VertexBufferBinding>& bindings,
+                           std::size_t                                  count,
+                           const std::shared_ptr<rhi::Buffer>&          output) override
+    {
+        const auto program = resourcePointerCast<MetalProgram>(shader);
+        return program && output && program->transformVertices(*m_native, bindings, count, *output);
+    }
+    std::shared_ptr<rhi::Readback> readTextureAsync(const std::shared_ptr<rhi::Texture>& texture, IntRect area) override
+    {
+        const auto resource = resourcePointerCast<MetalTextureResource>(texture);
+        return resource && resource->device == m_native ? MetalReadback::create(m_native, *resource->image, area) : nullptr;
+    }
+    std::shared_ptr<rhi::Timer> beginTimer() override
+    {
+        return MetalTimer::create(m_native);
     }
     std::unique_ptr<rhi::WindowSurface> createSurface(const WindowImpl& owner, unsigned int, const ContextSettings& settings) override
     {

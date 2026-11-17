@@ -27,9 +27,11 @@
 #include <SFML/Graphics/GraphicsDevice.hpp>
 #include <SFML/Graphics/OpenGL/OpenGLBuffer.hpp>
 #include <SFML/Graphics/OpenGL/OpenGLProgram.hpp>
+#include <SFML/Graphics/OpenGL/OpenGLReadback.hpp>
 #include <SFML/Graphics/OpenGL/OpenGLRenderTarget.hpp>
 #include <SFML/Graphics/OpenGL/OpenGLResource.hpp>
 #include <SFML/Graphics/OpenGL/OpenGLTexture.hpp>
+#include <SFML/Graphics/OpenGL/OpenGLTimer.hpp>
 #include <SFML/Graphics/RenderTextureImplFBO.hpp>
 
 #include <SFML/Window/GlContext.hpp>
@@ -42,7 +44,7 @@ void bindOpenGLTexture(const rhi::Texture* texture, CoordinateType type, bool pr
 {
     const OpenGLResource::TransientContextLock lock;
     ensureExtensionsInit();
-    const auto* resource = dynamic_cast<const OpenGLTexture*>(texture);
+    const auto* resource = resourceCast<const OpenGLTexture>(texture);
     glCheck(glBindTexture(GL_TEXTURE_2D, resource ? resource->nativeHandle() : 0));
 #ifndef SFML_OPENGL_ES
     if (!programmable)
@@ -98,7 +100,7 @@ public:
 #endif
     bool copyTo(rhi::Texture& destination, Vector2u offset) const override
     {
-        auto* texture = dynamic_cast<OpenGLTexture*>(&destination);
+        auto* texture = resourceCast<OpenGLTexture>(&destination);
         return texture && target->setActive(true) && texture->copyWindow(target->getSize(), offset);
     }
     std::shared_ptr<priv::WindowSurface> surface;
@@ -127,7 +129,53 @@ public:
         return {OpenGLTexture::maximumSize(),
                 RenderTextureImplFBO::isAvailable() ? RenderTextureImplFBO::getMaximumAntiAliasingLevel() : 0,
                 true,
-                OpenGLProgram::geometryAvailable()};
+                OpenGLProgram::geometryAvailable(),
+                glBeginTransformFeedback != nullptr,
+                glDrawArraysInstanced && (glVertexAttribDivisor || glVertexAttribDivisorARB),
+                true,
+                glFenceSync && glMapBufferRange,
+                OpenGLTimer::isAvailable()};
+    }
+    [[nodiscard]] rhi::CacheIdentity getCacheIdentity() const override
+    {
+        const OpenGLResource::TransientContextLock lock;
+        ensureExtensionsInit();
+        const auto value = [](GLenum name)
+        {
+            const auto* text = glGetString(name);
+            return text ? std::string(reinterpret_cast<const char*>(text)) : std::string{};
+        };
+        return {value(GL_VENDOR) + ":" + value(GL_RENDERER), value(GL_VERSION) + ":" + value(GL_SHADING_LANGUAGE_VERSION)};
+    }
+    std::shared_ptr<rhi::Texture> createFloatTexture(Vector2u size, const float* data) override
+    {
+        auto texture = std::make_shared<OpenGLTexture>(m_context);
+        return texture->resizeFloat(size, data) ? texture : nullptr;
+    }
+    std::shared_ptr<rhi::ShaderProgram> createShader(std::string_view          vertex,
+                                                     std::string_view          geometry,
+                                                     std::string_view          fragment,
+                                                     const rhi::ShaderOptions& options) override
+    {
+        auto shader = std::make_shared<OpenGLProgram>(m_context, m_programmable);
+        return shader->compile(vertex, geometry, fragment, options) ? shader : nullptr;
+    }
+    bool transformVertices(const std::shared_ptr<rhi::ShaderProgram>&   shader,
+                           const std::vector<rhi::VertexBufferBinding>& bindings,
+                           std::size_t                                  count,
+                           const std::shared_ptr<rhi::Buffer>&          output) override
+    {
+        auto program = resourcePointerCast<OpenGLProgram>(shader);
+        return program && output && program->transformVertices(bindings, count, *output);
+    }
+    std::shared_ptr<rhi::Readback> readTextureAsync(const std::shared_ptr<rhi::Texture>& texture, IntRect area) override
+    {
+        auto value = resourcePointerCast<OpenGLTexture>(texture);
+        return value ? OpenGLReadback::create(m_context, *value, area) : nullptr;
+    }
+    std::shared_ptr<rhi::Timer> beginTimer() override
+    {
+        return OpenGLTimer::create(m_context);
     }
     std::shared_ptr<rhi::Texture> createTexture(Vector2u size, bool srgb) override
     {
@@ -149,7 +197,7 @@ public:
     std::shared_ptr<rhi::RenderTarget> createRenderTarget(std::shared_ptr<rhi::Texture> color,
                                                           const ContextSettings&        settings) override
     {
-        const auto texture = std::dynamic_pointer_cast<OpenGLTexture>(color);
+        const auto texture = resourcePointerCast<OpenGLTexture>(color);
         return texture && acceptsSettings(settings) ? OpenGLRenderTarget::create(texture, settings, m_programmable) : nullptr;
     }
     std::unique_ptr<rhi::WindowSurface> createSurface(const WindowImpl& owner, unsigned int bits, const ContextSettings& settings) override
@@ -188,7 +236,7 @@ public:
     }
     bool copyWindow(const Window& window, rhi::Texture& value, Vector2u offset) override
     {
-        auto* texture = dynamic_cast<OpenGLTexture*>(&value);
+        auto* texture = resourceCast<OpenGLTexture>(&value);
         return texture && window.setActive(true) && texture->copyWindow(window.getSize(), offset);
     }
 

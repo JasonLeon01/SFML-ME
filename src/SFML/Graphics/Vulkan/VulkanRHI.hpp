@@ -23,26 +23,19 @@
 ////////////////////////////////////////////////////////////
 
 #pragma once
-#include <SFML/Graphics/RHI/NativeResources.hpp>
-#include <SFML/Graphics/Vulkan/VulkanDevice.hpp>
+#include <memory>
+
+namespace sf::rhi
+{
+class Texture;
+class Buffer;
+} // namespace sf::rhi
+
 namespace sf::priv
 {
-using VulkanTextureResource = NativeTexture<VulkanDevice, VulkanImage>;
-using VulkanBufferResource  = NativeBuffer<VulkanDevice, VulkanBuffer>;
-template <>
-bool VulkanBufferResource::upload(const void*, std::size_t, std::size_t);
-template <>
-bool VulkanBufferResource::copy(const rhi::Buffer&);
-template <>
-bool                                VulkanBufferResource::read(void*, std::size_t, std::size_t) const;
-inline std::shared_ptr<VulkanImage> nativeVulkanImage(const rhi::Texture* texture)
-{
-    const auto* resource = dynamic_cast<const VulkanTextureResource*>(texture);
-    return resource ? resource->image : nullptr;
-}
-inline std::shared_ptr<VulkanBuffer> nativeVulkanBuffer(const rhi::Buffer& buffer)
-{
-    const auto* resource = dynamic_cast<const VulkanBufferResource*>(&buffer);
-    return resource ? resource->buffer : nullptr;
-}
+struct VulkanImage;
+struct VulkanBuffer;
+
+std::shared_ptr<VulkanImage>  nativeVulkanImage(const rhi::Texture* texture);
+std::shared_ptr<VulkanBuffer> nativeVulkanBuffer(const rhi::Buffer& buffer);
 } // namespace sf::priv

@@ -29,6 +29,7 @@
 #include <SFML/System/Vector2.hpp>
 
 #include <array>
+#include <optional>
 #include <string_view>
 namespace sf::priv::WebInput
 {
@@ -38,6 +39,11 @@ struct KeyMapping
     Keyboard::Key      key;
     Keyboard::Scancode scan;
 };
+struct TouchPoint
+{
+    std::optional<int> identifier;
+    Vector2i           position;
+};
 const KeyMapping*                                findCode(std::string_view code);
 const KeyMapping*                                findKey(Keyboard::Key key);
 const KeyMapping*                                findScan(Keyboard::Scancode scan);
@@ -45,4 +51,5 @@ extern std::array<bool, Keyboard::KeyCount>      keys;
 extern std::array<bool, Keyboard::ScancodeCount> scans;
 extern std::array<bool, Mouse::ButtonCount>      buttons;
 extern Vector2i                                  mouse;
+extern std::array<TouchPoint, 32>                touches;
 } // namespace sf::priv::WebInput

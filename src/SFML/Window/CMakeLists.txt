@@ -83,6 +83,7 @@ if(SFML_OS_EMSCRIPTEN)
         ${SRCROOT}/Emscripten/Platform.cpp
         ${SRCROOT}/Emscripten/CursorImpl.hpp
         ${SRCROOT}/Emscripten/JoystickImpl.hpp
+        ${SRCROOT}/Emscripten/JoystickImpl.cpp
         ${SRCROOT}/Emscripten/SensorImpl.hpp
         ${SRCROOT}/Emscripten/ClipboardImpl.hpp
     )

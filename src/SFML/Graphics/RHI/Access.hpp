@@ -25,6 +25,8 @@
 #pragma once
 
 #include <SFML/Graphics/RHI/Resource.hpp>
+#include <SFML/Graphics/RenderTarget.hpp>
+#include <SFML/Graphics/RenderTargetBackend.hpp>
 #include <SFML/Graphics/Shader.hpp>
 #include <SFML/Graphics/Texture.hpp>
 #include <SFML/Graphics/VertexBuffer.hpp>
@@ -48,6 +50,15 @@ public:
     {
         value.refreshSamplers();
         return value.m_resource;
+    }
+    static void shader(Shader& value, std::shared_ptr<rhi::ShaderProgram> program)
+    {
+        value.m_samplers.clear();
+        value.m_resource = std::move(program);
+    }
+    static std::shared_ptr<rhi::RenderTarget> target(RenderTarget& value)
+    {
+        return value.m_backend;
     }
     static const WindowImpl* window(const WindowBase& value)
     {

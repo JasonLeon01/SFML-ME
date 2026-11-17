@@ -16,6 +16,7 @@ set(SRC
     ${SRCROOT}/RHI/Resource.cpp
     ${SRCROOT}/RHI/Resource.hpp
     ${SRCROOT}/RHI/Access.hpp
+    ${SRCROOT}/RHI/Access.cpp
     ${SRCROOT}/RHI/NativeResources.hpp
     ${SRCROOT}/GraphicsDevice.hpp
     ${SRCROOT}/RenderTargetBackend.hpp
@@ -101,6 +102,8 @@ if(SFML_BUILD_DIRECTX_BACKEND)
     target_compile_definitions(sfml-graphics PUBLIC SFML_RENDER_DIRECTX)
     target_link_libraries(sfml-graphics PRIVATE d3d11 dxgi dxguid)
     target_sources(sfml-graphics PRIVATE
+        ${SRCROOT}/DirectX/DirectXReadback.cpp
+        ${SRCROOT}/DirectX/DirectXTimer.cpp
         ${SRCROOT}/DirectX/DirectXRHI.cpp
         ${SRCROOT}/DirectX/DirectXRHI.hpp
         ${SRCROOT}/DirectX/DirectXDevice.cpp
@@ -126,6 +129,10 @@ if(SFML_BUILD_METAL_BACKEND)
         ${SRCROOT}/Metal/MetalDevice.hpp
         ${SRCROOT}/Metal/MetalRHI.mm
         ${SRCROOT}/Metal/MetalRHI.hpp
+        ${SRCROOT}/Metal/MetalReadback.hpp
+        ${SRCROOT}/Metal/MetalReadback.mm
+        ${SRCROOT}/Metal/MetalTimer.hpp
+        ${SRCROOT}/Metal/MetalTimer.mm
         ${SRCROOT}/Metal/MetalDevice.mm
         ${SRCROOT}/Metal/MetalObjects.hpp
         ${SRCROOT}/Metal/MetalProgram.hpp
@@ -155,6 +162,9 @@ if(SFML_BUILD_OPENGL_BACKEND)
         ${SRCROOT}/OpenGL/OpenGLRenderTarget.cpp
         ${SRCROOT}/OpenGL/OpenGLRenderTarget.hpp
         ${SRCROOT}/OpenGL/OpenGLResource.hpp
+        ${SRCROOT}/OpenGL/OpenGLVertexArray.cpp
+        ${SRCROOT}/OpenGL/OpenGLReadback.cpp
+        ${SRCROOT}/OpenGL/OpenGLTimer.cpp
         ${SRCROOT}/OpenGL/OpenGLRHI.cpp
         ${SRCROOT}/OpenGL/OpenGLTexture.cpp
         ${SRCROOT}/OpenGL/OpenGLTexture.hpp

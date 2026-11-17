@@ -43,36 +43,47 @@ public:
 
     [[nodiscard]] Vector2u getSize() const override;
     void clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
-    void                                             draw(const rhi::TargetState&  target,
-                                                          const Vertex*            vertices,
-                                                          std::size_t              count,
-                                                          PrimitiveType            type,
-                                                          const rhi::DrawSettings& states) override;
-    void                                             draw(const rhi::TargetState&  target,
-                                                          const rhi::Buffer&       buffer,
-                                                          std::size_t              first,
-                                                          std::size_t              count,
-                                                          PrimitiveType            type,
-                                                          const rhi::DrawSettings& states) override;
-    bool                                             setActive(bool active) override;
-    void                                             viewChanged() override;
-    [[nodiscard]] bool                               resize(Vector2u size);
-    void                                             finish() override;
-    [[nodiscard]] const ContextSettings&             settings() const override;
+    void               draw(const rhi::TargetState&  target,
+                            const Vertex*            vertices,
+                            std::size_t              count,
+                            PrimitiveType            type,
+                            const rhi::DrawSettings& states) override;
+    void               draw(const rhi::TargetState&  target,
+                            const rhi::Buffer&       buffer,
+                            std::size_t              first,
+                            std::size_t              count,
+                            PrimitiveType            type,
+                            const rhi::DrawSettings& states) override;
+    [[nodiscard]] bool drawVertices(
+        const rhi::TargetState&                      target,
+        const std::vector<rhi::VertexBufferBinding>& bindings,
+        std::size_t                                  first,
+        std::size_t                                  count,
+        std::size_t                                  instances,
+        PrimitiveType                                type,
+        const rhi::DrawSettings&                     states) override;
+    [[nodiscard]] bool                   prewarm(const rhi::TargetState&, const rhi::DrawSettings& states) override;
+    bool                                 setActive(bool active) override;
+    void                                 viewChanged() override;
+    [[nodiscard]] bool                   resize(Vector2u size);
+    void                                 finish() override;
+    [[nodiscard]] const ContextSettings& settings() const override;
     [[nodiscard]] const std::shared_ptr<MetalImage>& image() const;
     [[nodiscard]] static unsigned int                getMaximumAntiAliasingLevel(const MetalDevice& device);
 
 private:
     MetalRenderTarget(std::shared_ptr<MetalDevice> device, const ContextSettings& settings);
     [[nodiscard]] bool    attach(const std::shared_ptr<MetalImage>& image);
-    void                  drawVertices(const rhi::TargetState&  target,
-                                       const Vertex*            vertices,
-                                       const rhi::Buffer*       buffer,
-                                       std::size_t              first,
-                                       std::size_t              count,
-                                       PrimitiveType            type,
-                                       const rhi::DrawSettings& states,
-                                       bool                     clearing);
+    bool                  drawVertices(const rhi::TargetState&                      target,
+                                       const Vertex*                                vertices,
+                                       const rhi::Buffer*                           buffer,
+                                       std::size_t                                  first,
+                                       std::size_t                                  count,
+                                       PrimitiveType                                type,
+                                       const rhi::DrawSettings&                     states,
+                                       bool                                         clearing,
+                                       const std::vector<rhi::VertexBufferBinding>* bindings  = nullptr,
+                                       std::size_t                                  instances = 1);
     std::unique_ptr<Impl> m_impl;
 };
 } // namespace sf::priv

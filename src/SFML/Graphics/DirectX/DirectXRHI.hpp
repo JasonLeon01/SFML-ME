@@ -37,12 +37,12 @@ template <>
 bool                                 DirectXBufferResource::read(void*, std::size_t, std::size_t) const;
 inline std::shared_ptr<DirectXImage> nativeDirectXImage(const rhi::Texture* texture)
 {
-    const auto* resource = dynamic_cast<const DirectXTextureResource*>(texture);
+    const auto* resource = resourceCast<const DirectXTextureResource>(texture);
     return resource ? resource->image : nullptr;
 }
 inline std::shared_ptr<DirectXBuffer> nativeDirectXBuffer(const rhi::Buffer& buffer)
 {
-    const auto* resource = dynamic_cast<const DirectXBufferResource*>(&buffer);
+    const auto* resource = resourceCast<const DirectXBufferResource>(&buffer);
     return resource ? resource->buffer : nullptr;
 }
 } // namespace sf::priv

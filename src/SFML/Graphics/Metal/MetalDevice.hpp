@@ -60,9 +60,10 @@ public:
     [[nodiscard]] unsigned int                           maximumTextureSize() const;
     [[nodiscard]] unsigned int                           maximumSamples() const;
 
-    [[nodiscard]] std::shared_ptr<MetalImage>  makeTexture(Vector2u size, bool sRgb, bool mipmapped = true);
+    [[nodiscard]] std::shared_ptr<MetalImage> makeTexture(Vector2u size, bool sRgb, bool mipmapped = true, bool floating = false);
     [[nodiscard]] std::shared_ptr<MetalBuffer> makeBuffer(std::size_t bytes);
     [[nodiscard]] bool  upload(const MetalImage& image, const std::uint8_t* pixels, Vector2u size, Vector2u offset);
+    [[nodiscard]] bool  uploadFloats(const MetalImage& image, const float* pixels, Vector2u size, Vector2u offset);
     [[nodiscard]] bool  copy(const MetalImage& source, const MetalImage& destination, Vector2u offset);
     [[nodiscard]] Image readImage(const MetalImage& image);
     [[nodiscard]] bool  generateMipmap(const MetalImage& image);
@@ -77,6 +78,7 @@ public:
 
 private:
     MetalDevice();
+    [[nodiscard]] bool uploadPixels(const MetalImage& image, const void* pixels, Vector2u size, Vector2u offset, std::size_t pixelSize);
     mutable std::recursive_mutex m_mutex;
     std::unique_ptr<Impl>        m_impl;
 };

@@ -36,7 +36,10 @@ public:
     void colorWritten()
     {
         if (m_colorTexture)
+        {
             m_colorTexture->invalidateMipmap();
+            static_cast<TextureResource&>(*m_colorTexture).setGlslFlipped(true);
+        }
     }
     rhi::CommandContext& commands() override
     {

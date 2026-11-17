@@ -29,6 +29,10 @@ namespace sf::priv
 class OpenGLBuffer final : public BufferResource
 {
 public:
+    [[nodiscard]] const void* implementationType() const override
+    {
+        return resourceType<OpenGLBuffer>();
+    }
     explicit OpenGLBuffer(std::shared_ptr<void> context) : m_context(std::move(context))
     {
     }

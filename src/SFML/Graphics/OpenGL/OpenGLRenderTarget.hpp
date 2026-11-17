@@ -61,22 +61,31 @@ public:
     ~OpenGLRenderTarget() override;
 
     void clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
-    void draw(const rhi::TargetState&  target,
-              const Vertex*            vertices,
-              std::size_t              count,
-              PrimitiveType            type,
-              const rhi::DrawSettings& states) override;
-    void draw(const rhi::TargetState&  target,
-              const rhi::Buffer&       buffer,
-              std::size_t              first,
-              std::size_t              count,
-              PrimitiveType            type,
-              const rhi::DrawSettings& states) override;
-    bool setActive(bool active) override;
-    void viewChanged() override;
-    void pushGLStates(const rhi::TargetState& target) override;
-    void popGLStates(const rhi::TargetState& target) override;
-    void resetGLStates(const rhi::TargetState& target) override;
+    void               draw(const rhi::TargetState&  target,
+                            const Vertex*            vertices,
+                            std::size_t              count,
+                            PrimitiveType            type,
+                            const rhi::DrawSettings& states) override;
+    void               draw(const rhi::TargetState&  target,
+                            const rhi::Buffer&       buffer,
+                            std::size_t              first,
+                            std::size_t              count,
+                            PrimitiveType            type,
+                            const rhi::DrawSettings& states) override;
+    [[nodiscard]] bool drawVertices(
+        const rhi::TargetState&                      target,
+        const std::vector<rhi::VertexBufferBinding>& buffers,
+        std::size_t                                  first,
+        std::size_t                                  count,
+        std::size_t                                  instances,
+        PrimitiveType                                type,
+        const rhi::DrawSettings&                     states) override;
+    [[nodiscard]] bool prewarm(const rhi::TargetState& target, const rhi::DrawSettings& states) override;
+    bool               setActive(bool active) override;
+    void               viewChanged() override;
+    void               pushGLStates(const rhi::TargetState& target) override;
+    void               popGLStates(const rhi::TargetState& target) override;
+    void               resetGLStates(const rhi::TargetState& target) override;
 
 private:
     [[nodiscard]] bool isActive() const;
@@ -88,13 +97,15 @@ private:
     void setupDraw(const rhi::TargetState& target, bool useVertexCache, const rhi::DrawSettings& states);
     void drawPrimitives(PrimitiveType type, std::size_t first, std::size_t count);
     void cleanupDraw(const rhi::DrawSettings& states);
-    void drawProgrammable(const rhi::TargetState&  target,
-                          const Vertex*            vertices,
-                          unsigned int             buffer,
-                          std::size_t              first,
-                          std::size_t              count,
-                          PrimitiveType            type,
-                          const rhi::DrawSettings& states);
+    void drawProgrammable(const rhi::TargetState&                      target,
+                          const Vertex*                                vertices,
+                          unsigned int                                 buffer,
+                          std::size_t                                  first,
+                          std::size_t                                  count,
+                          PrimitiveType                                type,
+                          const rhi::DrawSettings&                     states,
+                          const std::vector<rhi::VertexBufferBinding>* bindings  = nullptr,
+                          std::size_t                                  instances = 1);
 
     Vector2u                           m_size;
     ContextSettings                    m_settings;

@@ -56,14 +56,20 @@ public:
 private:
     void                   processEvents() override;
     void                   installCallbacks(bool enabled);
+    void                   cancelTouches();
+    void                   updateFocus();
     static bool            keyboardCallback(int type, const EmscriptenKeyboardEvent* event, void* user);
     static bool            mouseCallback(int type, const EmscriptenMouseEvent* event, void* user);
     static bool            wheelCallback(int type, const EmscriptenWheelEvent* event, void* user);
     static bool            focusCallback(int type, const EmscriptenFocusEvent* event, void* user);
+    static bool            touchCallback(int type, const EmscriptenTouchEvent* event, void* user);
+    static bool            visibilityCallback(int type, const EmscriptenVisibilityChangeEvent* event, void* user);
+    [[nodiscard]] Vector2i canvasPosition(int clientX, int clientY) const;
     [[nodiscard]] Vector2i mousePosition(const EmscriptenMouseEvent& event) const;
     Vector2u               m_size;
     bool                   m_keyRepeat{true};
     bool                   m_cursorVisible{true};
+    bool                   m_focused{};
     bool                   m_lost{};
     std::string            m_cursor{"default"};
 };
