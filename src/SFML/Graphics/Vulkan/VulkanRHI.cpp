@@ -31,6 +31,9 @@
 
 #include <SFML/Window/WindowImpl.hpp>
 
+#include <iomanip>
+#include <sstream>
+
 #include <cstring>
 
 namespace sf::priv
@@ -115,7 +118,59 @@ public:
         return {m_native->context()->properties.limits.maxImageDimension2D,
                 VulkanRenderTarget::getMaximumAntiAliasingLevel(*m_native),
                 true,
-                m_native->context()->features.geometryShader != VK_FALSE};
+                m_native->context()->features.geometryShader != VK_FALSE,
+                m_native->context()->features.vertexPipelineStoresAndAtomics != VK_FALSE,
+                true,
+                m_native->supportsFloatTextures()};
+    }
+    [[nodiscard]] rhi::CacheIdentity getCacheIdentity() const override
+    {
+        const auto&        properties = m_native->context()->properties;
+        std::ostringstream device;
+        std::ostringstream driver;
+        device << std::hex << properties.vendorID << ':' << properties.deviceID;
+        driver << std::hex << properties.driverVersion << ':' << m_native->context()->apiVersion << ':'
+               << std::setfill('0');
+        for (const auto byte : properties.pipelineCacheUUID)
+            driver << std::setw(2) << static_cast<unsigned int>(byte);
+        return {device.str(), driver.str()};
+    }
+    std::shared_ptr<rhi::Texture> createFloatTexture(Vector2u size, const float* data) override
+    {
+        const auto limit = m_native->context()->properties.limits.maxImageDimension2D;
+        if (!size.x || !size.y || size.x > limit || size.y > limit || !m_native->supportsFloatTextures())
+            return {};
+        const auto lock  = m_native->lock();
+        auto       image = m_native->makeImage(size,
+                                         VK_FORMAT_R32G32B32A32_SFLOAT,
+                                         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                         VK_IMAGE_ASPECT_COLOR_BIT);
+        if (!image || (data && !m_native->uploadFloats(image, data, size, {})))
+            return {};
+        return std::make_shared<VulkanTextureResource>(m_native, std::move(image), size, false);
+    }
+    using NativeDeviceResource::createShader;
+    std::shared_ptr<rhi::ShaderProgram> createShader(std::string_view          vertex,
+                                                     std::string_view          geometry,
+                                                     std::string_view          fragment,
+                                                     const rhi::ShaderOptions& options) override
+    {
+        return VulkanProgram::create(*m_native, vertex, geometry, fragment, options);
+    }
+    bool transformVertices(const std::shared_ptr<rhi::ShaderProgram>&   shader,
+                           const std::vector<rhi::VertexBufferBinding>& inputs,
+                           std::size_t                                  count,
+                           const std::shared_ptr<rhi::Buffer>&          output) override
+    {
+        const auto program = resourcePointerCast<VulkanProgram>(shader);
+        if (!program || !output)
+            return false;
+        const auto lock = m_native->lock();
+        if (!program->transformVertices(*m_native, inputs, count, *output))
+            return false;
+        m_native->retain(program);
+        return true;
     }
     std::unique_ptr<rhi::WindowSurface> createSurface(const WindowImpl& owner, unsigned int, const ContextSettings& settings) override
     {

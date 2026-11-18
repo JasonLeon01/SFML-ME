@@ -81,7 +81,17 @@ auto uploadFloatImage(DeviceType&                       device,
     return device.uploadFloats(*image, pixels, size, offset);
 }
 template <typename DeviceType, typename ImageType>
-bool uploadFloatImage(DeviceType&, const std::shared_ptr<ImageType>&, const float*, Vector2u, Vector2u, long)
+auto uploadFloatImage(DeviceType&                       device,
+                      const std::shared_ptr<ImageType>& image,
+                      const float*                      pixels,
+                      Vector2u                          size,
+                      Vector2u                          offset,
+                      long) -> decltype(device.uploadFloats(image, pixels, size, offset))
+{
+    return device.uploadFloats(image, pixels, size, offset);
+}
+template <typename DeviceType, typename ImageType>
+bool uploadFloatImage(DeviceType&, const std::shared_ptr<ImageType>&, const float*, Vector2u, Vector2u, ...)
 {
     return false;
 }

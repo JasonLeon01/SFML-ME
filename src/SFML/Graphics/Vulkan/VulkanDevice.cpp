@@ -372,7 +372,8 @@ std::shared_ptr<VulkanDevice> VulkanDevice::create(const VulkanSettings& request
     vk.GetPhysicalDeviceMemoryProperties(context->physicalDevice, &context->memory);
     VkPhysicalDeviceFeatures available{};
     vk.GetPhysicalDeviceFeatures(context->physicalDevice, &available);
-    context->features.geometryShader = available.geometryShader;
+    context->features.geometryShader                 = available.geometryShader;
+    context->features.vertexPipelineStoresAndAtomics = available.vertexPipelineStoresAndAtomics;
 
     const float                          priority = 1.f;
     std::vector<VkDeviceQueueCreateInfo> queueInfos;
@@ -723,10 +724,39 @@ void VulkanDevice::transition(VulkanImage& image, VkImageLayout layout)
 
 bool VulkanDevice::upload(const std::shared_ptr<VulkanImage>& image, const std::uint8_t* pixels, Vector2u size, Vector2u offset)
 {
+    return image->format != VK_FORMAT_R32G32B32A32_SFLOAT && uploadPixels(image, pixels, size, offset, 4);
+}
+
+bool VulkanDevice::supportsFloatTextures() const
+{
+    VkImageFormatProperties properties{};
+    return context()->vk.GetPhysicalDeviceImageFormatProperties(context()->physicalDevice,
+                                                                VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                                VK_IMAGE_TYPE_2D,
+                                                                VK_IMAGE_TILING_OPTIMAL,
+                                                                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                                                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                                                0,
+                                                                &properties) == VK_SUCCESS;
+}
+
+bool VulkanDevice::uploadFloats(const std::shared_ptr<VulkanImage>& image, const float* pixels, Vector2u size, Vector2u offset)
+{
+    return image->format == VK_FORMAT_R32G32B32A32_SFLOAT && uploadPixels(image, pixels, size, offset, 4 * sizeof(float));
+}
+
+bool VulkanDevice::uploadPixels(const std::shared_ptr<VulkanImage>& image,
+                                const void*                         pixels,
+                                Vector2u                            size,
+                                Vector2u                            offset,
+                                std::size_t                         bytesPerPixel)
+{
+    if (!pixels || !size.x || !size.y || size.x > std::numeric_limits<std::size_t>::max() / bytesPerPixel / size.y)
+        return false;
     const VkCommandBuffer command = commands();
     if (!command)
         return false;
-    const auto buffer = stage(pixels, static_cast<std::size_t>(size.x) * size.y * 4);
+    const auto buffer = stage(pixels, static_cast<std::size_t>(size.x) * size.y * bytesPerPixel);
     if (!buffer.buffer)
         return false;
 
@@ -746,6 +776,8 @@ bool VulkanDevice::copy(const std::shared_ptr<VulkanImage>& source,
                         const std::shared_ptr<VulkanImage>& destination,
                         Vector2u                            offset)
 {
+    if ((source->format == VK_FORMAT_R32G32B32A32_SFLOAT) != (destination->format == VK_FORMAT_R32G32B32A32_SFLOAT))
+        return false;
     if (source == destination)
         return true;
     const VkCommandBuffer command = commands();
@@ -769,6 +801,8 @@ bool VulkanDevice::copy(const std::shared_ptr<VulkanImage>& source,
 
 Image VulkanDevice::readImage(const std::shared_ptr<VulkanImage>& image)
 {
+    if (image->format == VK_FORMAT_R32G32B32A32_SFLOAT)
+        return {};
     const auto            buffer  = makeBuffer(static_cast<VkDeviceSize>(image->size.x) * image->size.y * 4,
                                    VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     const VkCommandBuffer command = commands();
@@ -792,6 +826,8 @@ Image VulkanDevice::readImage(const std::shared_ptr<VulkanImage>& image)
 
 bool VulkanDevice::generateMipmap(const std::shared_ptr<VulkanImage>& image)
 {
+    if (image->format == VK_FORMAT_R32G32B32A32_SFLOAT)
+        return false;
     using namespace VulkanDeviceImpl;
     const auto&        ctx = *context();
     VkFormatProperties properties{};
@@ -860,7 +896,7 @@ VkSampler VulkanDevice::sampler(bool smooth, bool repeated, bool mipmapped)
         VkSamplerCreateInfo info{};
         info.sType     = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         info.magFilter = info.minFilter = smooth ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
-        info.mipmapMode                 = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        info.mipmapMode                 = smooth ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
         info.addressModeU = info.addressModeV = info.addressModeW = repeated ? VK_SAMPLER_ADDRESS_MODE_REPEAT
                                                                              : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         info.maxLod                                               = mipmapped ? VK_LOD_CLAMP_NONE : 0.f;
@@ -908,7 +944,8 @@ VkDescriptorSet VulkanDevice::allocateDescriptorSet(VkDescriptorSetLayout layout
         if (index == m_impl->descriptorPools.size())
         {
             const std::array sizes{VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorsPerType},
-                                   VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, descriptorsPerType}};
+                                   VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, descriptorsPerType},
+                                   VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, setsPerPool}};
             VkDescriptorPoolCreateInfo info{};
             info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
             info.maxSets       = setsPerPool;

@@ -44,6 +44,7 @@ struct VulkanSample
     bool                         smooth{};
     bool                         repeated{};
     bool                         mipmapped{};
+    bool                         glslFlipped{};
 };
 
 struct VulkanPipelineState
@@ -68,32 +69,50 @@ public:
     }
     struct Descriptors
     {
-        std::array<VkDescriptorSet, 2> sets{};
+        std::array<VkDescriptorSet, 3> sets{};
         std::uint32_t                  count{};
     };
 
     [[nodiscard]] static std::shared_ptr<VulkanProgram> create(
-        VulkanDevice&    device,
-        std::string_view vertex   = {},
-        std::string_view geometry = {},
-        std::string_view fragment = {});
+        VulkanDevice&             device,
+        std::string_view          vertex   = {},
+        std::string_view          geometry = {},
+        std::string_view          fragment = {},
+        const rhi::ShaderOptions& options  = {});
     ~VulkanProgram() override;
 
     VulkanProgram(const VulkanProgram&)            = delete;
     VulkanProgram& operator=(const VulkanProgram&) = delete;
 
+    [[nodiscard]] const rhi::ShaderOptions&     getOptions() const override;
+    [[nodiscard]] std::vector<rhi::UniformInfo> getActiveUniforms() const override;
+    bool                                        bindVertexBuffers(VulkanDevice&                                device,
+                                                                  VkCommandBuffer                              command,
+                                                                  const std::vector<rhi::VertexBufferBinding>& inputs,
+                                                                  std::size_t                                  first,
+                                                                  std::size_t                                  count,
+                                                                  std::size_t                                  instances) const;
+    bool                                        transformVertices(VulkanDevice&                                device,
+                                                                  const std::vector<rhi::VertexBufferBinding>& inputs,
+                                                                  std::size_t                                  count,
+                                                                  const rhi::Buffer&                           output);
     void setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count) override;
     void setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current) override;
 
     [[nodiscard]] VkPipeline  getPipeline(const VulkanPipelineState& state, VkRenderPass pass);
-    [[nodiscard]] Descriptors prepareDescriptors(VulkanDevice&               device,
-                                                 const VulkanDrawParameters& parameters,
-                                                 const VulkanSample&         texture,
-                                                 const VulkanImage*          attachment);
-    void                      bind(VkCommandBuffer commands, VkPipeline pipeline, const Descriptors& descriptors) const;
+    [[nodiscard]] Descriptors prepareDescriptors(
+        VulkanDevice&               device,
+        const VulkanDrawParameters& parameters,
+        const VulkanSample&         texture,
+        const VulkanImage*          attachment,
+        const VulkanBuffer*         output      = nullptr,
+        VkDeviceSize                outputBytes = 0);
+    void bind(VkCommandBuffer commands, VkPipeline pipeline, const Descriptors& descriptors) const;
     [[nodiscard]] static VulkanSample sample(const rhi::Texture* texture);
 
 private:
+    bool writeUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count);
+    const std::string& translatedName(const std::string& name) const;
     explicit VulkanProgram(std::shared_ptr<VulkanContext> context);
 
     struct Impl;

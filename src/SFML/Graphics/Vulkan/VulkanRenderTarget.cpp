@@ -151,7 +151,7 @@ std::shared_ptr<VulkanRenderTarget> VulkanRenderTarget::create(std::shared_ptr<V
                                                                std::shared_ptr<VulkanImage>  image,
                                                                const ContextSettings&        settings)
 {
-    if (!image)
+    if (!image || !image->attachment)
         return {};
 
     auto       target = std::shared_ptr<VulkanRenderTarget>(new VulkanRenderTarget(std::move(device), settings));
@@ -428,49 +428,82 @@ void VulkanRenderTarget::draw(const rhi::TargetState&  target,
     draw(target, VulkanDevice::Upload{nativeVulkanBuffer(buffer)->buffer, 0}, first, count, type, states);
 }
 
-void VulkanRenderTarget::draw(const rhi::TargetState&  target,
-                              VulkanDevice::Upload     buffer,
-                              std::size_t              first,
-                              std::size_t              count,
-                              PrimitiveType            type,
-                              const rhi::DrawSettings& states)
+bool VulkanRenderTarget::drawVertices(
+    const rhi::TargetState&                      target,
+    const std::vector<rhi::VertexBufferBinding>& inputs,
+    std::size_t                                  first,
+    std::size_t                                  count,
+    std::size_t                                  instances,
+    PrimitiveType                                type,
+    const rhi::DrawSettings&                     states)
+{
+    constexpr auto maximum = std::numeric_limits<std::uint32_t>::max();
+    if (!count || !instances || first > maximum || count > maximum - first || instances > maximum)
+        return false;
+    const auto lock = m_device->lock();
+    return draw(target, {}, first, count, type, states, &inputs, instances);
+}
+
+VulkanPipelineState VulkanRenderTarget::pipelineState(PrimitiveType type, const rhi::DrawSettings& states) const
+{
+    return {image()->format,
+            m_attachments->depth ? m_attachments->depth->format : VK_FORMAT_UNDEFINED,
+            m_attachments->samples,
+            type,
+            states.blendMode,
+            states.stencilMode.stencilComparison,
+            states.stencilMode.stencilUpdateOperation,
+            states.stencilMode.stencilOnly};
+}
+
+bool VulkanRenderTarget::prewarm(const rhi::TargetState&, const rhi::DrawSettings& states)
+{
+    const auto lock    = m_device->lock();
+    const auto program = states.shader ? resourcePointerCast<VulkanProgram>(states.shader) : m_device->defaultProgram();
+    return program && program->getOptions().transformOutputs.empty() &&
+           program->getPipeline(pipelineState(PrimitiveType::Triangles, states), m_attachments->pass) &&
+           program->getPipeline(pipelineState(PrimitiveType::TriangleStrip, states), m_attachments->pass);
+}
+
+bool VulkanRenderTarget::draw(
+    const rhi::TargetState&                      target,
+    VulkanDevice::Upload                         buffer,
+    std::size_t                                  first,
+    std::size_t                                  count,
+    PrimitiveType                                type,
+    const rhi::DrawSettings&                     states,
+    const std::vector<rhi::VertexBufferBinding>* inputs,
+    std::size_t                                  instances)
 {
     const auto rect    = target.viewport;
     const auto scissor = VulkanTargetImpl::getScissor(target, image()->size);
     if (rect.size.x <= 0 || rect.size.y <= 0 || !scissor.extent.width || !scissor.extent.height)
-        return;
+        return false;
 
-    const auto program = states.shader && resourcePointerCast<VulkanProgram>(states.shader)
-                             ? resourcePointerCast<VulkanProgram>(states.shader)
-                             : m_device->defaultProgram();
-    if (!program)
-        return;
-
-    const VulkanPipelineState pipelineState{image()->format,
-                                            m_attachments->depth ? m_attachments->depth->format : VK_FORMAT_UNDEFINED,
-                                            m_attachments->samples,
-                                            type,
-                                            states.blendMode,
-                                            states.stencilMode.stencilComparison,
-                                            states.stencilMode.stencilUpdateOperation,
-                                            states.stencilMode.stencilOnly};
-    const VkPipeline          pipeline = program->getPipeline(pipelineState, m_attachments->pass);
+    const auto program = states.shader ? resourcePointerCast<VulkanProgram>(states.shader) : m_device->defaultProgram();
+    if (!program || !program->getOptions().transformOutputs.empty() ||
+        (!inputs && !program->getOptions().vertexBindings.empty()))
+        return false;
+    const VkPipeline pipeline = program->getPipeline(pipelineState(type, states), m_attachments->pass);
     if (!pipeline)
-        return;
+        return false;
 
     auto parameters = prepareDraw(target, states);
-    // SFML's clip-space Y goes up. Vulkan viewports with positive height go down.
-    for (std::size_t column = 0; column < 4; ++column)
-    {
-        parameters.transform[4 * column + 1] *= -1.f;
-        parameters.projection[4 * column + 1] *= -1.f;
-    }
+    // Translated GLSL applies the clip-space conversion to its final vertex position.
+    if (!program->getOptions().glslMatrixLayout)
+        for (std::size_t column = 0; column < 4; ++column)
+        {
+            parameters.transform[4 * column + 1] *= -1.f;
+            parameters.projection[4 * column + 1] *= -1.f;
+        }
 
     auto       sample      = VulkanProgram::sample(states.texture.get());
     const auto descriptors = program->prepareDescriptors(*m_device, parameters, sample, image().get());
     if (!descriptors.count)
-        return;
+        return false;
 
+    if (inputs && !program->bindVertexBuffers(*m_device, m_device->commands(), *inputs, first, count, instances))
+        return false;
     if (const VkCommandBuffer command = beginPass())
     {
         const VkViewport viewport{static_cast<float>(rect.position.x),
@@ -486,11 +519,18 @@ void VulkanRenderTarget::draw(const rhi::TargetState&  target,
         vk.CmdSetStencilCompareMask(command, VK_STENCIL_FRONT_AND_BACK, states.stencilMode.stencilMask.value);
         vk.CmdSetStencilWriteMask(command, VK_STENCIL_FRONT_AND_BACK, ~0u);
         vk.CmdSetStencilReference(command, VK_STENCIL_FRONT_AND_BACK, states.stencilMode.stencilReference.value);
-        vk.CmdBindVertexBuffers(command, 0, 1, &buffer.buffer, &buffer.offset);
-        vk.CmdDraw(command, static_cast<std::uint32_t>(count), 1, static_cast<std::uint32_t>(first), 0);
+        if (!inputs)
+            vk.CmdBindVertexBuffers(command, 0, 1, &buffer.buffer, &buffer.offset);
+        vk.CmdDraw(command,
+                   static_cast<std::uint32_t>(count),
+                   static_cast<std::uint32_t>(instances),
+                   static_cast<std::uint32_t>(first),
+                   0);
         vk.CmdEndRenderPass(command);
         m_device->retain(program);
+        return true;
     }
+    return false;
 }
 Vector2u VulkanRenderTarget::getSize() const
 {
