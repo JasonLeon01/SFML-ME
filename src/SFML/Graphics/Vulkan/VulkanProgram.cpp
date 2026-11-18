@@ -204,12 +204,14 @@ bool reflect(const VulkanContext&          context,
     return true;
 }
 
-VkShaderModule makeModule(const VulkanContext&  context,
-                          std::string_view      source,
-                          VkShaderStageFlagBits stage,
-                          std::vector<Binding>& bindings,
-                          bool                  transform)
+VkShaderModule makeModule(const VulkanContext&      context,
+                          std::string_view          source,
+                          VkShaderStageFlagBits     stage,
+                          std::vector<Binding>&     bindings,
+                          const rhi::ShaderOptions& options,
+                          bool&                     feedback)
 {
+    const bool transform = !options.transformOutputs.empty();
     if (source.size() < 5 * sizeof(std::uint32_t) || source.size() % sizeof(std::uint32_t))
         return VK_NULL_HANDLE;
 
@@ -228,8 +230,46 @@ VkShaderModule makeModule(const VulkanContext&  context,
     } reflection;
     bool storageOutput = false;
     if (spvReflectCreateShaderModule(source.size(), words.data(), &reflection.module) != SPV_REFLECT_RESULT_SUCCESS ||
-        !reflect(context, reflection.module, stage, bindings, transform, storageOutput) || storageOutput != transform)
+        !reflect(context, reflection.module, stage, bindings, transform, storageOutput))
         return VK_NULL_HANDLE;
+    const auto* entry = spvReflectGetEntryPoint(&reflection.module, "main");
+    bool        xfb   = false;
+    for (std::uint32_t i = 0; i < entry->execution_mode_count; ++i)
+        xfb |= entry->execution_modes[i] == SpvExecutionModeXfb;
+    if (transform != (xfb || storageOutput) || (xfb && storageOutput) ||
+        (storageOutput && !context.features.vertexPipelineStoresAndAtomics))
+        return VK_NULL_HANDLE;
+    if (xfb)
+    {
+        const auto& limits = context.feedbackProperties;
+        if (!context.bindFeedbackBuffers || options.transformStride > limits.maxTransformFeedbackBufferDataStride ||
+            options.transformStride > limits.maxTransformFeedbackBufferDataSize ||
+            options.transformStride > limits.maxTransformFeedbackStreamDataSize)
+            return VK_NULL_HANDLE;
+        // SPIRV-Reflect exposes Xfb execution mode but not buffer/stride decorations.
+        bool hasStride = false;
+        for (std::size_t index = 5; index < words.size();)
+        {
+            const auto length = words[index] >> 16;
+            if (!length || length > words.size() - index)
+                return VK_NULL_HANDLE;
+            const auto op         = words[index] & 0xffffu;
+            const auto decoration = op == SpvOpDecorate ? 2u : op == SpvOpMemberDecorate ? 3u : 0u;
+            if (decoration && length > decoration + 1)
+            {
+                const auto kind  = words[index + decoration];
+                const auto value = words[index + decoration + 1];
+                if ((kind == SpvDecorationXfbBuffer && value != 0) ||
+                    (kind == SpvDecorationXfbStride && value != options.transformStride))
+                    return VK_NULL_HANDLE;
+                hasStride |= kind == SpvDecorationXfbStride;
+            }
+            index += length;
+        }
+        if (!hasStride)
+            return VK_NULL_HANDLE;
+        feedback = true;
+    }
 
     VkShaderModuleCreateInfo info{};
     info.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -290,6 +330,7 @@ struct VulkanProgram::Impl
     rhi::ShaderOptions                                      options;
     std::vector<VkVertexInputBindingDescription>            vertexBindings;
     std::vector<VkVertexInputAttributeDescription>          vertexAttributes;
+    bool                                                    feedback{};
     VkRenderPass                                            transformPass{};
     VkFramebuffer                                           transformFramebuffer{};
     std::array<VkDescriptorSetLayout, 3>                    sets{};
@@ -335,7 +376,8 @@ std::shared_ptr<VulkanProgram> VulkanProgram::create(
     const auto& limits    = ctx.properties.limits;
     if (!validateShaderOptions(options) || options.vertexBindings.size() > limits.maxVertexInputBindings ||
         options.vertexAttributes.size() > limits.maxVertexInputAttributes ||
-        (transform && (!ctx.features.vertexPipelineStoresAndAtomics || vertex.empty() || !geometry.empty())) ||
+        (transform && ((!ctx.features.vertexPipelineStoresAndAtomics && !ctx.bindFeedbackBuffers) || vertex.empty() ||
+                       !geometry.empty())) ||
         (!geometry.empty() && !ctx.features.geometryShader))
         return {};
     if (vertex.empty())
@@ -376,7 +418,7 @@ std::shared_ptr<VulkanProgram> VulkanProgram::create(
     {
         if (source.empty())
             continue;
-        const VkShaderModule module = makeModule(ctx, source, stage, impl.bindings, transform);
+        const VkShaderModule module = makeModule(ctx, source, stage, impl.bindings, options, impl.feedback);
         if (!module)
         {
             err() << "Could not load Vulkan SPIR-V for the requested API version, stage, and SFML shader layout"
@@ -399,7 +441,7 @@ std::shared_ptr<VulkanProgram> VulkanProgram::create(
     if (!impl.sets[0])
         return {};
 
-    if (!impl.bindings.empty() || transform)
+    if (!impl.bindings.empty() || (transform && !impl.feedback))
     {
         std::vector<VkDescriptorSetLayoutBinding> layout;
         layout.reserve(impl.bindings.size());
@@ -412,10 +454,13 @@ std::shared_ptr<VulkanProgram> VulkanProgram::create(
 
     if (transform)
     {
-        const VkDescriptorSetLayoutBinding output{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr};
-        impl.sets[2] = createLayout(ctx, &output, 1);
-        if (!impl.sets[2])
-            return {};
+        if (!impl.feedback)
+        {
+            const VkDescriptorSetLayoutBinding output{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr};
+            impl.sets[2] = createLayout(ctx, &output, 1);
+            if (!impl.sets[2])
+                return {};
+        }
         VkSubpassDescription subpass{};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         VkRenderPassCreateInfo pass{};
@@ -434,7 +479,7 @@ std::shared_ptr<VulkanProgram> VulkanProgram::create(
 
     VkPipelineLayoutCreateInfo pipeline{};
     pipeline.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline.setLayoutCount = transform ? 3u : impl.sets[1] ? 2u : 1u;
+    pipeline.setLayoutCount = impl.sets[2] ? 3u : impl.sets[1] ? 2u : 1u;
     pipeline.pSetLayouts    = impl.sets.data();
     if (ctx.vk.CreatePipelineLayout(ctx.device, &pipeline, nullptr, &impl.layout) != VK_SUCCESS)
         return {};
@@ -880,10 +925,11 @@ bool VulkanProgram::transformVertices(VulkanDevice&                             
                                       const rhi::Buffer&                           output)
 {
     const auto buffer = nativeVulkanBuffer(output);
+    const auto limit  = m_impl->feedback ? m_impl->context->feedbackProperties.maxTransformFeedbackBufferSize
+                                         : m_impl->context->properties.limits.maxStorageBufferRange;
     if (!m_impl->transformPass || !count || count > std::numeric_limits<std::uint32_t>::max() || !buffer ||
         buffer->context != m_impl->context || device.context() != m_impl->context ||
-        count > std::min<VkDeviceSize>(output.getSize(), m_impl->context->properties.limits.maxStorageBufferRange) /
-                    getOptions().transformStride ||
+        count > std::min<VkDeviceSize>(output.getSize(), limit) / getOptions().transformStride ||
         std::any_of(inputs.begin(), inputs.end(), [&](const auto& input) { return input.buffer.get() == &output; }))
         return false;
     VulkanPipelineState state;
@@ -894,25 +940,20 @@ bool VulkanProgram::transformVertices(VulkanDevice&                             
     const VkCommandBuffer command = device.commands();
     if (!bindVertexBuffers(device, command, inputs, 0, count, 1))
         return false;
-    const auto descriptors = prepareDescriptors(device, {}, {}, nullptr, buffer.get(), count * getOptions().transformStride);
+    const VkDeviceSize bytes = count * getOptions().transformStride;
+    const auto descriptors = prepareDescriptors(device, {}, {}, nullptr, m_impl->feedback ? nullptr : buffer.get(), bytes);
     if (!descriptors.count)
         return false;
-    const auto& vk = device.context()->vk;
+    const auto&                vk         = device.context()->vk;
+    const VkPipelineStageFlags writeStage = m_impl->feedback ? VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT
+                                                             : VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+    const VkAccessFlags writeAccess = m_impl->feedback ? VK_ACCESS_TRANSFORM_FEEDBACK_WRITE_BIT_EXT : VK_ACCESS_SHADER_WRITE_BIT;
     // A ping-pong destination can still be an input to an earlier draw.
     VkMemoryBarrier before{};
     before.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    before.srcAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-    before.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    vk.CmdPipelineBarrier(command,
-                          VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-                          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-                          0,
-                          1,
-                          &before,
-                          0,
-                          nullptr,
-                          0,
-                          nullptr);
+    before.srcAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | writeAccess;
+    before.dstAccessMask = writeAccess;
+    vk.CmdPipelineBarrier(command, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | writeStage, writeStage, 0, 1, &before, 0, nullptr, 0, nullptr);
     VkRenderPassBeginInfo pass{};
     pass.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     pass.renderPass        = m_impl->transformPass;
@@ -920,14 +961,22 @@ bool VulkanProgram::transformVertices(VulkanDevice&                             
     pass.renderArea.extent = {1, 1};
     vk.CmdBeginRenderPass(command, &pass, VK_SUBPASS_CONTENTS_INLINE);
     bind(command, pipeline, descriptors);
+    if (m_impl->feedback)
+    {
+        constexpr VkDeviceSize offset = 0;
+        m_impl->context->bindFeedbackBuffers(command, 0, 1, &buffer->buffer, &offset, &bytes);
+        m_impl->context->beginFeedback(command, 0, 0, nullptr, nullptr);
+    }
     vk.CmdDraw(command, static_cast<std::uint32_t>(count), 1, 0, 0);
+    if (m_impl->feedback)
+        m_impl->context->endFeedback(command, 0, 0, nullptr, nullptr);
     vk.CmdEndRenderPass(command);
     VkMemoryBarrier after{};
     after.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    after.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    after.srcAccessMask = writeAccess;
     after.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_HOST_READ_BIT;
     vk.CmdPipelineBarrier(command,
-                          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                          writeStage,
                           VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_HOST_BIT,
                           0,
                           1,
