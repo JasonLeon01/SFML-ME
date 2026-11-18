@@ -119,7 +119,8 @@ public:
                 VulkanRenderTarget::getMaximumAntiAliasingLevel(*m_native),
                 true,
                 m_native->context()->features.geometryShader != VK_FALSE,
-                m_native->context()->features.vertexPipelineStoresAndAtomics != VK_FALSE,
+                m_native->context()->features.vertexPipelineStoresAndAtomics != VK_FALSE ||
+                    m_native->context()->bindFeedbackBuffers,
                 true,
                 m_native->supportsFloatTextures()};
     }

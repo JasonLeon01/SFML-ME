@@ -58,17 +58,21 @@ struct VulkanContext
 {
     ~VulkanContext();
 
-    VulkanDispatch                   vk;
-    VkInstance                       instance{};
-    VkPhysicalDevice                 physicalDevice{};
-    VkDevice                         device{};
-    VkPipelineCache                  pipelineCache{};
-    std::uint32_t                    apiVersion{};
-    VkPhysicalDeviceProperties       properties{};
-    VkPhysicalDeviceMemoryProperties memory{};
-    VkPhysicalDeviceFeatures         features{};
-    std::uint32_t                    graphicsFamily{};
-    std::vector<VkQueue>             queues;
+    VulkanDispatch                                 vk;
+    VkInstance                                     instance{};
+    VkPhysicalDevice                               physicalDevice{};
+    VkDevice                                       device{};
+    VkPipelineCache                                pipelineCache{};
+    std::uint32_t                                  apiVersion{};
+    VkPhysicalDeviceProperties                     properties{};
+    VkPhysicalDeviceMemoryProperties               memory{};
+    VkPhysicalDeviceFeatures                       features{};
+    VkPhysicalDeviceTransformFeedbackPropertiesEXT feedbackProperties{};
+    PFN_vkCmdBindTransformFeedbackBuffersEXT       bindFeedbackBuffers{};
+    PFN_vkCmdBeginTransformFeedbackEXT             beginFeedback{};
+    PFN_vkCmdEndTransformFeedbackEXT               endFeedback{};
+    std::uint32_t                                  graphicsFamily{};
+    std::vector<VkQueue>                           queues;
 };
 
 struct VulkanBuffer
@@ -133,7 +137,10 @@ public:
 
     [[nodiscard]] std::shared_ptr<VulkanBuffer> makeBuffer(std::size_t bytes) const
     {
-        return makeBuffer(bytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        if (context()->bindFeedbackBuffers)
+            usage |= VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT;
+        return makeBuffer(bytes, usage);
     }
     [[nodiscard]] std::shared_ptr<VulkanBuffer> makeBuffer(VkDeviceSize bytes, VkBufferUsageFlags usage) const;
     [[nodiscard]] std::shared_ptr<VulkanImage>  makeImage(

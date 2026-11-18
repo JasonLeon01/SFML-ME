@@ -285,7 +285,26 @@ std::shared_ptr<VulkanDevice> VulkanDevice::create(const VulkanSettings& request
     application.pEngineName = "SFML";
     application.apiVersion  = requestedVersion;
 
-    const auto&          extensions = Vulkan::getGraphicsRequiredInstanceExtensions();
+    auto extensions  = Vulkan::getGraphicsRequiredInstanceExtensions();
+    bool properties2 = requestedVersion >= VK_API_VERSION_1_1;
+    if (!properties2)
+    {
+        const auto enumerateExtensions = reinterpret_cast<PFN_vkEnumerateInstanceExtensionProperties>(
+            getProc(VK_NULL_HANDLE, "vkEnumerateInstanceExtensionProperties"));
+        if (enumerateExtensions)
+        {
+            const auto available = enumerate<VkExtensionProperties>(
+                [&](auto* count, auto* values) { return enumerateExtensions(nullptr, count, values); });
+            properties2 = std::any_of(available.begin(),
+                                      available.end(),
+                                      [](const auto& ext) {
+                                          return std::string_view(ext.extensionName) ==
+                                                 VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME;
+                                      });
+            if (properties2)
+                extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+        }
+    }
     VkInstanceCreateInfo instanceInfo{};
     instanceInfo.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instanceInfo.pApplicationInfo        = &application;
@@ -311,7 +330,8 @@ std::shared_ptr<VulkanDevice> VulkanDevice::create(const VulkanSettings& request
 
     std::vector<VkQueueFamilyProperties> chosenFamilies;
     std::uint32_t                        highestVersion{};
-    int                                  bestScore = -1;
+    int                                  bestScore         = -1;
+    bool                                 feedbackExtension = false;
     for (const VkPhysicalDevice physical : physicalDevices)
     {
         VkPhysicalDeviceProperties properties{};
@@ -359,6 +379,12 @@ std::shared_ptr<VulkanDevice> VulkanDevice::create(const VulkanSettings& request
             context->properties     = properties;
             context->graphicsFamily = static_cast<std::uint32_t>(family - families.begin());
             chosenFamilies          = std::move(families);
+            feedbackExtension       = std::any_of(deviceExtensions.begin(),
+                                            deviceExtensions.end(),
+                                            [](const auto& ext) {
+                                                return std::string_view(ext.extensionName) ==
+                                                       VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME;
+                                            });
         }
     }
 
@@ -389,13 +415,42 @@ std::shared_ptr<VulkanDevice> VulkanDevice::create(const VulkanSettings& request
         queueInfos.push_back(queue);
     }
 
-    const char*        swapchainExtension = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    VkPhysicalDeviceTransformFeedbackFeaturesEXT feedback{};
+    feedback.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT;
+    std::vector<const char*> deviceExtensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    if (feedbackExtension && properties2)
+    {
+        const bool core        = requestedVersion >= VK_API_VERSION_1_1;
+        const auto getFeatures = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
+            getProc(context->instance, core ? "vkGetPhysicalDeviceFeatures2" : "vkGetPhysicalDeviceFeatures2KHR"));
+        const auto getProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
+            getProc(context->instance, core ? "vkGetPhysicalDeviceProperties2" : "vkGetPhysicalDeviceProperties2KHR"));
+        if (getFeatures && getProperties)
+        {
+            VkPhysicalDeviceFeatures2 features{};
+            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+            features.pNext = &feedback;
+            getFeatures(context->physicalDevice, &features);
+            if (feedback.transformFeedback)
+            {
+                feedback.geometryStreams = VK_FALSE;
+                auto& limits             = context->feedbackProperties;
+                limits.sType             = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_PROPERTIES_EXT;
+                VkPhysicalDeviceProperties2 properties{};
+                properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+                properties.pNext = &limits;
+                getProperties(context->physicalDevice, &properties);
+                deviceExtensions.push_back(VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
+            }
+        }
+    }
     VkDeviceCreateInfo deviceInfo{};
     deviceInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceInfo.queueCreateInfoCount    = static_cast<std::uint32_t>(queueInfos.size());
     deviceInfo.pQueueCreateInfos       = queueInfos.data();
-    deviceInfo.enabledExtensionCount   = 1;
-    deviceInfo.ppEnabledExtensionNames = &swapchainExtension;
+    deviceInfo.pNext                   = feedback.transformFeedback ? &feedback : nullptr;
+    deviceInfo.enabledExtensionCount   = static_cast<std::uint32_t>(deviceExtensions.size());
+    deviceInfo.ppEnabledExtensionNames = deviceExtensions.data();
     deviceInfo.pEnabledFeatures        = &context->features;
     if (vk.CreateDevice(context->physicalDevice, &deviceInfo, nullptr, &context->device) != VK_SUCCESS)
         return {};
@@ -411,6 +466,17 @@ std::shared_ptr<VulkanDevice> VulkanDevice::create(const VulkanSettings& request
     if (!loaded)
         return {};
 
+    if (feedback.transformFeedback)
+    {
+        context->bindFeedbackBuffers = reinterpret_cast<PFN_vkCmdBindTransformFeedbackBuffersEXT>(
+            vk.GetDeviceProcAddr(context->device, "vkCmdBindTransformFeedbackBuffersEXT"));
+        context->beginFeedback = reinterpret_cast<PFN_vkCmdBeginTransformFeedbackEXT>(
+            vk.GetDeviceProcAddr(context->device, "vkCmdBeginTransformFeedbackEXT"));
+        context->endFeedback = reinterpret_cast<PFN_vkCmdEndTransformFeedbackEXT>(
+            vk.GetDeviceProcAddr(context->device, "vkCmdEndTransformFeedbackEXT"));
+        if (!context->bindFeedbackBuffers || !context->beginFeedback || !context->endFeedback)
+            return {};
+    }
     context->queues.resize(chosenFamilies.size());
     for (const auto& queue : queueInfos)
         vk.GetDeviceQueue(context->device, queue.queueFamilyIndex, 0, &context->queues[queue.queueFamilyIndex]);
