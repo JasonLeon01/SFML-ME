@@ -133,7 +133,7 @@ public:
 
     [[nodiscard]] std::shared_ptr<VulkanBuffer> makeBuffer(std::size_t bytes) const
     {
-        return makeBuffer(bytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        return makeBuffer(bytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     }
     [[nodiscard]] std::shared_ptr<VulkanBuffer> makeBuffer(VkDeviceSize bytes, VkBufferUsageFlags usage) const;
     [[nodiscard]] std::shared_ptr<VulkanImage>  makeImage(
@@ -144,7 +144,9 @@ public:
          VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT,
          std::uint32_t         levels  = 1) const;
     [[nodiscard]] std::shared_ptr<VulkanImage> makeTexture(Vector2u size, bool sRgb) const;
-    void                                       transition(VulkanImage& image, VkImageLayout layout);
+    [[nodiscard]] bool                         supportsFloatTextures() const;
+    [[nodiscard]] bool uploadFloats(const std::shared_ptr<VulkanImage>& image, const float* pixels, Vector2u size, Vector2u offset);
+    void transition(VulkanImage& image, VkImageLayout layout);
 
     [[nodiscard]] bool upload(const std::shared_ptr<VulkanImage>& image, const std::uint8_t* pixels, Vector2u size, Vector2u offset);
     [[nodiscard]] bool      copy(const std::shared_ptr<VulkanImage>& source,
@@ -167,6 +169,11 @@ public:
 private:
     explicit VulkanDevice(std::shared_ptr<VulkanContext> value);
     [[nodiscard]] bool initialize();
+    bool               uploadPixels(const std::shared_ptr<VulkanImage>& image,
+                                    const void*                         pixels,
+                                    Vector2u                            size,
+                                    Vector2u                            offset,
+                                    std::size_t                         bytesPerPixel);
 
     struct Impl;
     std::unique_ptr<Impl> m_impl;

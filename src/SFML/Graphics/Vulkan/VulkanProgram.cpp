@@ -30,6 +30,7 @@
 #include <SFML/System/Err.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <ostream>
 #include <spirv_reflect.h>
 #include <tuple>
@@ -126,7 +127,9 @@ void reflectMembers(std::vector<Member>& members, const SpvReflectBlockVariable&
 bool reflect(const VulkanContext&          context,
              const SpvReflectShaderModule& module,
              VkShaderStageFlagBits         stage,
-             std::vector<Binding>&         bindings)
+             std::vector<Binding>&         bindings,
+             bool                          transform,
+             bool&                         storageOutput)
 {
     const auto* entry = spvReflectGetEntryPoint(&module, "main");
     if (!entry || static_cast<VkShaderStageFlagBits>(entry->shader_stage) != stage)
@@ -148,6 +151,12 @@ bool reflect(const VulkanContext&          context,
 
     for (const auto* descriptor : descriptors)
     {
+        if (descriptor->set == 2 && descriptor->binding == 0 && descriptor->count == 1 && transform &&
+            stage == VK_SHADER_STAGE_VERTEX_BIT && descriptor->descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+        {
+            storageOutput = true;
+            continue;
+        }
         const bool uniform = descriptor->descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         const bool sampler = descriptor->descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER &&
                              descriptor->image.dim == SpvDim2D && !descriptor->image.arrayed && !descriptor->image.ms;
@@ -198,7 +207,8 @@ bool reflect(const VulkanContext&          context,
 VkShaderModule makeModule(const VulkanContext&  context,
                           std::string_view      source,
                           VkShaderStageFlagBits stage,
-                          std::vector<Binding>& bindings)
+                          std::vector<Binding>& bindings,
+                          bool                  transform)
 {
     if (source.size() < 5 * sizeof(std::uint32_t) || source.size() % sizeof(std::uint32_t))
         return VK_NULL_HANDLE;
@@ -216,8 +226,9 @@ VkShaderModule makeModule(const VulkanContext&  context,
             spvReflectDestroyShaderModule(&module);
         }
     } reflection;
+    bool storageOutput = false;
     if (spvReflectCreateShaderModule(source.size(), words.data(), &reflection.module) != SPV_REFLECT_RESULT_SUCCESS ||
-        !reflect(context, reflection.module, stage, bindings))
+        !reflect(context, reflection.module, stage, bindings, transform, storageOutput) || storageOutput != transform)
         return VK_NULL_HANDLE;
 
     VkShaderModuleCreateInfo info{};
@@ -276,7 +287,12 @@ struct VulkanProgram::Impl
     std::shared_ptr<VulkanContext>                          context;
     std::vector<VkPipelineShaderStageCreateInfo>            stages;
     std::vector<VulkanProgramImpl::Binding>                 bindings;
-    std::array<VkDescriptorSetLayout, 2>                    sets{};
+    rhi::ShaderOptions                                      options;
+    std::vector<VkVertexInputBindingDescription>            vertexBindings;
+    std::vector<VkVertexInputAttributeDescription>          vertexAttributes;
+    VkRenderPass                                            transformPass{};
+    VkFramebuffer                                           transformFramebuffer{};
+    std::array<VkDescriptorSetLayout, 3>                    sets{};
     VkPipelineLayout                                        layout{};
     std::vector<std::pair<VulkanPipelineState, VkPipeline>> pipelines;
     std::mutex                                              uniformsMutex;
@@ -292,6 +308,10 @@ VulkanProgram::~VulkanProgram()
     const auto& ctx = *m_impl->context;
     for (const auto& pipeline : m_impl->pipelines)
         ctx.vk.DestroyPipeline(ctx.device, pipeline.second, nullptr);
+    if (m_impl->transformFramebuffer)
+        ctx.vk.DestroyFramebuffer(ctx.device, m_impl->transformFramebuffer, nullptr);
+    if (m_impl->transformPass)
+        ctx.vk.DestroyRenderPass(ctx.device, m_impl->transformPass, nullptr);
     if (m_impl->layout)
         ctx.vk.DestroyPipelineLayout(ctx.device, m_impl->layout, nullptr);
     for (const VkDescriptorSetLayout layout : m_impl->sets)
@@ -301,30 +321,62 @@ VulkanProgram::~VulkanProgram()
         ctx.vk.DestroyShaderModule(ctx.device, stage.module, nullptr);
 }
 
-std::shared_ptr<VulkanProgram> VulkanProgram::create(VulkanDevice&    device,
-                                                     std::string_view vertex,
-                                                     std::string_view geometry,
-                                                     std::string_view fragment)
+std::shared_ptr<VulkanProgram> VulkanProgram::create(
+    VulkanDevice&             device,
+    std::string_view          vertex,
+    std::string_view          geometry,
+    std::string_view          fragment,
+    const rhi::ShaderOptions& options)
 {
     using namespace VulkanProgramImpl;
-    const auto  lock = device.lock();
-    const auto& ctx  = *device.context();
-    if (!geometry.empty() && !ctx.features.geometryShader)
+    const auto  lock      = device.lock();
+    const auto& ctx       = *device.context();
+    const bool  transform = !options.transformOutputs.empty();
+    const auto& limits    = ctx.properties.limits;
+    if (!validateShaderOptions(options) || options.vertexBindings.size() > limits.maxVertexInputBindings ||
+        options.vertexAttributes.size() > limits.maxVertexInputAttributes ||
+        (transform && (!ctx.features.vertexPipelineStoresAndAtomics || vertex.empty() || !geometry.empty())) ||
+        (!geometry.empty() && !ctx.features.geometryShader))
         return {};
     if (vertex.empty())
         vertex = bytes(VulkanShaders::vertex);
-    if (fragment.empty())
+    if (transform)
+        fragment = {};
+    else if (fragment.empty())
         fragment = bytes(VulkanShaders::fragment);
 
     auto  result = std::shared_ptr<VulkanProgram>(new VulkanProgram(device.context()));
     auto& impl   = *result->m_impl;
+    impl.options = options;
+    constexpr std::array formats{VK_FORMAT_R32_SFLOAT,
+                                 VK_FORMAT_R32G32_SFLOAT,
+                                 VK_FORMAT_R32G32B32_SFLOAT,
+                                 VK_FORMAT_R32G32B32A32_SFLOAT};
+    for (const auto& layout : options.vertexBindings)
+    {
+        if (layout.stepRate > 1 || layout.stride > limits.maxVertexInputBindingStride)
+            return {};
+        impl.vertexBindings.push_back({static_cast<std::uint32_t>(impl.vertexBindings.size()),
+                                       static_cast<std::uint32_t>(layout.stride),
+                                       layout.stepRate ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX});
+    }
+    for (const auto& attribute : options.vertexAttributes)
+    {
+        if (attribute.location >= limits.maxVertexInputAttributes || attribute.offset > limits.maxVertexInputAttributeOffset)
+            return {};
+        impl.vertexAttributes.push_back(
+            {attribute.location,
+             attribute.binding,
+             formats[attribute.components - 1],
+             static_cast<std::uint32_t>(attribute.offset)});
+    }
     for (const auto& [stage, source] : {std::pair{VK_SHADER_STAGE_VERTEX_BIT, vertex},
                                         std::pair{VK_SHADER_STAGE_GEOMETRY_BIT, geometry},
                                         std::pair{VK_SHADER_STAGE_FRAGMENT_BIT, fragment}})
     {
         if (source.empty())
             continue;
-        const VkShaderModule module = makeModule(ctx, source, stage, impl.bindings);
+        const VkShaderModule module = makeModule(ctx, source, stage, impl.bindings, transform);
         if (!module)
         {
             err() << "Could not load Vulkan SPIR-V for the requested API version, stage, and SFML shader layout"
@@ -347,7 +399,7 @@ std::shared_ptr<VulkanProgram> VulkanProgram::create(VulkanDevice&    device,
     if (!impl.sets[0])
         return {};
 
-    if (!impl.bindings.empty())
+    if (!impl.bindings.empty() || transform)
     {
         std::vector<VkDescriptorSetLayoutBinding> layout;
         layout.reserve(impl.bindings.size());
@@ -358,19 +410,94 @@ std::shared_ptr<VulkanProgram> VulkanProgram::create(VulkanDevice&    device,
             return {};
     }
 
+    if (transform)
+    {
+        const VkDescriptorSetLayoutBinding output{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr};
+        impl.sets[2] = createLayout(ctx, &output, 1);
+        if (!impl.sets[2])
+            return {};
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        VkRenderPassCreateInfo pass{};
+        pass.sType        = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        pass.subpassCount = 1;
+        pass.pSubpasses   = &subpass;
+        if (ctx.vk.CreateRenderPass(ctx.device, &pass, nullptr, &impl.transformPass) != VK_SUCCESS)
+            return {};
+        VkFramebufferCreateInfo framebuffer{};
+        framebuffer.sType      = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebuffer.renderPass = impl.transformPass;
+        framebuffer.width = framebuffer.height = framebuffer.layers = 1;
+        if (ctx.vk.CreateFramebuffer(ctx.device, &framebuffer, nullptr, &impl.transformFramebuffer) != VK_SUCCESS)
+            return {};
+    }
+
     VkPipelineLayoutCreateInfo pipeline{};
     pipeline.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline.setLayoutCount = impl.sets[1] ? 2u : 1u;
+    pipeline.setLayoutCount = transform ? 3u : impl.sets[1] ? 2u : 1u;
     pipeline.pSetLayouts    = impl.sets.data();
     if (ctx.vk.CreatePipelineLayout(ctx.device, &pipeline, nullptr, &impl.layout) != VK_SUCCESS)
         return {};
     return result;
 }
 
+const rhi::ShaderOptions& VulkanProgram::getOptions() const
+{
+    return m_impl->options;
+}
+
+const std::string& VulkanProgram::translatedName(const std::string& name) const
+{
+    for (const auto& alias : getOptions().uniformAliases)
+        if (alias.name == name)
+            return alias.translatedName;
+    return name;
+}
+
+std::vector<rhi::UniformInfo> VulkanProgram::getActiveUniforms() const
+{
+    std::vector<rhi::UniformInfo> result;
+    const auto                    append = [&](rhi::UniformInfo value)
+    {
+        for (const auto& alias : getOptions().uniformAliases)
+            if (alias.translatedName == value.name)
+                value.name = alias.name;
+        for (const auto& transform : getOptions().samplerCoordinateTransforms)
+            if (transform.uniformName == value.name)
+                return;
+        if (std::none_of(result.begin(), result.end(), [&](const auto& previous) { return previous.name == value.name; }))
+            result.push_back(std::move(value));
+    };
+    for (const auto& binding : m_impl->bindings)
+    {
+        if (binding.layout.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+            append({binding.name, rhi::UniformType::Int, 1, true});
+        for (const auto& member : binding.members)
+        {
+            if (member.columns != 1 &&
+                (member.columns != member.components || !member.floating || member.columns < 3 || member.columns > 4))
+                continue;
+            const auto type = member.columns == 1
+                                  ? static_cast<rhi::UniformType>((member.floating ? 0u : 4u) + member.components - 1)
+                              : member.columns == 3 ? rhi::UniformType::Mat3
+                                                    : rhi::UniformType::Mat4;
+            append({member.name, type, member.arrayLength, false});
+        }
+    }
+    return result;
+}
+
 void VulkanProgram::setUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count)
 {
+    const std::lock_guard lock(m_impl->uniformsMutex);
+    if (!writeUniform(translatedName(name), type, values, count))
+        err() << "Vulkan uniform not found or has incompatible type: " << name << std::endl;
+}
+
+bool VulkanProgram::writeUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count)
+{
     if (!values || !count)
-        return;
+        return false;
     const auto  index      = static_cast<unsigned int>(type);
     const bool  matrix     = type == ShaderUniformType::Mat3 || type == ShaderUniformType::Mat4;
     const auto  columns    = matrix ? (type == ShaderUniformType::Mat3 ? 3u : 4u) : 1u;
@@ -378,8 +505,7 @@ void VulkanProgram::setUniform(const std::string& name, ShaderUniformType type, 
     const bool  floating   = index < 4 || matrix;
     const auto* data       = static_cast<const std::byte*>(values);
 
-    const std::lock_guard lock(m_impl->uniformsMutex);
-    bool                  found = false;
+    bool found = false;
     for (auto& binding : m_impl->bindings)
     {
         for (const auto& member : binding.members)
@@ -413,8 +539,7 @@ void VulkanProgram::setUniform(const std::string& name, ShaderUniformType type, 
         }
     }
 
-    if (!found)
-        err() << "Vulkan uniform not found or has incompatible type: " << name << std::endl;
+    return found;
 }
 
 void VulkanProgram::setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current)
@@ -423,7 +548,8 @@ void VulkanProgram::setSampler(const std::string& name, std::shared_ptr<rhi::Tex
     bool                  found = false;
     for (auto& binding : m_impl->bindings)
     {
-        if (binding.layout.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && binding.name == name)
+        if (binding.layout.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER &&
+            binding.name == translatedName(name))
         {
             binding.texture        = texture;
             binding.currentTexture = current;
@@ -487,6 +613,13 @@ VkPipeline VulkanProgram::getPipeline(const VulkanPipelineState& state, VkRender
     vertex.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(attributes.size());
     vertex.pVertexAttributeDescriptions    = attributes.data();
 
+    if (!m_impl->vertexBindings.empty() && !state.present)
+    {
+        vertex.vertexBindingDescriptionCount   = static_cast<std::uint32_t>(m_impl->vertexBindings.size());
+        vertex.pVertexBindingDescriptions      = m_impl->vertexBindings.data();
+        vertex.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(m_impl->vertexAttributes.size());
+        vertex.pVertexAttributeDescriptions    = m_impl->vertexAttributes.data();
+    }
     VkPipelineInputAssemblyStateCreateInfo assembly{};
     assembly.sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     assembly.topology = topologies[static_cast<std::size_t>(state.primitive)];
@@ -497,11 +630,12 @@ VkPipeline VulkanProgram::getPipeline(const VulkanPipelineState& state, VkRender
     viewport.scissorCount  = 1;
 
     VkPipelineRasterizationStateCreateInfo raster{};
-    raster.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    raster.polygonMode = VK_POLYGON_MODE_FILL;
-    raster.cullMode    = VK_CULL_MODE_NONE;
-    raster.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    raster.lineWidth   = 1.f;
+    raster.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    raster.polygonMode             = VK_POLYGON_MODE_FILL;
+    raster.cullMode                = VK_CULL_MODE_NONE;
+    raster.frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    raster.rasterizerDiscardEnable = !m_impl->options.transformOutputs.empty();
+    raster.lineWidth               = 1.f;
 
     VkPipelineMultisampleStateCreateInfo multisample{};
     multisample.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -574,24 +708,43 @@ VkPipeline VulkanProgram::getPipeline(const VulkanPipelineState& state, VkRender
 
 VulkanSample VulkanProgram::sample(const rhi::Texture* texture)
 {
-    return texture
-               ? VulkanSample{nativeVulkanImage(texture), texture->isSmooth(), texture->isRepeated(), texture->hasMipmap()}
-               : VulkanSample{};
+    return texture ? VulkanSample{nativeVulkanImage(texture),
+                                  texture->isSmooth(),
+                                  texture->isRepeated(),
+                                  texture->hasMipmap(),
+                                  texture->glslFlipped()}
+                   : VulkanSample{};
 }
 
 VulkanProgram::Descriptors VulkanProgram::prepareDescriptors(
     VulkanDevice&               device,
     const VulkanDrawParameters& parameters,
     const VulkanSample&         texture,
-    const VulkanImage*          attachment)
+    const VulkanImage*          attachment,
+    const VulkanBuffer*         output,
+    VkDeviceSize                outputBytes)
 {
     const std::lock_guard lock(m_impl->uniformsMutex);
-    Descriptors           result;
-    result.count   = m_impl->sets[1] ? 2u : 1u;
+    const int             textureEnabled = texture.image ? 1 : 0;
+    (void)writeUniform(translatedName("sf_TextureEnabled"), ShaderUniformType::Int, &textureEnabled, 1);
+    for (const auto& coordinate : getOptions().samplerCoordinateTransforms)
+    {
+        bool flipped = texture.glslFlipped;
+        for (const auto& binding : m_impl->bindings)
+            if (binding.layout.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER &&
+                binding.name == translatedName(coordinate.name) && !binding.currentTexture)
+                flipped = binding.texture && binding.texture->glslFlipped();
+        const std::array<float, 4> transform{1.f, flipped ? -1.f : 1.f, 0.f, flipped ? 1.f : 0.f};
+        (void)writeUniform(translatedName(coordinate.uniformName), ShaderUniformType::Vec4, transform.data(), 1);
+    }
+    Descriptors result;
+    if ((output != nullptr) != (m_impl->sets[2] != VK_NULL_HANDLE))
+        return {};
+    result.count   = output ? 3u : m_impl->sets[1] ? 2u : 1u;
     result.sets[0] = device.allocateDescriptorSet(m_impl->sets[0], 1, 1);
     if (!result.sets[0])
         return {};
-    if (result.count == 2)
+    if (result.count >= 2)
     {
         const auto buffers = static_cast<std::uint32_t>(
             std::count_if(m_impl->bindings.begin(),
@@ -672,9 +825,119 @@ VulkanProgram::Descriptors VulkanProgram::prepareDescriptors(
         }
     }
 
+    VkDescriptorBufferInfo storage{};
+    if (output)
+    {
+        result.sets[2] = device.allocateDescriptorSet(m_impl->sets[2], 0, 0);
+        if (!result.sets[2])
+            return {};
+        storage = {output->buffer, 0, outputBytes};
+        VkWriteDescriptorSet write{};
+        write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet          = result.sets[2];
+        write.descriptorCount = 1;
+        write.descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.pBufferInfo     = &storage;
+        writes.push_back(write);
+    }
     const auto& ctx = *m_impl->context;
     ctx.vk.UpdateDescriptorSets(ctx.device, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
     return result;
+}
+
+bool VulkanProgram::bindVertexBuffers(
+    VulkanDevice&                                device,
+    VkCommandBuffer                              command,
+    const std::vector<rhi::VertexBufferBinding>& inputs,
+    std::size_t                                  first,
+    std::size_t                                  count,
+    std::size_t                                  instances) const
+{
+    rhi::ShaderOptions standard;
+    standard.vertexBindings.push_back({sizeof(Vertex), 0});
+    if (!command || m_impl->context != device.context() ||
+        !validateVertexBindings(getOptions().vertexBindings.empty() ? standard : getOptions(), inputs, first, count, instances))
+        return false;
+    std::vector<VkBuffer>     buffers;
+    std::vector<VkDeviceSize> offsets;
+    for (const auto& input : inputs)
+    {
+        const auto buffer = nativeVulkanBuffer(*input.buffer);
+        if (!buffer || buffer->context != m_impl->context || input.offset >= buffer->capacity)
+            return false;
+        buffers.push_back(buffer->buffer);
+        offsets.push_back(input.offset);
+        device.retain(buffer);
+    }
+    device.context()
+        ->vk.CmdBindVertexBuffers(command, 0, static_cast<std::uint32_t>(buffers.size()), buffers.data(), offsets.data());
+    return true;
+}
+
+bool VulkanProgram::transformVertices(VulkanDevice&                                device,
+                                      const std::vector<rhi::VertexBufferBinding>& inputs,
+                                      std::size_t                                  count,
+                                      const rhi::Buffer&                           output)
+{
+    const auto buffer = nativeVulkanBuffer(output);
+    if (!m_impl->transformPass || !count || count > std::numeric_limits<std::uint32_t>::max() || !buffer ||
+        buffer->context != m_impl->context || device.context() != m_impl->context ||
+        count > std::min<VkDeviceSize>(output.getSize(), m_impl->context->properties.limits.maxStorageBufferRange) /
+                    getOptions().transformStride ||
+        std::any_of(inputs.begin(), inputs.end(), [&](const auto& input) { return input.buffer.get() == &output; }))
+        return false;
+    VulkanPipelineState state;
+    state.primitive           = PrimitiveType::Points;
+    const VkPipeline pipeline = getPipeline(state, m_impl->transformPass);
+    if (!pipeline)
+        return false;
+    const VkCommandBuffer command = device.commands();
+    if (!bindVertexBuffers(device, command, inputs, 0, count, 1))
+        return false;
+    const auto descriptors = prepareDescriptors(device, {}, {}, nullptr, buffer.get(), count * getOptions().transformStride);
+    if (!descriptors.count)
+        return false;
+    const auto& vk = device.context()->vk;
+    // A ping-pong destination can still be an input to an earlier draw.
+    VkMemoryBarrier before{};
+    before.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    before.srcAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    before.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    vk.CmdPipelineBarrier(command,
+                          VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                          0,
+                          1,
+                          &before,
+                          0,
+                          nullptr,
+                          0,
+                          nullptr);
+    VkRenderPassBeginInfo pass{};
+    pass.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    pass.renderPass        = m_impl->transformPass;
+    pass.framebuffer       = m_impl->transformFramebuffer;
+    pass.renderArea.extent = {1, 1};
+    vk.CmdBeginRenderPass(command, &pass, VK_SUBPASS_CONTENTS_INLINE);
+    bind(command, pipeline, descriptors);
+    vk.CmdDraw(command, static_cast<std::uint32_t>(count), 1, 0, 0);
+    vk.CmdEndRenderPass(command);
+    VkMemoryBarrier after{};
+    after.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    after.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    after.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_HOST_READ_BIT;
+    vk.CmdPipelineBarrier(command,
+                          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                          VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_HOST_BIT,
+                          0,
+                          1,
+                          &after,
+                          0,
+                          nullptr,
+                          0,
+                          nullptr);
+    device.retain(buffer);
+    return true;
 }
 
 void VulkanProgram::bind(VkCommandBuffer commands, VkPipeline pipeline, const Descriptors& descriptors) const

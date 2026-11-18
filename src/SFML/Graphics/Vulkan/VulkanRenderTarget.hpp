@@ -29,6 +29,7 @@
 
 namespace sf::priv
 {
+struct VulkanPipelineState;
 class VulkanRenderTarget final : public RenderTargetBackend
 {
 public:
@@ -39,19 +40,28 @@ public:
 
     [[nodiscard]] Vector2u getSize() const override;
     void clear(const rhi::TargetState& target, std::optional<Color> color, std::optional<StencilValue> stencil) override;
-    void draw(const rhi::TargetState&  target,
-              const Vertex*            vertices,
-              std::size_t              count,
-              PrimitiveType            type,
-              const rhi::DrawSettings& states) override;
-    void draw(const rhi::TargetState&  target,
-              const rhi::Buffer&       buffer,
-              std::size_t              first,
-              std::size_t              count,
-              PrimitiveType            type,
-              const rhi::DrawSettings& states) override;
-    bool setActive(bool active) override;
-    void viewChanged() override;
+    void               draw(const rhi::TargetState&  target,
+                            const Vertex*            vertices,
+                            std::size_t              count,
+                            PrimitiveType            type,
+                            const rhi::DrawSettings& states) override;
+    void               draw(const rhi::TargetState&  target,
+                            const rhi::Buffer&       buffer,
+                            std::size_t              first,
+                            std::size_t              count,
+                            PrimitiveType            type,
+                            const rhi::DrawSettings& states) override;
+    [[nodiscard]] bool drawVertices(
+        const rhi::TargetState&                      target,
+        const std::vector<rhi::VertexBufferBinding>& inputs,
+        std::size_t                                  first,
+        std::size_t                                  count,
+        std::size_t                                  instances,
+        PrimitiveType                                type,
+        const rhi::DrawSettings&                     states) override;
+    [[nodiscard]] bool prewarm(const rhi::TargetState& target, const rhi::DrawSettings& states) override;
+    bool               setActive(bool active) override;
+    void               viewChanged() override;
 
     [[nodiscard]] bool                                resize(Vector2u size);
     void                                              finish() override;
@@ -62,14 +72,17 @@ public:
 private:
     struct Attachments;
     explicit VulkanRenderTarget(std::shared_ptr<VulkanDevice> device, const ContextSettings& settings);
-    [[nodiscard]] bool            attach(std::shared_ptr<VulkanImage> image);
-    [[nodiscard]] VkCommandBuffer beginPass();
-    void                          draw(const rhi::TargetState&  target,
-                                       VulkanDevice::Upload     buffer,
-                                       std::size_t              first,
-                                       std::size_t              count,
-                                       PrimitiveType            type,
-                                       const rhi::DrawSettings& states);
+    [[nodiscard]] bool                attach(std::shared_ptr<VulkanImage> image);
+    [[nodiscard]] VkCommandBuffer     beginPass();
+    [[nodiscard]] VulkanPipelineState pipelineState(PrimitiveType type, const rhi::DrawSettings& states) const;
+    bool                              draw(const rhi::TargetState&                      target,
+                                           VulkanDevice::Upload                         buffer,
+                                           std::size_t                                  first,
+                                           std::size_t                                  count,
+                                           PrimitiveType                                type,
+                                           const rhi::DrawSettings&                     states,
+                                           const std::vector<rhi::VertexBufferBinding>* inputs    = nullptr,
+                                           std::size_t                                  instances = 1);
 
     std::shared_ptr<VulkanDevice> m_device;
     ContextSettings               m_requested;
