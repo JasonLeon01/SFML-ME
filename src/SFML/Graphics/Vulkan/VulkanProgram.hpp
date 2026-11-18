@@ -112,7 +112,7 @@ public:
 
 private:
     bool writeUniform(const std::string& name, ShaderUniformType type, const void* values, std::size_t count);
-    const std::string& translatedName(const std::string& name) const;
+    [[nodiscard]] const std::string& translatedName(const std::string& name) const;
     explicit VulkanProgram(std::shared_ptr<VulkanContext> context);
 
     struct Impl;
