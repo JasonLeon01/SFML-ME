@@ -79,6 +79,9 @@ public:
     ///
     ////////////////////////////////////////////////////////////
     ~EglContext() override;
+#ifdef SFML_SYSTEM_HARMONY
+    void refreshNativeWindow();
+#endif
 #ifdef SFML_SYSTEM_ANDROID
     void setNativeWindow(WindowHandle handle) override;
 #endif
@@ -185,6 +188,10 @@ public:
 #endif
 
 private:
+#ifdef SFML_SYSTEM_HARMONY
+    bool          m_tracksNativeWindow{};
+    std::uint64_t m_surfaceGeneration{};
+#endif
     ////////////////////////////////////////////////////////////
     /// \brief Helper to copy the picked EGL configuration
     ////////////////////////////////////////////////////////////

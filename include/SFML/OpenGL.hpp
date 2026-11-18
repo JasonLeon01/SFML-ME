@@ -70,7 +70,7 @@
 #include <OpenGLES/ES3/gl.h>
 #include <OpenGLES/ES3/glext.h>
 
-#elif defined(SFML_SYSTEM_ANDROID)
+#elif defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY)
 
 #include <GLES2/gl2ext.h>
 #include <GLES3/gl3.h>

@@ -28,6 +28,9 @@
 #include <SFML/Graphics/Vulkan/VulkanWindowSurface.hpp>
 
 #include <SFML/Window/VulkanImpl.hpp>
+#ifdef SFML_SYSTEM_HARMONY
+#include <SFML/Window/Harmony/NativeAppImpl.hpp>
+#endif
 
 #include <SFML/System/Err.hpp>
 
@@ -130,12 +133,15 @@ struct VulkanWindowSurface::Impl
     std::shared_ptr<VulkanDevice>       device;
     std::shared_ptr<VulkanRenderTarget> target;
     WindowHandle                        handle;
-    Vector2u                            size;
-    VkSurfaceKHR                        surface{};
-    std::uint32_t                       presentFamily{};
-    std::unique_ptr<Swapchain>          swapchain;
-    bool                                vsync{};
-    bool                                dirty{true};
+#ifdef SFML_SYSTEM_HARMONY
+    std::uint64_t surfaceGeneration{Harmony::getSurfaceSnapshot().generation};
+#endif
+    Vector2u                   size;
+    VkSurfaceKHR               surface{};
+    std::uint32_t              presentFamily{};
+    std::unique_ptr<Swapchain> swapchain;
+    bool                       vsync{};
+    bool                       dirty{true};
 };
 
 std::unique_ptr<VulkanWindowSurface> VulkanWindowSurface::create(
@@ -297,10 +303,17 @@ bool VulkanWindowSurface::createSwapchain()
     info.imageSharingMode      = concurrent ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
     info.queueFamilyIndexCount = concurrent ? 2u : 0u;
     info.pQueueFamilyIndices   = families.data();
-    info.preTransform          = capabilities.currentTransform;
-    info.compositeAlpha        = alpha;
-    info.presentMode           = mode;
-    info.clipped               = VK_TRUE;
+#ifdef SFML_SYSTEM_HARMONY
+    // XComponent sizes and SFML input coordinates already follow the Stage orientation.
+    info.preTransform = (capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
+                            ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+                            : capabilities.currentTransform;
+#else
+    info.preTransform = capabilities.currentTransform;
+#endif
+    info.compositeAlpha = alpha;
+    info.presentMode    = mode;
+    info.clipped        = VK_TRUE;
 
     // Destroy the old swapchain after its presentation queue has completed.
     state.swapchain.reset();
@@ -443,6 +456,15 @@ void VulkanWindowSurface::display()
     auto&      state  = *m_impl;
     auto&      device = *state.device;
     const auto lock   = device.lock();
+#ifdef SFML_SYSTEM_HARMONY
+    const auto snapshot = Harmony::getSurfaceSnapshot();
+    if (state.surfaceGeneration != snapshot.generation)
+    {
+        destroySurface();
+        state.handle            = snapshot.window;
+        state.surfaceGeneration = snapshot.generation;
+    }
+#endif
     if (device.isLost() || !state.handle || !state.size.x || !state.size.y)
     {
         (void)device.flush();

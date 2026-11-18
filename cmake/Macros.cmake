@@ -146,7 +146,7 @@ macro(sfml_add_library module)
 
     # set the version and soversion of the target (for compatible systems -- mostly Linuxes)
     # except for Android which strips soversion suffixes
-    if(NOT SFML_OS_ANDROID)
+    if(NOT SFML_OS_ANDROID AND NOT SFML_OS_HARMONY)
         set_target_properties(${target} PROPERTIES SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
         set_target_properties(${target} PROPERTIES VERSION ${PROJECT_VERSION})
     endif()

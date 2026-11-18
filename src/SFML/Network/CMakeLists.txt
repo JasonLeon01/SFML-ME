@@ -69,8 +69,12 @@ sfml_add_library(Network
 target_link_libraries(sfml-network PUBLIC SFML::System)
 if(SFML_OS_WINDOWS)
     target_link_libraries(sfml-network PRIVATE Crypt32 ws2_32 Dnsapi)
-elseif(SFML_OS_LINUX OR SFML_OS_IOS OR SFML_OS_MACOS)
+elseif(SFML_OS_LINUX OR SFML_OS_IOS OR SFML_OS_MACOS OR SFML_OS_HARMONY)
     target_link_libraries(sfml-network PRIVATE resolv)
+endif()
+
+if(SFML_OS_HARMONY)
+    target_link_libraries(sfml-network PRIVATE net_ssl)
 endif()
 
 if(SFML_USE_SYSTEM_DEPS)
@@ -165,7 +169,7 @@ if(SFML_OS_MACOS)
     target_link_libraries(sfml-network PRIVATE "-framework Security" "-framework CoreFoundation")
 endif()
 
-if(SFML_OS_LINUX OR SFML_OS_ANDROID OR SFML_OS_FREEBSD OR SFML_OS_OPENBSD OR SFML_OS_NETBSD)
+if(SFML_OS_LINUX OR SFML_OS_ANDROID OR SFML_OS_HARMONY OR SFML_OS_FREEBSD OR SFML_OS_OPENBSD OR SFML_OS_NETBSD)
     sfml_set_option(SFML_CA_PATH "" PATH "Path to a CA bundle file or directory that should be used instead of the default directories to verify certificates.")
     if(NOT (SFML_CA_PATH STREQUAL ""))
         target_compile_definitions(sfml-network PRIVATE SFML_CA_PATH="${SFML_CA_PATH}")

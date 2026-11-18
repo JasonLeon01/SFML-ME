@@ -32,6 +32,11 @@
 #include <SFML/System/Android/Activity.hpp>
 #include <SFML/System/Android/ResourceStream.hpp>
 #endif
+#ifdef SFML_SYSTEM_HARMONY
+#include <SFML/System/Harmony/ResourceStream.hpp>
+
+#include <string_view>
+#endif
 #include <memory>
 #include <utility>
 
@@ -77,7 +82,26 @@ bool FileInputStream::open(const std::filesystem::path& filename)
     m_androidFile.reset();
 #endif
 
+#ifdef SFML_SYSTEM_HARMONY
+    m_harmonyFile.reset();
+    m_file.reset();
+    constexpr std::string_view prefix = "rawfile:/";
+    const auto                 path   = filename.generic_string();
+    const bool                 raw    = path.compare(0, prefix.size(), prefix) == 0;
+    if (!raw)
+        m_file.reset(openFile(filename, "rb"));
+    if (!m_file && (raw || filename.is_relative()))
+    {
+        auto stream = std::make_unique<priv::HarmonyResourceStream>();
+        if (stream->open(raw ? std::filesystem::path(path.substr(prefix.size())) : filename))
+        {
+            m_harmonyFile = std::move(stream);
+            return true;
+        }
+    }
+#else
     m_file.reset(openFile(filename, "rb"));
+#endif
 
 #ifdef SFML_SYSTEM_ANDROID
     if (!m_file && filename.is_relative() && priv::getActivityStatesPtr() != nullptr)
@@ -101,6 +125,9 @@ std::optional<std::size_t> FileInputStream::read(void* data, std::size_t size)
 #ifdef SFML_SYSTEM_ANDROID
     if (m_androidFile)
         return m_androidFile->read(data, size);
+#elif defined(SFML_SYSTEM_HARMONY)
+    if (m_harmonyFile)
+        return m_harmonyFile->read(data, size);
 #endif
     if (!m_file)
         return std::nullopt;
@@ -114,6 +141,9 @@ std::optional<std::size_t> FileInputStream::seek(std::size_t position)
 #ifdef SFML_SYSTEM_ANDROID
     if (m_androidFile)
         return m_androidFile->seek(position);
+#elif defined(SFML_SYSTEM_HARMONY)
+    if (m_harmonyFile)
+        return m_harmonyFile->seek(position);
 #endif
     if (!m_file)
         return std::nullopt;
@@ -130,6 +160,9 @@ std::optional<std::size_t> FileInputStream::tell()
 #ifdef SFML_SYSTEM_ANDROID
     if (m_androidFile)
         return m_androidFile->tell();
+#elif defined(SFML_SYSTEM_HARMONY)
+    if (m_harmonyFile)
+        return m_harmonyFile->tell();
 #endif
     if (!m_file)
         return std::nullopt;
@@ -144,6 +177,9 @@ std::optional<std::size_t> FileInputStream::getSize()
 #ifdef SFML_SYSTEM_ANDROID
     if (m_androidFile)
         return m_androidFile->getSize();
+#elif defined(SFML_SYSTEM_HARMONY)
+    if (m_harmonyFile)
+        return m_harmonyFile->getSize();
 #endif
     if (!m_file)
         return std::nullopt;

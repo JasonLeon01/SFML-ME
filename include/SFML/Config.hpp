@@ -80,6 +80,10 @@
 // Android
 #define SFML_SYSTEM_ANDROID
 
+#elif defined(__OHOS__)
+
+#define SFML_SYSTEM_HARMONY
+
 #elif defined(__linux__)
 
 // Linux

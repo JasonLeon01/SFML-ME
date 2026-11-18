@@ -65,6 +65,14 @@ else()
             ${SRCROOT}/Android/ResourceStream.cpp
             ${SRCROOT}/Android/SuspendAwareClock.cpp
         )
+    elseif(SFML_OS_HARMONY)
+        list(APPEND PLATFORM_SRC
+            ${SRCROOT}/Harmony/ResourceManager.cpp
+            ${SRCROOT}/Harmony/ResourceManagerImpl.hpp
+            ${SRCROOT}/Harmony/ResourceStream.hpp
+            ${SRCROOT}/Harmony/ResourceStream.cpp
+            ${SRCROOT}/Harmony/SuspendAwareClock.cpp
+        )
     endif()
 
     source_group("unix" FILES ${PLATFORM_SRC})
@@ -107,4 +115,6 @@ elseif(SFML_OS_WINDOWS)
     target_link_libraries(sfml-system PRIVATE winmm)
 elseif(SFML_OS_ANDROID)
     target_link_libraries(sfml-system PRIVATE android log)
+elseif(SFML_OS_HARMONY)
+    target_link_libraries(sfml-system PRIVATE "-lrawfile.z")
 endif()

@@ -28,6 +28,11 @@
 ////////////////////////////////////////////////////////////
 #include <SFML/Window/EglContext.hpp>
 #include <SFML/Window/WindowImpl.hpp>
+#ifdef SFML_SYSTEM_HARMONY
+#include <SFML/Window/Harmony/NativeAppImpl.hpp>
+
+#include <native_window/external_window.h>
+#endif
 
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Sleep.hpp>
@@ -67,7 +72,7 @@ namespace
 // A nested named namespace is used here to allow unity builds of SFML.
 namespace EglContextImpl
 {
-#ifdef SFML_SYSTEM_ANDROID
+#if defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY)
 template <typename T>
 T loadEglBootstrapSymbol(void* handle, const char* name)
 {
@@ -92,7 +97,7 @@ EGLDisplay getInitializedDisplay()
 {
     static const EGLDisplay display = []
     {
-#ifdef SFML_SYSTEM_ANDROID
+#if defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY)
         if (!loadEglBootstrap())
 #else
         if (!gladLoaderLoadEGL(EGL_NO_DISPLAY))
@@ -141,8 +146,15 @@ EglContext::EglContext(EglContext* shared, const ContextSettings& settings, cons
 
     updateSettings();
     createContext(shared, m_settings);
+#ifdef SFML_SYSTEM_HARMONY
+    (void)owner;
+    m_tracksNativeWindow = true;
+    if (m_context != EGL_NO_CONTEXT)
+        refreshNativeWindow();
+#else
     if (m_context != EGL_NO_CONTEXT)
         createSurface(static_cast<EGLNativeWindowType>(owner.getNativeHandle()));
+#endif
 }
 
 
@@ -285,6 +297,30 @@ void EglContext::createSurface(EGLNativeWindowType window)
     }
 }
 
+
+#ifdef SFML_SYSTEM_HARMONY
+void EglContext::refreshNativeWindow()
+{
+    if (!m_tracksNativeWindow)
+        return;
+    auto&         host = Harmony::getHostState();
+    NativeWindow* window{};
+    {
+        const std::lock_guard lock(host.mutex);
+        if (m_surfaceGeneration == host.surfaceGeneration && (m_surface != EGL_NO_SURFACE || !host.window))
+            return;
+        m_surfaceGeneration = host.surfaceGeneration;
+        if (host.window && OH_NativeWindow_NativeObjectReference(host.window) == 0)
+            window = host.window;
+    }
+    destroySurface();
+    if (window)
+    {
+        createSurface(window);
+        (void)OH_NativeWindow_NativeObjectUnreference(window);
+    }
+}
+#endif
 
 #ifdef SFML_SYSTEM_ANDROID
 void EglContext::setNativeWindow(WindowHandle handle)

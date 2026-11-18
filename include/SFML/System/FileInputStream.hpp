@@ -46,6 +46,13 @@ class SFML_SYSTEM_API ResourceStream;
 }
 #endif
 
+#ifdef SFML_SYSTEM_HARMONY
+namespace sf::priv
+{
+class HarmonyResourceStream;
+}
+#endif
+
 
 namespace sf
 {
@@ -108,8 +115,9 @@ public:
     ////////////////////////////////////////////////////////////
     /// \brief Open the stream from a file path
     ///
-    /// On Android, the filesystem is checked first. Relative paths fall
-    /// back to packaged assets if the file cannot be opened.
+    /// On Android and OpenHarmony, the filesystem is checked first. Relative paths fall
+    /// back to packaged assets if the file cannot be opened. On OpenHarmony,
+    /// `rawfile:/path` explicitly selects a packaged resource.
     ///
     /// \param filename Name of the file to open
     ///
@@ -173,6 +181,10 @@ private:
     ////////////////////////////////////////////////////////////
 #ifdef SFML_SYSTEM_ANDROID
     std::unique_ptr<priv::ResourceStream> m_androidFile;
+#endif
+
+#ifdef SFML_SYSTEM_HARMONY
+    std::unique_ptr<priv::HarmonyResourceStream> m_harmonyFile;
 #endif
 
     std::unique_ptr<std::FILE, FileCloser> m_file; //!< stdio file stream

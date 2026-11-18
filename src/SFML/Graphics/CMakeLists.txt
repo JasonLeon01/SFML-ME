@@ -214,7 +214,7 @@ target_include_directories(sfml-graphics SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/e
 target_include_directories(sfml-graphics SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/qoi")
 
 # find external libraries
-if(SFML_OS_ANDROID)
+if(SFML_OS_ANDROID OR SFML_OS_HARMONY)
     target_link_libraries(sfml-graphics PRIVATE z)
 elseif(SFML_OS_IOS)
     target_link_libraries(sfml-graphics PRIVATE z bz2)

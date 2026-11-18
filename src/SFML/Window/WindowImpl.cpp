@@ -82,6 +82,10 @@ using WindowImplType = sf::priv::WindowImplCocoa;
 using WindowImplType = sf::priv::WindowImplUIKit;
 
 
+#elif defined(SFML_SYSTEM_HARMONY)
+#include <SFML/Window/Harmony/WindowImplHarmony.hpp>
+using WindowImplType = sf::priv::WindowImplHarmony;
+
 #elif defined(SFML_SYSTEM_ANDROID)
 
 #include <SFML/Window/Android/WindowImplAndroid.hpp>

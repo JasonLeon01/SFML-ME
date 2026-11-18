@@ -28,6 +28,10 @@
 #include <SFML/Window/VideoMode.hpp>
 #include <SFML/Window/VideoModeImpl.hpp>
 
+#ifdef SFML_SYSTEM_HARMONY
+#include <SFML/Window/Harmony/FullscreenModeCache.hpp>
+#endif
+
 #include <algorithm>
 #include <functional>
 
@@ -51,6 +55,12 @@ VideoMode VideoMode::getDesktopMode()
 ////////////////////////////////////////////////////////////
 const std::vector<VideoMode>& VideoMode::getFullscreenModes()
 {
+#ifdef SFML_SYSTEM_HARMONY
+    // The XComponent size is unavailable while the native DSO is being loaded
+    // and changes when the mobile surface rotates. Do not let an early query
+    // permanently cache the 1x1 fallback or a later query return an old size.
+    return priv::Harmony::refreshFullscreenModes(priv::VideoModeImpl::getFullscreenModes());
+#else
     static const auto modes = []
     {
         std::vector<VideoMode> result = priv::VideoModeImpl::getFullscreenModes();
@@ -59,6 +69,7 @@ const std::vector<VideoMode>& VideoMode::getFullscreenModes()
     }();
 
     return modes;
+#endif
 }
 
 

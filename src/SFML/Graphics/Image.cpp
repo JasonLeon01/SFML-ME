@@ -225,7 +225,7 @@ void Image::resize(Vector2u size, const std::uint8_t* pixels)
 ////////////////////////////////////////////////////////////
 bool Image::loadFromFile(const std::filesystem::path& filename)
 {
-#ifdef SFML_SYSTEM_ANDROID
+#if defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY)
 
     FileInputStream stream;
     if (!stream.open(filename))

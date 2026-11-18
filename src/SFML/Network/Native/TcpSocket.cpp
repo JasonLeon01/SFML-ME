@@ -44,6 +44,10 @@
 #include <mbedtls/net_sockets.h>
 #include <mbedtls/ssl.h>
 
+#if defined(SFML_SYSTEM_HARMONY)
+#include <network/netstack/net_ssl/net_ssl_c.h>
+#endif
+
 #if defined(SFML_SYSTEM_WINDOWS)
 #include <wincrypt.h>
 #elif defined(SFML_SYSTEM_MACOS)
@@ -56,6 +60,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <ostream>
@@ -71,7 +76,7 @@
 namespace
 {
 // Low-level send/receive flags (OS-dependent)
-#ifdef SFML_SYSTEM_LINUX
+#if defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_HARMONY)
 constexpr int flags = MSG_NOSIGNAL;
 #else
 constexpr int flags = 0;
@@ -83,6 +88,59 @@ std::string tlsErrorString(int errnum)
     mbedtls_strerror(errnum, buffer.data(), buffer.size());
     return buffer.data();
 }
+
+#if defined(SFML_SYSTEM_HARMONY) && !defined(SFML_CA_PATH)
+struct HarmonyTrustState
+{
+    bool expectHighestCertificate{true};
+};
+
+
+bool isHarmonySystemTrusted(const mbedtls_x509_crt& certificate)
+{
+    if (!certificate.raw.p || !certificate.raw.len || certificate.raw.len > std::numeric_limits<std::uint32_t>::max())
+        return false;
+
+    NetStack_CertBlob blob{};
+    blob.type = NETSTACK_CERT_TYPE_DER;
+    blob.size = static_cast<std::uint32_t>(certificate.raw.len);
+    blob.data = const_cast<std::uint8_t*>(certificate.raw.p);
+    return OH_NetStack_CertVerification(&blob, nullptr) == 0;
+}
+
+
+int verifyHarmonySystemTrust(void* context, mbedtls_x509_crt* certificate, int depth, std::uint32_t* verificationFlags)
+{
+    auto* trust = static_cast<HarmonyTrustState*>(context);
+    if (!trust || !certificate || !verificationFlags)
+        return MBEDTLS_ERR_X509_FATAL_ERROR;
+
+    // Mbed TLS invokes this callback for its actually constructed chain, from
+    // the highest certificate down to the peer leaf. Anchor only that actual
+    // highest item through Harmony's protected store. This must not inspect
+    // peerChain->next directly: an unrelated but valid appended intermediate
+    // is not evidence that the leaf chained to it.
+    constexpr auto notTrusted = static_cast<std::uint32_t>(MBEDTLS_X509_BADCERT_NOT_TRUSTED);
+    if (trust->expectHighestCertificate)
+    {
+        trust->expectHighestCertificate = false;
+        if (!isHarmonySystemTrusted(*certificate))
+            return MBEDTLS_ERR_X509_FATAL_ERROR;
+        *verificationFlags &= ~notTrusted;
+    }
+
+    // OPTIONAL is required because Mbed TLS does not count a verify callback
+    // as a configured CA chain. Enforce required semantics ourselves: every
+    // remaining signature, validity, usage, hostname or trust error is fatal.
+    if (*verificationFlags != 0)
+        return MBEDTLS_ERR_X509_FATAL_ERROR;
+
+    if (depth == 0)
+        trust->expectHighestCertificate = true;
+
+    return 0;
+}
+#endif
 
 bool loadSystemCertificates([[maybe_unused]] mbedtls_x509_crt* x509crt, [[maybe_unused]] mbedtls_x509_crl* x509crl)
 {
@@ -153,8 +211,8 @@ bool loadSystemCertificates([[maybe_unused]] mbedtls_x509_crt* x509crt, [[maybe_
     };
 
     return loadStore("ROOT") && loadStore("CA");
-#elif (defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_FREEBSD) || \
-       defined(SFML_SYSTEM_OPENBSD) || defined(SFML_SYSTEM_NETBSD))
+#elif (defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY) || \
+       defined(SFML_SYSTEM_FREEBSD) || defined(SFML_SYSTEM_OPENBSD) || defined(SFML_SYSTEM_NETBSD))
 #if defined(SFML_CA_PATH)
     if (!std::filesystem::exists(SFML_CA_PATH))
     {
@@ -185,7 +243,7 @@ bool loadSystemCertificates([[maybe_unused]] mbedtls_x509_crt* x509crt, [[maybe_
 
     return true;
 #else
-    auto loadStore = [&](const char* path)
+    [[maybe_unused]] auto loadStore = [&](const char* path)
     {
         // Just trying to load all known paths is simpler than specifying paths per distribution
         if (!std::filesystem::exists(path))
@@ -207,6 +265,11 @@ bool loadSystemCertificates([[maybe_unused]] mbedtls_x509_crt* x509crt, [[maybe_
            loadStore("/etc/pki/tls/") && loadStore("/etc/pki/tls/certs/");
 #elif defined(SFML_SYSTEM_ANDROID)
     return loadStore("/system/etc/security/cacerts/") && loadStore("/data/misc/keychain/cacerts-added/");
+#elif defined(SFML_SYSTEM_HARMONY)
+    // Harmony keeps its root store outside the application sandbox. Peer
+    // chains are anchored with OH_NetStack_CertVerification after Mbed TLS has
+    // performed its normal chain and hostname checks.
+    return true;
 #elif defined(SFML_SYSTEM_FREEBSD)
     return loadStore("/usr/local/share/certs");
 #elif defined(SFML_SYSTEM_OPENBSD)
@@ -504,8 +567,23 @@ struct TcpSocket::Impl
             mbedtls_ssl_conf_rng(&state.sslConfig, mbedtls_ctr_drbg_random, &mbedTlsSharedState.ctrDrbgContext);
 #endif
 
-            // Set up peer verification mode
-            mbedtls_ssl_conf_authmode(&state.sslConfig, verifyPeer ? MBEDTLS_SSL_VERIFY_REQUIRED : MBEDTLS_SSL_VERIFY_NONE);
+            int authenticationMode = verifyPeer ? MBEDTLS_SSL_VERIFY_REQUIRED : MBEDTLS_SSL_VERIFY_NONE;
+
+#if defined(SFML_SYSTEM_HARMONY) && !defined(SFML_CA_PATH)
+            // Harmony's root store is protected from direct sandbox access.
+            // Extend Mbed TLS verification at the per-certificate callback,
+            // preserving every non-trust verification failure while allowing
+            // NetworkKit to provide the trust anchor. Mbed TLS does not count
+            // a verify callback as a CA chain, so OPTIONAL is required here;
+            // the callback itself rejects every remaining flag.
+            if (!isServer && verifyPeer)
+            {
+                authenticationMode       = MBEDTLS_SSL_VERIFY_OPTIONAL;
+                state.harmonySystemTrust = true;
+                mbedtls_ssl_conf_verify(&state.sslConfig, verifyHarmonySystemTrust, &state.harmonyTrust);
+            }
+#endif
+            mbedtls_ssl_conf_authmode(&state.sslConfig, authenticationMode);
 
             // Set the CA chain to use for verification
             // Set our own certificate if we are a server
@@ -673,6 +751,18 @@ struct TcpSocket::Impl
                 return TlsStatus::Error;
             }
 
+#if defined(SFML_SYSTEM_HARMONY) && !defined(SFML_CA_PATH)
+            // Defence in depth for OPTIONAL: the callback must have cleared
+            // every per-certificate flag before a verified client handshake
+            // can be exposed as complete.
+            if (state.harmonySystemTrust && mbedtls_ssl_get_verify_result(&state.sslContext) != 0)
+            {
+                err() << "TLS certificate verification failed through the Harmony system trust store" << std::endl;
+                tlsState.reset();
+                return TlsStatus::Error;
+            }
+#endif
+
             state.handshakeComplete = true;
         }
 
@@ -706,6 +796,10 @@ struct TcpSocket::Impl
         mbedtls_x509_crt    x509Crt{};
         mbedtls_x509_crl    x509Crl{};
         mbedtls_pk_context  privateKeyContext{};
+#if defined(SFML_SYSTEM_HARMONY) && !defined(SFML_CA_PATH)
+        HarmonyTrustState harmonyTrust;
+        bool              harmonySystemTrust{};
+#endif
     };
 
     std::optional<TlsState> tlsState;

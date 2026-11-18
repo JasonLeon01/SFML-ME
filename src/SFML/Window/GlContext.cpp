@@ -103,7 +103,7 @@ using ContextType = sf::priv::SFContext;
 #include <SFML/Window/iOS/EaglContext.hpp>
 using ContextType = sf::priv::EaglContext;
 
-#elif defined(SFML_SYSTEM_ANDROID)
+#elif defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY)
 
 #include <SFML/Window/EglContext.hpp>
 using ContextType = sf::priv::EglContext;
@@ -705,6 +705,10 @@ const ContextSettings& GlContext::getSettings() const
 ////////////////////////////////////////////////////////////
 bool GlContext::setActive(bool active)
 {
+#ifdef SFML_SYSTEM_HARMONY
+    if (active)
+        static_cast<ContextType&>(*this).refreshNativeWindow();
+#endif
 #ifdef SFML_SYSTEM_EMSCRIPTEN
     if (active && WebContext::isLost())
         return false;

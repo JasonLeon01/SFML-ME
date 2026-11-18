@@ -64,6 +64,8 @@ endif()
 if(SFML_BUILD_VULKAN_BACKEND)
     if(SFML_OS_WINDOWS)
         list(APPEND SRC ${SRCROOT}/Win32/VulkanImplWin32.cpp)
+    elseif(SFML_OS_HARMONY)
+        list(APPEND SRC ${SRCROOT}/Harmony/VulkanImplHarmony.cpp)
     elseif(SFML_OS_ANDROID)
         list(APPEND SRC ${SRCROOT}/Android/VulkanImplAndroid.cpp)
     else()
@@ -311,6 +313,34 @@ elseif(SFML_OS_ANDROID)
             ${SRCROOT}/EglContext.hpp
         )
     endif()
+elseif(SFML_OS_HARMONY)
+    set(PLATFORM_SRC
+        ${SRCROOT}/Harmony/CancelableInitialization.hpp
+        ${SRCROOT}/Harmony/EventQueue.hpp
+        ${SRCROOT}/Harmony/FullscreenModeCache.hpp
+        ${SRCROOT}/Harmony/NativeApp.cpp
+        ${SRCROOT}/Harmony/NativeApp.hpp
+        ${SRCROOT}/Harmony/NativeAppImpl.hpp
+        ${SRCROOT}/Harmony/CursorImpl.cpp
+        ${SRCROOT}/Harmony/CursorImpl.hpp
+        ${SRCROOT}/Harmony/ClipboardImpl.cpp
+        ${SRCROOT}/Harmony/ClipboardImpl.hpp
+        ${SRCROOT}/Harmony/InputImpl.cpp
+        ${SRCROOT}/Harmony/InputMethodImpl.cpp
+        ${SRCROOT}/Harmony/InputMethodImpl.hpp
+        ${SRCROOT}/Harmony/JoystickImpl.cpp
+        ${SRCROOT}/Harmony/JoystickImpl.hpp
+        ${SRCROOT}/Harmony/SensorImpl.cpp
+        ${SRCROOT}/Harmony/SensorImpl.hpp
+        ${SRCROOT}/Harmony/VideoModeImpl.cpp
+        ${SRCROOT}/Harmony/WindowImplHarmony.cpp
+        ${SRCROOT}/Harmony/WindowImplHarmony.hpp
+    )
+    if(SFML_BUILD_OPENGL_BACKEND)
+        list(APPEND PLATFORM_SRC ${SRCROOT}/EglContext.cpp ${SRCROOT}/EglContext.hpp
+                                 ${SRCROOT}/EGLCheck.cpp ${SRCROOT}/EGLCheck.hpp)
+    endif()
+    source_group("harmony" FILES ${PLATFORM_SRC})
 endif()
 
 # define the sfml-window target
@@ -344,7 +374,9 @@ if((NOT BUILD_SHARED_LIBS) AND SFML_OS_MACOS)
 endif()
 
 # Vulkan headers
-target_include_directories(sfml-window SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/vulkan")
+if(NOT SFML_OS_HARMONY)
+    target_include_directories(sfml-window SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/headers/vulkan")
+endif()
 
 if(SFML_BUILD_VULKAN_BACKEND)
     target_compile_definitions(sfml-window PUBLIC SFML_RENDER_VULKAN)
@@ -363,7 +395,7 @@ if(SFML_BUILD_OPENGL_BACKEND)
 
     if(SFML_OS_IOS)
         target_link_libraries(sfml-window PRIVATE "-framework OpenGLES")
-    elseif(SFML_OS_ANDROID)
+    elseif(SFML_OS_ANDROID OR SFML_OS_HARMONY)
         target_link_libraries(sfml-window PRIVATE EGL GLESv3)
     elseif(SFML_OPENGL_ES OR SFML_USE_DRM)
         if(CMAKE_DL_LIBS)
@@ -400,6 +432,9 @@ elseif(SFML_OS_IOS)
     target_link_libraries(sfml-window PUBLIC "-framework Foundation" "-framework UIKit" "-framework CoreGraphics" "-framework QuartzCore" "-framework CoreMotion" "-framework GameController")
 elseif(SFML_OS_ANDROID)
     target_link_libraries(sfml-window PRIVATE android)
+elseif(SFML_OS_HARMONY)
+    target_link_libraries(sfml-window PRIVATE ace_ndk.z deviceinfo_ndk.z native_window ohgame_controller.z
+                          ohsensor ohinputmethod pasteboard udmf native_window_manager native_display_manager ohinput)
 endif()
 
 # on some platforms (e.g. Raspberry Pi 3 armhf), GCC requires linking libatomic to use <atomic> features

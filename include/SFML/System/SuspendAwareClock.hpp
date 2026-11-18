@@ -36,16 +36,16 @@
 namespace sf
 {
 ////////////////////////////////////////////////////////////
-/// \brief Android, chrono-compatible, suspend-aware clock
+/// \brief Mobile, chrono-compatible, suspend-aware clock
 ///
-/// Linux steady clock is represented by `CLOCK_MONOTONIC`.
+/// POSIX steady clock is commonly represented by `CLOCK_MONOTONIC`.
 /// However, this implementation does not work properly for
 /// long-running clocks that work in the background when the
 /// system is suspended.
 ///
-/// `SuspendAwareClock` uses `CLOCK_BOOTTIME` which is identical
-/// to `CLOCK_MONOTONIC`, except that it also includes any time
-/// that the system is suspended.
+/// On supported mobile platforms, `SuspendAwareClock` uses
+/// `CLOCK_BOOTTIME`, which is identical to `CLOCK_MONOTONIC`,
+/// except that it also includes any time that the system is suspended.
 ///
 /// Note: In most cases, `CLOCK_MONOTONIC` is a better choice.
 /// Make sure this implementation is required for your use case.

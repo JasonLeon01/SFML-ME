@@ -40,7 +40,7 @@
 #include <wepoll.h>
 using epoll_t = HANDLE;
 #define EPOLL_CLOEXEC 0
-#elif defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_ANDROID)
+#elif defined(SFML_SYSTEM_LINUX) || defined(SFML_SYSTEM_ANDROID) || defined(SFML_SYSTEM_HARMONY)
 #define SFML_USE_EPOLL
 #include <sys/epoll.h>
 using epoll_t = int;
