@@ -491,7 +491,7 @@ const rhi::ShaderOptions& VulkanProgram::getOptions() const
     return m_impl->options;
 }
 
-const std::string& VulkanProgram::translatedName(const std::string& name) const
+std::string VulkanProgram::translatedName(std::string name) const
 {
     for (const auto& alias : getOptions().uniformAliases)
         if (alias.name == name)
@@ -590,11 +590,11 @@ bool VulkanProgram::writeUniform(const std::string& name, ShaderUniformType type
 void VulkanProgram::setSampler(const std::string& name, std::shared_ptr<rhi::Texture> texture, bool current)
 {
     const std::lock_guard lock(m_impl->uniformsMutex);
-    bool                  found = false;
+    const auto            samplerName = translatedName(name);
+    bool                  found       = false;
     for (auto& binding : m_impl->bindings)
     {
-        if (binding.layout.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER &&
-            binding.name == translatedName(name))
+        if (binding.layout.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && binding.name == samplerName)
         {
             binding.texture        = texture;
             binding.currentTexture = current;
@@ -774,10 +774,11 @@ VulkanProgram::Descriptors VulkanProgram::prepareDescriptors(
     (void)writeUniform(translatedName("sf_TextureEnabled"), ShaderUniformType::Int, &textureEnabled, 1);
     for (const auto& coordinate : getOptions().samplerCoordinateTransforms)
     {
-        bool flipped = texture.glslFlipped;
+        const auto samplerName = translatedName(coordinate.name);
+        bool       flipped     = texture.glslFlipped;
         for (const auto& binding : m_impl->bindings)
             if (binding.layout.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER &&
-                binding.name == translatedName(coordinate.name) && !binding.currentTexture)
+                binding.name == samplerName && !binding.currentTexture)
                 flipped = binding.texture && binding.texture->glslFlipped();
         const std::array<float, 4> transform{1.f, flipped ? -1.f : 1.f, 0.f, flipped ? 1.f : 0.f};
         (void)writeUniform(translatedName(coordinate.uniformName), ShaderUniformType::Vec4, transform.data(), 1);
