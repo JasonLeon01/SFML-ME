@@ -1212,7 +1212,7 @@ Sftp::Result Sftp::download(const std::filesystem::path&                        
             if (read < 0)
             {
                 // Get the error before calling libssh2_sftp_close_handle since it could get overwritten
-                const auto result = makeError(m_impl->ssh2Session.get(), m_impl->sftpSession.get());
+                auto result = makeError(m_impl->ssh2Session.get(), m_impl->sftpSession.get());
                 libssh2_sftp_close_handle(handle);
                 return result;
             }
@@ -1331,7 +1331,7 @@ Sftp::Result Sftp::upload(const std::filesystem::path&                          
             if (written < 0)
             {
                 // Get the error before calling libssh2_sftp_close_handle since it could get overwritten
-                const auto result = makeError(m_impl->ssh2Session.get(), m_impl->sftpSession.get());
+                auto result = makeError(m_impl->ssh2Session.get(), m_impl->sftpSession.get());
                 libssh2_sftp_close_handle(handle);
                 return result;
             }

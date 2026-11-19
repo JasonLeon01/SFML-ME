@@ -45,9 +45,13 @@ struct GlSettings : ContextSettings
 
     GlSettings() = default;
 
-    explicit GlSettings(const ContextSettings& settings) :
-        ContextSettings{settings.depthBits, settings.stencilBits, settings.antiAliasingLevel, settings.sRgbCapable}
+    explicit GlSettings(const ContextSettings& settings)
     {
+        depthBits         = settings.depthBits;
+        stencilBits       = settings.stencilBits;
+        antiAliasingLevel = settings.antiAliasingLevel;
+        sRgbCapable       = settings.sRgbCapable;
+
 #ifdef SFML_OPENGL_ES
         if (const auto* es = std::get_if<OpenGLESSettings>(&settings.backend))
         {

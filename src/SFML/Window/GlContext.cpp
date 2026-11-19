@@ -571,7 +571,11 @@ void GlContext::releaseTransientContext()
 {
     auto& currentContext = GlContextImpl::CurrentContext::get();
     assert(currentContext.transientCount && "Transient context release without a matching acquire");
-    if (currentContext.transientCount && --currentContext.transientCount == 0)
+    if (!currentContext.transientCount)
+        return;
+
+    --currentContext.transientCount;
+    if (!currentContext.transientCount)
         TransientContext::get().reset();
 }
 
