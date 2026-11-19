@@ -45,7 +45,7 @@ public:
         stop();
     }
 
-    std::atomic<sf::Time> lastSeek{};
+    std::atomic<sf::Time> lastSeek{sf::Time::Zero};
 
 private:
     [[nodiscard]] bool onGetData(Chunk& data) override
