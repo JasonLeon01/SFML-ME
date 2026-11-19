@@ -567,22 +567,24 @@ struct TcpSocket::Impl
             mbedtls_ssl_conf_rng(&state.sslConfig, mbedtls_ctr_drbg_random, &mbedTlsSharedState.ctrDrbgContext);
 #endif
 
-            int authenticationMode = verifyPeer ? MBEDTLS_SSL_VERIFY_REQUIRED : MBEDTLS_SSL_VERIFY_NONE;
-
-#if defined(SFML_SYSTEM_HARMONY) && !defined(SFML_CA_PATH)
-            // Harmony's root store is protected from direct sandbox access.
-            // Extend Mbed TLS verification at the per-certificate callback,
-            // preserving every non-trust verification failure while allowing
-            // NetworkKit to provide the trust anchor. Mbed TLS does not count
-            // a verify callback as a CA chain, so OPTIONAL is required here;
-            // the callback itself rejects every remaining flag.
-            if (!isServer && verifyPeer)
+            const int authenticationMode = [&]
             {
-                authenticationMode       = MBEDTLS_SSL_VERIFY_OPTIONAL;
-                state.harmonySystemTrust = true;
-                mbedtls_ssl_conf_verify(&state.sslConfig, verifyHarmonySystemTrust, &state.harmonyTrust);
-            }
+#if defined(SFML_SYSTEM_HARMONY) && !defined(SFML_CA_PATH)
+                // Harmony's root store is protected from direct sandbox access.
+                // Extend Mbed TLS verification at the per-certificate callback,
+                // preserving every non-trust verification failure while allowing
+                // NetworkKit to provide the trust anchor. Mbed TLS does not count
+                // a verify callback as a CA chain, so OPTIONAL is required here;
+                // the callback itself rejects every remaining flag.
+                if (!isServer && verifyPeer)
+                {
+                    state.harmonySystemTrust = true;
+                    mbedtls_ssl_conf_verify(&state.sslConfig, verifyHarmonySystemTrust, &state.harmonyTrust);
+                    return MBEDTLS_SSL_VERIFY_OPTIONAL;
+                }
 #endif
+                return verifyPeer ? MBEDTLS_SSL_VERIFY_REQUIRED : MBEDTLS_SSL_VERIFY_NONE;
+            }();
             mbedtls_ssl_conf_authmode(&state.sslConfig, authenticationMode);
 
             // Set the CA chain to use for verification

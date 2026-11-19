@@ -358,16 +358,18 @@ bool AudioDevice::setDevice(const std::string& name)
     selection.selection = name;
 #endif
 
-    if (reinitialize())
-        return true;
+    const bool reinitialized = reinitialize();
 
 #ifdef SFML_SYSTEM_HARMONY
     // OpenHarmony exposes the current system-selected media route. Restore the
     // previous usable selection if reinitializing the requested route fails.
-    selection = previous;
-    static_cast<void>(reinitialize());
+    if (!reinitialized)
+    {
+        selection = previous;
+        static_cast<void>(reinitialize());
+    }
 #endif
-    return false;
+    return reinitialized;
 }
 
 
