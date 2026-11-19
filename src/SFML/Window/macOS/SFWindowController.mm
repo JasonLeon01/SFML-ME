@@ -172,8 +172,8 @@
 ////////////////////////////////////////////////////////
 - (void)setupFullscreenViewWithMode:(const sf::VideoMode&)mode
 {
-    // Create a screen-sized window on the main display
-    NSScreen* const screen     = [NSScreen mainScreen];
+    // Fullscreen video modes are enumerated on CGMainDisplayID, the first AppKit screen.
+    NSScreen* const screen     = [[NSScreen screens] firstObject];
     const NSSize    desktop    = [screen frame].size;
     const NSRect    windowRect = NSMakeRect(0, 0, desktop.width, desktop.height);
     m_window                   = [[SFWindow alloc]

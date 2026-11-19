@@ -221,9 +221,8 @@
     // Convert it to screen coordinates
     point = [self convertPointToScreen:point];
 
-    // Flip screen coordinates to match CGDisplayMoveCursorToPoint referential.
-    const double screenHeight = [[[self window] screen] frame].size.height;
-    point.y                   = screenHeight - point.y;
+    // Quartz global coordinates have their origin at the top-left of the primary screen.
+    point.y = NSMaxY([[[NSScreen screens] firstObject] frame]) - point.y;
 
     return point;
 }
