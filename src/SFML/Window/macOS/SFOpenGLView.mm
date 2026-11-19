@@ -265,7 +265,7 @@
     if ((m_scaleFactor != oldScaleFactor) && (m_requester != nullptr))
     {
         NSSize newSize = [self frame].size;
-        m_requester->windowResized({static_cast<unsigned int>(newSize.width), static_cast<unsigned int>(newSize.height)});
+        m_requester->windowResized(newSize.width, newSize.height);
     }
 }
 
@@ -297,7 +297,7 @@
 
     // The new size
     NSSize newSize = [self frame].size;
-    m_requester->windowResized({static_cast<unsigned int>(newSize.width), static_cast<unsigned int>(newSize.height)});
+    m_requester->windowResized(newSize.width, newSize.height);
 }
 
 ////////////////////////////////////////////////////////
